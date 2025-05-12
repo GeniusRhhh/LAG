@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<TacviewDebriefing Version="1.2.6">
+	<!--Flight Recording Properties-->
+	<FlightRecording/>
+	<!--Mission Properties-->
+	<Mission>
+		<Title>1v1_NoWeapon_HierarchySelfplay_20241222_124600_1040_0_56</Title>
+		<MissionTime>2020-04-01T00:00:00Z</MissionTime>
+		<Duration>200.00</Duration>
+	</Mission>
+	<!--Flight Log-->
+	<Events/>
+</TacviewDebriefing>

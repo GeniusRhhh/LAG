@@ -1,0 +1,78 @@
+E:\Python\python.exe E:/Pycharm/LAG/scripts/train/judge_model.py
+
+=== Match Results ===
+
+
+     JSBSim Flight Dynamics Model v1.1.6 [GitHub build 320/commit b477f6312bee2fd3af4c4e5ba1a3e732ed2b99d4] Nov  4 2024 19:47:36
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+E:\Pycharm\LAG\scripts\train\judge_model.py:34: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ego_policy.load_state_dict(torch.load(ego_model_path, map_location=device))
+E:\Pycharm\LAG\scripts\train\judge_model.py:35: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  enm_policy.load_state_dict(torch.load(enm_model_path, map_location=device))
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Enemy) -> Ego Reward: 38.39
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Enemy) -> Ego Reward: 11.99
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Enemy) -> Ego Reward: -55.91
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Enemy) -> Ego Reward: 28.86
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Enemy) -> Ego Reward: -103.73
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Enemy) -> Ego Reward: -7.12
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Enemy) -> Ego Reward: 30.01
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Enemy) -> Ego Reward: 28.77
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Enemy) -> Ego Reward: 24.66
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Enemy) -> Ego Reward: 22.56
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Enemy) -> Ego Reward: 32.45
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Enemy) -> Ego Reward: 27.37
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Enemy) -> Ego Reward: -55.23
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Enemy) -> Ego Reward: 42.61
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Enemy) -> Ego Reward: 36.04
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Enemy) -> Ego Reward: 24.27
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Enemy) -> Ego Reward: -126.22
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Enemy) -> Ego Reward: -0.80
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Enemy) -> Ego Reward: 41.35
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Enemy) -> Ego Reward: -81.21
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Enemy) -> Ego Reward: -10.42
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Enemy) -> Ego Reward: -75.21
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Enemy) -> Ego Reward: -163.45
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Enemy) -> Ego Reward: -5.39
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Enemy) -> Ego Reward: -423.06
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Enemy) -> Ego Reward: -426.91
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Enemy) -> Ego Reward: -430.56
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Enemy) -> Ego Reward: -430.09
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Enemy) -> Ego Reward: -538.25
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Enemy) -> Ego Reward: -887.75
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Enemy) -> Ego Reward: -423.96
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Enemy) -> Ego Reward: -425.28
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Enemy) -> Ego Reward: -422.84
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Enemy) -> Ego Reward: -430.74
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Enemy) -> Ego Reward: -306.13
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Enemy) -> Ego Reward: -1079.04
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt] (Enemy) -> Ego Reward: 14.18
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] (Enemy) -> Ego Reward: 28.55
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt] (Enemy) -> Ego Reward: -11.97
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt] (Enemy) -> Ego Reward: -8.89
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt] (Enemy) -> Ego Reward: -552.94
+Match: [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt] (Ego) vs [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt] (Enemy) -> Ego Reward: -1096.21
+
+=== Average Scores ===
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt: Average Score: -14.59, Wins: 3/6
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt: Average Score: 27.64, Wins: 6/6
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt: Average Score: -13.22, Wins: 3/6
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt: Average Score: -49.05, Wins: 1/6
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt: Average Score: -522.77, Wins: 0/6
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt: Average Score: -514.66, Wins: 0/6
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt: Average Score: -271.21, Wins: 2/6
+
+=== Final Scores ===
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_650.pt: -14.59
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt: 27.64
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_661.pt: -13.22
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_1040.pt: -49.05
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_35.pt: -522.77
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_84.pt: -514.66
+../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_0.pt: -271.21
+
+Best model is [../results/SingleCombat/1v1/NoWeapon/Selfplay/ppo/v1/wandb/20241218_2141/actor_630.pt] with average score 27.64
+
+Process finished with exit code 0
