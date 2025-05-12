@@ -135,6 +135,7 @@ def main(args):
 
     # env init
     envs = make_train_env(all_args)
+    logging.info(f"obs_space: {envs.observation_space}, act_space: {envs.action_space}")
     eval_envs = make_eval_env(all_args) if all_args.use_eval else None
 
     config = {

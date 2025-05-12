@@ -1,3 +1,6 @@
+import logging
+from collections import deque
+
 import torch
 import numpy as np
 from typing import Union, List
@@ -266,6 +269,115 @@ class ReplayBuffer(Buffer):
             yield obs_batch, actions_batch, masks_batch, old_action_log_probs_batch, advantages_batch, \
                 returns_batch, value_preds_batch, rnn_states_actor_batch, rnn_states_critic_batch
 
+
+class SACReplayBuffer(Buffer):
+    """
+    SAC Replay Buffer for LAG platform
+    - Supports n_rollout_threads and num_agents
+    - Includes reward normalization
+    """
+    def __init__(self, args, obs_space, act_space, n_rollout_threads, num_agents, capacity=1000000):
+        self.args = args
+        self.n_rollout_threads = n_rollout_threads
+        self.num_agents = num_agents
+        self.capacity = capacity
+        self.reward_norm = args.reward_norm
+
+        # Reward normalization
+        self.reward_mean = np.zeros(num_agents)
+        self.reward_var = np.ones(num_agents)
+        self.reward_count = np.zeros(num_agents)
+        self.reward_buffers = [deque(maxlen=1000) for _ in range(num_agents)]
+
+        obs_dim = get_shape_from_space(obs_space)
+        act_dim = get_shape_from_space(act_space)
+
+        # Buffers for multiple agents
+        self.obs_buf = np.zeros((capacity, n_rollout_threads, num_agents, *obs_dim), dtype=np.float32)
+        self.next_obs_buf = np.zeros((capacity, n_rollout_threads, num_agents, *obs_dim), dtype=np.float32)
+        self.act_buf = np.zeros((capacity, n_rollout_threads, num_agents, *act_dim), dtype=np.float32)
+        self.rew_buf = np.zeros((capacity, n_rollout_threads, num_agents, 1), dtype=np.float32)
+        self.done_buf = np.zeros((capacity, n_rollout_threads, num_agents, 1), dtype=np.float32)
+
+        self.ptr = 0
+        self.size = 0
+
+    def insert(self, obs, actions, rewards, next_obs, dones, **kwargs):
+        """
+        Store experience for multiple agents
+        Input shapes: [n_rollout_threads, num_agents, dim]
+        """
+        idx = self.ptr
+        self.obs_buf[idx] = obs
+        self.act_buf[idx] = actions
+
+        # 调试日志，确认 rewards 形状
+        # logging.info(f"SACReplayBuffer.insert - Rewards shape: {rewards.shape}, Rewards content: {rewards}")
+
+        # 确保 rewards 形状正确
+        expected_shape = (self.n_rollout_threads, self.num_agents, 1)
+        if rewards.shape != expected_shape:
+            logging.warning(f"Unexpected rewards shape: got {rewards.shape}, expected {expected_shape}")
+            if rewards.ndim == 2:  # (n_rollout_threads, num_agents)
+                rewards = rewards.reshape(self.n_rollout_threads, self.num_agents, 1)
+            elif rewards.ndim == 1:  # (n_rollout_threads,)
+                rewards = rewards.reshape(self.n_rollout_threads, 1, 1)
+            else:
+                raise ValueError(f"Cannot reshape rewards from {rewards.shape} to {expected_shape}")
+
+        # Update reward statistics per agent
+        if self.reward_norm:
+            for a in range(self.num_agents):
+                rew_a = rewards[:, a, 0]  # 提取 (n_rollout_threads,) 的奖励数组
+                if idx % 100 == 0:  # 每 100 步打印一次
+                    logging.info(f"Agent {a} rewards: {rew_a}")
+                self.reward_buffers[a].extend(rew_a)
+                self.reward_count[a] += len(rew_a)
+                self.reward_mean[a] = np.mean(self.reward_buffers[a])
+                self.reward_var[a] = np.var(self.reward_buffers[a]) + 1e-6
+                if self.reward_var[a] < 1e-6:  # 检测方差过小
+                    logging.warning(f"Agent {a} reward variance too small: {self.reward_var[a]}")
+                # 标准化奖励
+                rewards[:, a, :] = (rewards[:, a, :] - self.reward_mean[a]) / np.sqrt(self.reward_var[a])
+
+        self.rew_buf[idx] = rewards
+        self.next_obs_buf[idx] = next_obs
+        self.done_buf[idx] = dones
+
+        self.ptr = (self.ptr + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+    def after_update(self):
+        """No-op for SAC, as it doesn't require trajectory reset like PPO."""
+        pass
+
+    def clear(self):
+        self.ptr = 0
+        self.size = 0
+        self.obs_buf.fill(0)
+        self.act_buf.fill(0)
+        self.rew_buf.fill(0)
+        self.next_obs_buf.fill(0)
+        self.done_buf.fill(0)
+        for buf in self.reward_buffers:
+            buf.clear()
+        self.reward_mean.fill(0)
+        self.reward_var.fill(1)
+        self.reward_count.fill(0)
+
+    def sample_batch(self, batch_size=256):
+        """
+        Sample a batch of experiences
+        Output shapes: [batch_size, n_rollout_threads, num_agents, dim]
+        """
+        idxs = np.random.randint(0, self.size, size=batch_size)
+        batch = {
+            "obs": self.obs_buf[idxs],
+            "act": self.act_buf[idxs],
+            "rew": self.rew_buf[idxs],
+            "next_obs": self.next_obs_buf[idxs],
+            "done": self.done_buf[idxs]
+        }
+        return batch
 
 class SharedReplayBuffer(ReplayBuffer):
 

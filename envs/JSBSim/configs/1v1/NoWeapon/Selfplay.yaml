@@ -46,10 +46,34 @@ PostureReward_potential: true
 PostureReward_orientation_version: v2
 PostureReward_range_version: v3
 PostureReward_target_dist: 3.0
+#new
+PostureReward_AO_weight: 1.0
+PostureReward_TA_weight: 1.0
+PostureReward_R_weight: 1.0
+PostureReward_AO_change_penalty: 0.1
+
 
 AltitudeReward_safe_altitude: 4.0
 AltitudeReward_danger_altitude: 3.5
 AltitudeReward_Kv: 0.2
+#new
+AltitudeReward_ideal_altitude: 4.1
+AltitudeReward_ideal_tolerance: 0.5
 
 EventDrivenReward_scale: 1
 EventDrivenReward_potential: true
+#new
+HeadingReward_heading_error_scale: 5.0
+HeadingReward_alt_error_scale: 15.24
+HeadingReward_roll_error_scale: 0.35
+HeadingReward_speed_error_scale: 24
+HeadingReward_stability_factor: 0.1
+#new
+RelativeAltitudeReward_KH: 1.0
+RelativeAltitudeReward_ideal_diff: 0.5
+RelativeAltitudeReward_diff_tolerance: 0.3
+#new
+EnergyAdvantageReward_k: 0.02
+EnergyAdvantageReward_max: 0.5
+#new
+FlightStabilityReward_factor: 0.1

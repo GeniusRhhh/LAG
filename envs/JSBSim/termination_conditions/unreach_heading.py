@@ -28,12 +28,13 @@ class UnreachHeading(BaseTerminationCondition):
             task: task instance
             env: environment instance
 
-        Returns:Q
+        Returns:
             (tuple): (done, success, info)
         """
         done = False
         success = False
-        cur_step = info['current_step']
+        # 安全访问 current_step，设置默认值
+        cur_step = info.get('current_step', 0)
         check_time = env.agents[agent_id].get_property_value(c.heading_check_time)
         # check heading when simulation_time exceed check_time
         if env.agents[agent_id].get_property_value(c.simulation_sim_time_sec) >= check_time:
@@ -48,9 +49,9 @@ class UnreachHeading(BaseTerminationCondition):
                 new_heading = env.agents[agent_id].get_property_value(c.target_heading_deg) + delta_heading
                 new_heading = (new_heading + 360) % 360
                 new_altitude = env.agents[agent_id].get_property_value(c.target_altitude_ft) + delta_altitude
-                new_altitude = max(new_altitude, 15000) # assert the value in safe region
+                new_altitude = max(new_altitude, 15000)  # assert the value in safe region
                 new_velocities_u = env.agents[agent_id].get_property_value(c.target_velocities_u_mps) + delta_velocities_u
-                new_velocities_u = max(new_velocities_u, 120.) # assert the value in safe region
+                new_velocities_u = max(new_velocities_u, 120.)  # assert the value in safe region
                 env.agents[agent_id].set_property_value(c.target_heading_deg, new_heading)
                 env.agents[agent_id].set_property_value(c.target_altitude_ft, new_altitude)
                 env.agents[agent_id].set_property_value(c.target_velocities_u_mps, new_velocities_u)

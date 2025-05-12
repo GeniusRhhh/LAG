@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 from gymnasium import spaces
 from .task_base import BaseTask
@@ -5,13 +7,13 @@ from ..core.catalog import Catalog as c
 from ..reward_functions import AltitudeReward, HeadingReward
 from ..termination_conditions import ExtremeState, LowAltitude, Overload, Timeout, UnreachHeading
 
-
 class HeadingTask(BaseTask):
     '''
     Control target heading with discrete action space
     '''
     def __init__(self, config):
         super().__init__(config)
+        self.step_count = 0  # 添加步数计数器，用于控制日志频率
 
         self.reward_functions = [
             HeadingReward(self.config),
@@ -61,8 +63,14 @@ class HeadingTask(BaseTask):
         self.observation_space = spaces.Box(low=-10, high=10., shape=(12,))
 
     def load_action_space(self):
-        # aileron, elevator, rudder, throttle
-        self.action_space = spaces.MultiDiscrete([41, 41, 41, 30])
+        """
+        动作空间改成连续, shape=(4,)
+          - aileron, elevator, rudder in [-1,1]
+          - throttle in [0.4,0.9]
+        """
+        low  = np.array([-1.0, -1.0, -1.0,  0.4], dtype=np.float32)
+        high = np.array([ 1.0,  1.0,  1.0,  0.9], dtype=np.float32)
+        self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
     def get_obs(self, env, agent_id):
         """
@@ -97,14 +105,25 @@ class HeadingTask(BaseTask):
         norm_obs[10] = obs[8] / 340         # 10. ego_v_down    (unit: mh)
         norm_obs[11] = obs[9] / 340         # 11. ego_vc        (unit: mh)
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
+
+        # 增加步数计数并控制日志频率
+        self.step_count += 1
+        if self.step_count % 100 == 0:  # 每 100 步打印一次
+            logging.info(
+                f"Agent {agent_id} observation (Step {self.step_count}): delta_altitude={norm_obs[0]:.4f}, "
+                f"delta_heading={norm_obs[1]:.4f}, altitude={norm_obs[3]:.4f}, velocity_u={norm_obs[2]:.4f}")
+
+        # 可选：检测异常情况下的日志
+        if np.any(np.isnan(norm_obs)) or np.any(np.isinf(norm_obs)):
+            logging.warning(f"Invalid observation for Agent {agent_id}: {norm_obs}")
+
         return norm_obs
 
     def normalize_action(self, env, agent_id, action):
-        """Convert discrete action index into continuous value.
         """
-        norm_act = np.zeros(4)
-        norm_act[0] = action[0] * 2. / (self.action_space.nvec[0] - 1.) - 1.
-        norm_act[1] = action[1] * 2. / (self.action_space.nvec[1] - 1.) - 1.
-        norm_act[2] = action[2] * 2. / (self.action_space.nvec[2] - 1.) - 1.
-        norm_act[3] = action[3] * 0.5 / (self.action_space.nvec[3] - 1.) + 0.4
+        因为 SAC 直接输出 [-1,1] for aileron/elevator/rudder, and [0.4,0.9] for throttle
+        """
+        low  = self.action_space.low
+        high = self.action_space.high
+        norm_act = np.clip(action, low, high)
         return norm_act

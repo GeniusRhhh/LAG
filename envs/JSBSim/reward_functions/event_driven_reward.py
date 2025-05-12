@@ -13,22 +13,12 @@ class EventDrivenReward(BaseRewardFunction):
         super().__init__(config)
 
     def get_reward(self, task, env, agent_id):
-        """
-        Reward is the sum of all the events.
-
-        Args:
-            task: task instance
-            env: environment instance
-
-        Returns:
-            (float): reward
-        """
-        reward = 0
-        if env.agents[agent_id].is_shotdown:
+        reward = 0  # 初始化奖励值
+        if env.agents[agent_id].is_shotdown:  # 检查是否被导弹击中
             reward -= 200
-        elif env.agents[agent_id].is_crash:
+        elif env.agents[agent_id].is_crash:  # 检查是否意外坠毁
             reward -= 200
-        for missile in env.agents[agent_id].launch_missiles:
+        for missile in env.agents[agent_id].launch_missiles:  # 检查发射的导弹是否成功击中目标
             if missile.is_success:
                 reward += 200
-        return self._process(reward, agent_id)
+        return self._process(reward, agent_id)  # 对奖励进行后处理，并返回结果
