@@ -1,15 +1,15 @@
 #!/bin/bash
 
-#env="SingleControl"         # 对应 SingleControlEnv
-#scenario="1/heading"          # 对应 HeadingTask
-#algo="sac"                  # 算法名称
-#exp="v0131"  # 你想给此次实验的名字
-#seed=5
-env="SingleCombat"         # 对应 SingleControlEnv
-scenario="1v1/NoWeapon/Selfplay"          # 对应 HeadingTask
+env="SingleControl"         # 对应 SingleControlEnv
+scenario="1/heading"          # 对应 HeadingTask
 algo="sac"                  # 算法名称
-exp="Selfpla0213"  # 你想给此次实验的名字
-seed=20
+exp="v0131"  # 你想给此次实验的名字
+seed=5
+#env="SingleCombat"         # 对应 SingleControlEnv
+#scenario="1v1/NoWeapon/Selfplay"          # 对应 HeadingTask
+#algo="sac"                  # 算法名称
+#exp="Selfpla0213"  # 你想给此次实验的名字
+#seed=20
 echo "Running env=${env}, scenario=${scenario}, algo=${algo}, exp=${exp}, seed=${seed}"
 
 
@@ -31,3 +31,7 @@ CUDA_VISIBLE_DEVICES=0 python train/train_jsbsim_sac.py \
     --batch-size 256 \
     --update-per-step 1 \
     --hidden-size "128 128" --act-hidden-size "128 128" \
+    --buffer-size 10000 \
+    --target_entropy -3 \
+    --init-alpha 1.0 \
+    --max-episodes 1000

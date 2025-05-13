@@ -203,51 +203,64 @@
 import gymnasium as gym
 import torch
 import torch.nn as nn
-import numpy as np
-import logging
 
 from .distributions import BetaShootBernoulli, Categorical, DiagGaussian, Bernoulli
 from .mlp import MLPLayer
 
+import torch
+import torch.nn as nn
+import logging
+from gymnasium import spaces
+
+import logging
+import torch
+import torch.nn as nn
+import numpy as np
+from gymnasium import spaces
+from .distributions import BetaShootBernoulli, Categorical, DiagGaussian, Bernoulli
+from .mlp import MLPLayer
+
 class ACTLayer(nn.Module):
-    def __init__(self, act_space, input_dim, hidden_size, activation_id, gain, device=torch.device("cpu")):
+    def __init__(self, act_space, input_dim, hidden_size, activation_id, gain, device='cpu'):
         super(ACTLayer, self).__init__()
         self._mlp_actlayer = False
         self._continuous_action = False
         self._multidiscrete_action = False
         self._mixed_action = False
         self._shoot_action = False
-        self._act_space = act_space
+        self._global_step = 0
         self.device = device
-        self.step_count = 0
+
+        # Initialize action bounds for continuous action space
+        if isinstance(act_space, spaces.Box):
+            self.action_low = torch.tensor(act_space.low, dtype=torch.float32, device=device)
+            self.action_high = torch.tensor(act_space.high, dtype=torch.float32, device=device)
 
         if len(hidden_size) > 0:
             self._mlp_actlayer = True
             self.mlp = MLPLayer(input_dim, hidden_size, activation_id)
             input_dim = self.mlp.output_size
 
-        if isinstance(act_space, gym.spaces.Discrete):
+        if isinstance(act_space, spaces.Discrete):
             action_dim = act_space.n
             self.action_out = Categorical(input_dim, action_dim, gain)
-        elif isinstance(act_space, gym.spaces.Box):
+        elif isinstance(act_space, spaces.Box):
             self._continuous_action = True
             action_dim = act_space.shape[0]
-            self.action_out = DiagGaussian(input_dim, action_dim, gain, act_space.low, act_space.high)
-            self.action_low = torch.tensor(act_space.low, dtype=torch.float32, device=self.device)
-            self.action_high = torch.tensor(act_space.high, dtype=torch.float32, device=self.device)
-        elif isinstance(act_space, gym.spaces.MultiBinary):
+            self.action_out = DiagGaussian(input_dim, action_dim, gain, device=self.device)
+        elif isinstance(act_space, spaces.MultiBinary):
             action_dim = act_space.shape[0]
             self.action_out = Bernoulli(input_dim, action_dim, gain)
-        elif isinstance(act_space, gym.spaces.MultiDiscrete):
+        elif isinstance(act_space, spaces.MultiDiscrete):
             self._multidiscrete_action = True
             action_dims = act_space.nvec
             action_outs = []
             for action_dim in action_dims:
                 action_outs.append(Categorical(input_dim, action_dim, gain))
             self.action_outs = nn.ModuleList(action_outs)
-        elif isinstance(act_space, gym.spaces.Tuple) and \
-                isinstance(act_space[0], gym.spaces.MultiDiscrete) and \
-                isinstance(act_space[1], gym.spaces.Discrete):
+        elif isinstance(act_space, spaces.Tuple) and \
+                isinstance(act_space[0], spaces.MultiDiscrete) and \
+                isinstance(act_space[1], spaces.Discrete):
             self._shoot_action = True
             discrete_dims = act_space[0].nvec
             self._discrete_dim = act_space[0].shape[0]
@@ -259,17 +272,11 @@ class ACTLayer(nn.Module):
             action_outs.append(BetaShootBernoulli(input_dim, self._control_shoot_dim, gain))
             self.action_outs = nn.ModuleList(action_outs)
         else:
-            raise NotImplementedError(f"Unsupported action space type: {type(act_space)}!")
-        self.to(self.device)
+            raise NotImplementedError(f"不支持的动作空间类型: {type(act_space)}!")
 
-    def forward(self, x, deterministic=False, return_log_prob=False, **kwargs):
-        if torch.isnan(x).any() or torch.isinf(x).any():
-            logging.warning(f"Invalid input in ACTLayer: {x}")
-            x = torch.clamp(x, -10, 10)
+    def forward(self, x, deterministic=False, **kwargs):
         if self._mlp_actlayer:
             x = self.mlp(x)
-
-        self.step_count += 1
 
         if self._multidiscrete_action:
             actions = []
@@ -277,12 +284,11 @@ class ACTLayer(nn.Module):
             for action_out in self.action_outs:
                 action_dist = action_out(x)
                 action = action_dist.mode() if deterministic else action_dist.sample()
-                action_log_prob = action_dist.log_probs(action) if return_log_prob else None
+                action_log_prob = action_dist.log_probs(action)
                 actions.append(action)
                 action_log_probs.append(action_log_prob)
             actions = torch.cat(actions, dim=-1)
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1,
-                                                                       keepdim=True) if return_log_prob else None
+            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
 
         elif self._shoot_action:
             actions = []
@@ -290,101 +296,116 @@ class ACTLayer(nn.Module):
             for action_out in self.action_outs[:-1]:
                 action_dist = action_out(x)
                 action = action_dist.mode() if deterministic else action_dist.sample()
-                action_log_prob = action_dist.log_probs(action) if return_log_prob else None
+                action_log_prob = action_dist.log_probs(action)
                 actions.append(action)
                 action_log_probs.append(action_log_prob)
             shoot_action_dist = self.action_outs[-1](x, **kwargs)
             shoot_action = shoot_action_dist.mode() if deterministic else shoot_action_dist.sample()
             actions.append(shoot_action)
             actions = torch.cat(actions, dim=-1)
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1,
-                                                                       keepdim=True) if return_log_prob else None
-
-        else:
-            action_dists = self.action_out(x)
-            raw_mean = action_dists.mean
-            raw_std = action_dists.stddev
-
-            # 直接采样原始动作
-            actions = action_dists.mode() if deterministic else action_dists.sample()
-
-            # 映射到 [-1, 1] 后限制到动作空间
-            actions = torch.tanh(actions)  # 限制到 [-1, 1]
-            if self._continuous_action:
-                actions = self.action_low + (actions + 1.0) * 0.5 * (self.action_high - self.action_low)
-                actions = torch.clamp(actions, self.action_low, self.action_high)
-
-                if return_log_prob:
-                    # 简化 log_probs 计算，移除 Jacobian 修正
-                    scaled_actions = (actions - self.action_low) / (self.action_high - self.action_low) * 2.0 - 1.0
-                    pre_tanh_actions = torch.atanh(torch.clamp(scaled_actions, -0.999, 0.999))
-                    action_log_probs = action_dists.log_probs(pre_tanh_actions)
-                    action_log_probs = action_log_probs.sum(dim=-1, keepdim=True)  # 聚合为 [batch_size, 1]
-                else:
-                    action_log_probs = None
-
-            if self.step_count % 100 == 0 and self._continuous_action:
-                logging.info(
-                    f"ACTLayer Step {self.step_count}: mean={raw_mean.detach().cpu().numpy().squeeze()}, std={raw_std.detach().cpu().numpy().squeeze()}, actions={actions.detach().cpu().numpy().squeeze()}")
-
-        return actions, action_log_probs
-    def evaluate_actions(self, x, action, active_masks=None, **kwargs):
-        if torch.isnan(x).any() or torch.isinf(x).any():
-            logging.warning(f"Invalid input in evaluate_actions: {x}")
-            x = torch.clamp(x, -10, 10)
-        if torch.isnan(action).any() or torch.isinf(action).any():
-            logging.warning(f"Invalid action in evaluate_actions: {action}")
-            action = torch.clamp(action, -10, 10)
-        if self._mlp_actlayer:
-            x = self.mlp(x)
-
-        if self._multidiscrete_action:
-            action = torch.transpose(action, 0, 1)
-            action_log_probs = []
-            dist_entropy = []
-            for action_out, act in zip(self.action_outs, action):
-                action_dist = action_out(x)
-                action_log_probs.append(action_dist.log_probs(act.unsqueeze(-1)))
-                dist_entropy.append(action_dist.entropy() / action_log_probs[-1].size(0))
             action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
-            dist_entropy = torch.cat(dist_entropy, dim=-1).sum(dim=-1, keepdim=True)
-
-        elif self._shoot_action:
-            dis_action, shoot_action = action.split((self._discrete_dim, self._shoot_dim), dim=-1)
-            action_log_probs = []
-            dist_entropy = []
-            dis_action = torch.transpose(dis_action, 0, 1)
-            for action_out, act in zip(self.action_outs[:-1], dis_action):
-                action_dist = action_out(x)
-                action_log_probs.append(action_dist.log_probs(act.unsqueeze(-1)))
-                dist_entropy.append(action_dist.entropy() / action_log_probs[-1].size(0))
-            shoot_action_dist = self.action_outs[-1](x, **kwargs)
-            action_log_probs.append(shoot_action_dist.log_probs(shoot_action))
-            dist_entropy.append(shoot_action_dist.entropy() / action_log_probs[-1].size(0))
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
-            dist_entropy = torch.cat(dist_entropy, dim=-1).sum(dim=-1, keepdim=True)
 
         else:
             action_dist = self.action_out(x)
-            action_log_probs = action_dist.log_probs(action)
-            dist_entropy = action_dist.entropy() / action_log_probs.size(0)
-        return action_log_probs, dist_entropy
+            actions = action_dist.mode() if deterministic else action_dist.sample()
+            action_log_probs = action_dist.log_probs(actions)
 
-    def get_probs(self, x):
+            if self._continuous_action:
+                self._global_step += 1
+                if self._global_step % 20000 == 0:
+                    mean = action_dist.loc.cpu().detach().numpy()
+                    std = action_dist.scale.cpu().detach().numpy()
+                    actions_np = actions.cpu().detach().numpy()
+                    sample_action = actions_np[0].tolist()
+                    logging.info(
+                        f"ACTLayer Step {self._global_step}: "
+                        f"mean={mean[0].tolist()}, std={std[0].tolist()}, "
+                        f"sample_action={sample_action}"
+                    )
+
+                # Clip actions to ensure they are within bounds
+                actions = torch.clamp(actions, self.action_low, self.action_high)
+
+                # Boundary check for logging
+                actions_np = actions.cpu().detach().numpy()  # Add detach()
+                control_bounds_violated = np.any(
+                    (actions_np[:, :3] < -1.0) | (actions_np[:, :3] > 1.0), axis=1
+                )  # Shape: [8,]
+                thrust_bounds_violated = (
+                    (actions_np[:, 3] < 0.4) | (actions_np[:, 3] > 0.9)
+                )  # Shape: [8,]
+                actions_out_of_bounds = np.any(control_bounds_violated | thrust_bounds_violated)
+
+                if actions_out_of_bounds:
+                    logging.warning(
+                        f"Step {self._global_step} Actions out of bounds: "
+                        f"actions={actions_np.tolist()}, "
+                        f"control_violated={control_bounds_violated.tolist()}, "
+                        f"thrust_violated={thrust_bounds_violated.tolist()}"
+                    )
+
+        return actions, action_log_probs
+
+    def evaluate_actions(self, state, action):
         if self._mlp_actlayer:
-            x = self.mlp(x)
+            state = self.mlp(state)
+
+        if self._multidiscrete_action:
+            action_log_probs = []
+            action_entropy = []
+            for i, action_out in enumerate(self.action_outs):
+                action_dist = action_out(state)
+                action_log_prob = action_dist.log_probs(action[:, i].unsqueeze(-1))
+                dist_entropy = action_dist.entropy()
+                action_log_probs.append(action_log_prob)
+                action_entropy.append(dist_entropy)
+            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
+            action_entropy = torch.cat(action_entropy, dim=-1).sum(dim=-1, keepdim=True)
+        elif self._shoot_action:
+            action_log_probs = []
+            action_entropy = []
+            for i, action_out in enumerate(self.action_outs[:-1]):
+                action_dist = action_out(state)
+                action_log_prob = action_dist.log_probs(action[:, i].unsqueeze(-1))
+                dist_entropy = action_dist.entropy()
+                action_log_probs.append(action_log_prob)
+                action_entropy.append(dist_entropy)
+            shoot_action_dist = self.action_outs[-1](state)
+            shoot_action_log_prob = shoot_action_dist.log_probs(action[:, -self._control_shoot_dim:])
+            shoot_action_entropy = shoot_action_dist.entropy()
+            action_log_probs.append(shoot_action_log_prob)
+            action_entropy.append(shoot_action_entropy)
+            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
+            action_entropy = torch.cat(action_entropy, dim=-1).sum(dim=-1, keepdim=True)
+        else:
+            action_dist = self.action_out(state)
+            action_log_probs = action_dist.log_probs(action)
+            action_entropy = action_dist.entropy()
+
+        return action_log_probs, action_entropy
+
+    def get_probs(self, state):
+        if self._mlp_actlayer:
+            state = self.mlp(state)
+
         if self._multidiscrete_action:
             action_probs = []
             for action_out in self.action_outs:
-                action_dist = action_out(x)
-                action_prob = action_dist.probs
-                action_probs.append(action_prob)
+                action_dist = action_out(state)
+                action_probs.append(action_dist.probs)
             action_probs = torch.cat(action_probs, dim=-1)
-        elif self._continuous_action or self._shoot_action:
-            raise ValueError("Normal distribution has no `probs` attribute!")
+        elif self._shoot_action:
+            action_probs = []
+            for action_out in self.action_outs[:-1]:
+                action_dist = action_out(state)
+                action_probs.append(action_dist.probs)
+            shoot_action_dist = self.action_outs[-1](state)
+            action_probs.append(shoot_action_dist.probs)
+            action_probs = torch.cat(action_probs, dim=-1)
         else:
-            action_dists = self.action_out(x)
-            action_probs = action_dists.probs
+            action_dist = self.action_out(state)
+            action_probs = action_dist.probs
+
         return action_probs
 
     @property
@@ -393,3 +414,4 @@ class ACTLayer(nn.Module):
             return len(self.action_outs)
         else:
             return self.action_out.output_size
+

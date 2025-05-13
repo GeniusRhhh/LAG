@@ -26,8 +26,8 @@ def _t2n(x):
 
 num_agents = 2
 render = True
-ego_policy_index = 1040
-enm_policy_index = 0
+ego_policy_index = 600
+enm_policy_index = 400
 episode_rewards = 0
 ego_run_dir = "../scripts/results/SingleCombat/1v1/NoWeapon/HierarchySelfplay/ppo/v1/03031629"
 enm_run_dir = "../scripts/results/SingleCombat/1v1/NoWeapon/HierarchySelfplay/ppo/v1/03031629"
@@ -52,12 +52,6 @@ obs = env.reset()
 # 打印观察空间和初始形状
 logging.info(f"Observation space: {env.observation_space}")
 logging.info(f"Initial obs shape: {obs.shape}")
-
-# 临时强制设置初始高度
-for agent_id, sim in env.agents.items():
-    sim.set_property_value(c.position_h_sl_ft, 20000.0)
-    logging.info(f"Set {agent_id} initial altitude: {sim.get_property_value(c.position_h_sl_ft)} ft")
-obs = env.reset()  # 再次重置以应用高度
 
 if render:
     env.render(mode='txt', filepath=f'{experiment_name}.txt.acmi')

@@ -1,31 +1,28 @@
+# reward_functions/heading_reward.py
 import math
+import numpy as np
 from .reward_function_base import BaseRewardFunction
 from ..core.catalog import Catalog as c
-import numpy as np
 
 class HeadingReward(BaseRewardFunction):
     def __init__(self, config):
         super().__init__(config)
-        self.reward_item_names = [self.__class__.__name__ + item for item in ['', '_heading', '_roll', '_speed']]
+        self.reward_item_names = [self.__class__.__name__ + item for item in ['', '_heading', '_alt', '_roll', '_speed']]
 
     def get_reward(self, task, env, agent_id):
-        heading_error_scale = 30.0  # 减小尺度，提高敏感性
-        heading_error = env.agents[agent_id].get_property_value(c.delta_heading)
-        heading_r = math.exp(-(heading_error / heading_error_scale) ** 2)
-        heading_r = 2.0 * heading_r - 1.0
+        delta_heading = env.agents[agent_id].get_property_value(c.delta_heading)
+        delta_altitude = env.agents[agent_id].get_property_value(c.delta_altitude)
+        roll_rad = env.agents[agent_id].get_property_value(c.attitude_roll_rad)
+        delta_speed = env.agents[agent_id].get_property_value(c.delta_velocities_u)
 
-        roll_error_scale = 0.7
-        roll_error = env.agents[agent_id].get_property_value(c.attitude_roll_rad)
-        roll_r = math.exp(-(roll_error / roll_error_scale) ** 2)
-        roll_r = 2.0 * roll_r - 1.0
+        # 放宽高斯尺度
+        heading_r = math.exp(-((delta_heading / 10.0) ** 2))  # 5.0 → 10.0
+        alt_r = math.exp(-((delta_altitude / 15.24) ** 2))
+        roll_r = math.exp(-((roll_rad / 0.35) ** 2))
+        speed_r = math.exp(-((delta_speed / 24.0) ** 2))
 
-        speed_error_scale = 50.0
-        speed_error = env.agents[agent_id].get_property_value(c.delta_velocities_u)
-        speed_r = math.exp(-(speed_error / speed_error_scale) ** 2)
-        speed_r = 2.0 * speed_r - 1.0
+        # 添加正奖励项
+        heading_bonus = 0.5 * (1.0 - abs(delta_heading) / 180.0)  # 航向误差越小，奖励越高
+        reward = (heading_r * alt_r * roll_r * speed_r) ** (1 / 4) + heading_bonus
 
-        reward = 0.6 * heading_r + 0.2 * roll_r + 0.2 * speed_r  # 提高航向权重
-        if abs(heading_error) < 10.0:
-            reward += 0.5  # 阶段性正向奖励
-        reward = np.clip(reward, -2.0, 2.0)
-        return self._process(reward, agent_id, (heading_r, roll_r, speed_r))
+        return self._process(reward, agent_id, (heading_r, alt_r, roll_r, speed_r))

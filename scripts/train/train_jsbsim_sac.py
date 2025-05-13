@@ -161,12 +161,12 @@ def main(args):
     }
 
     # 7) 引入单智能体 SAC Runner
-    # from runner.single_jsbsim_runner import SingleJSBSimRunner
-    # runner = SingleJSBSimRunner(config)
+    from runner.single_jsbsim_runner import SingleJSBSimRunner
+    runner = SingleJSBSimRunner(config)
     # from runner.OnevOneJsbsimRunner import OnevOneJSBSimRunner
     # runner = OnevOneJSBSimRunner(config)
-    from runner.selfplay_OnevOneJsbsimRunner import selfplayOnevOneJSBSimRunner
-    runner= selfplayOnevOneJSBSimRunner(config)
+    # from runner.selfplay_OnevOneJsbsimRunner import selfplayOnevOneJSBSimRunner
+    # runner= selfplayOnevOneJSBSimRunner(config)
 
     # 8) 开始训练
     try:

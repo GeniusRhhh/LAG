@@ -182,5 +182,113 @@
 #         self.reward_mean.fill(0)
 #         self.reward_var.fill(1)
 #         self.reward_count.fill(0)
+import logging
 
+import numpy as np
 
+class SACReplayBuffer:
+    """
+    SAC 经验回放缓冲区(N, 支持 n_env 个并行环境,
+    存储每个环境产生的序列 (n_env, obs_dim), (n_env, act_dim), 奖励
+    """
+    def __init__(self, obs_space, act_space, n_env, capacity=10**6):
+        """
+        初始化 SACReplayBuffer
+        :param obs_space: 观察空间 (gym.Space)
+        :param act_space: 动作空间 (gym.Space)
+        :param n_env: 并行环境数量 (int)
+        :param capacity: 经验回放容量 (int)
+        """
+        # print(f"[DEBUG] SACReplayBuffer received obs_space={obs_space}, act_space={act_space}, n_env={n_env}")
+        obs_dim = obs_space.shape[0]  # 共取观察空间已知维度
+        act_dim = act_space.shape[0]  # 共取动作空间已知维度
+        self.n_env = n_env
+        self.capacity = capacity
+
+        # 动态初始化缓冲池, 增加 n_env 维度
+        self.obs_buf = np.zeros((capacity, n_env, obs_dim), dtype=np.float32)
+        self.next_obs_buf = np.zeros((capacity, n_env, obs_dim), dtype=np.float32)
+        self.act_buf = np.zeros((capacity, n_env, act_dim), dtype=np.float32)
+        self.rew_buf = np.zeros((capacity, n_env, 1), dtype=np.float32)
+        self.done_buf = np.zeros((capacity, n_env, 1), dtype=np.float32)
+        # print(f"[DEBUG] SACReplayBuffer initialized with obs_dim={obs_dim}, act_dim={act_dim}, n_env={n_env}, ...")
+
+        self.ptr = 0  # 当前存储指针计数
+        self.size = 0  # 总经验数据区存储数据计数
+
+    def store(self, obs, act, rew, next_obs, done):
+        """
+        存储 n_env 个环境的 (s, a, r, s', done) 经验
+        :param obs: (n_env, obs_dim) 观察
+        :param act: (n_env, act_dim) 动作
+        :param rew: (n_env, 1) 奖励
+        :param next_obs: (n_env, obs_dim) 下一步状态
+        :param done: (n_env, 1) 终止信号
+        """
+        # 确保 obs, next_obs 符合是 (n_env, obs_dim) 而不是 (n_env, n_agents, obs_dim)
+        if obs.ndim == 3 and obs.shape[1] == 1:
+            obs = obs.squeeze(1)  # (n_env, obs_dim)
+            next_obs = next_obs.squeeze(1)
+
+        if act.ndim == 3 and act.shape[1] == 1:
+            act = act.squeeze(1)  # (n_env, act_dim)
+
+        idx = self.ptr  # 当前存储指针索引
+        # print(f"[DEBUG] Storing obs in buffer: {obs.shape}")
+
+        # print(f"[DEBUG] Store: obs.shape={obs.shape}, act.shape={act.shape}")
+        self.obs_buf[idx] = obs  # shape (n_env, obs_dim)
+        self.act_buf[idx] = act  # shape (n_env, act_dim)
+        self.rew_buf[idx] = rew  # shape (n_env, 1)
+        self.next_obs_buf[idx] = next_obs  # shape (n_env, obs_dim)
+        self.done_buf[idx] = done  # shape (n_env, 1)
+
+        # 更新存储指针计数
+        self.ptr = (self.ptr + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def sample_batch(self, batch_size=256):
+        """
+        采样一个批次的数据
+        :param batch_size: 采样大小
+        :return: 采样
+        """
+        idxs = np.random.randint(0, self.size, size=batch_size)
+
+        batch = {
+            "obs": self.obs_buf[idxs],  # shape (batch_size, n_env, obs_dim)
+            "act": self.act_buf[idxs],  # shape (batch_size, n_env, act_dim)
+            "rew": self.rew_buf[idxs],  # shape (batch_size, n_env, 1)
+            "next_obs": self.next_obs_buf[idxs],  # shape (batch_size, n_env, obs_dim)
+            "done": self.done_buf[idxs]  # shape (batch_size, n_env, 1)
+        }
+
+        # 确保 obs 维度 (batch_size, obs_dim) 而不是 (batch_size, n_agents, obs_dim)
+        if batch["obs"].shape[1] == 1:
+            batch["obs"] = batch["obs"].squeeze(1)  # 共用维去掉 1 维去掉 squeeze
+        if batch["next_obs"].shape[1] == 1:
+            batch["next_obs"] = batch["next_obs"].squeeze(1)
+        elif self.size < batch_size:
+            logging.info(f"[WARNING] Replay Buffer insufficient: size={self.size}, requested={batch_size}")
+        # logging.info(f"Replay Buffer Size: {len(self.obs_buf)}, Sampling Batch SIZE: {batch_size}")
+
+        return batch
+
+    def clear(self):
+        """
+        清空缓冲区
+        """
+        self.ptr = 0
+        self.size = 0
+        self.obs_buf.fill(0)
+        self.act_buf.fill(0)
+        self.rew_buf.fill(0)
+        self.next_obs_buf.fill(0)
+        self.done_buf.fill(0)
+        print("[INFO] SACReplayBuffer cleared.")
+
+    def __len__(self):
+        """
+        返回当前缓冲区大小
+        """
+        return self.size

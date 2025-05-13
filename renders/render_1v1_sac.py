@@ -1,89 +1,100 @@
 import numpy as np
 import torch
-import logging
-from datetime import datetime
-
-# 假设你有 SingleCombatEnv 环境
-from envs.JSBSim.envs import SingleCombatEnv
-
-# 你的 SAC Actor
+from envs.JSBSim.envs import SingleControlEnv
+from envs.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.sac.sac_actor import ActorNet
+import logging
+import os
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
+class Args:
+    def __init__(self) -> None:
+        self.gain = 0.01
+        self.hidden_size = '128 128'
+        self.act_hidden_size = '128 128'
+        self.activation_id = 1
+        self.use_feature_normalization = False
+        self.use_recurrent_policy = False
+        self.tpdv = dict(dtype=torch.float32, device=torch.device('cpu'))
 
-def main():
-    # 1) 创建 1v1 对战环境
-    env_name = "SingleCombat"
-    scenario = "1v1_combat"
-    env = SingleCombatEnv(scenario)
-    env.seed(42)
+def _t2n(x):
+    """Convert torch tensor to numpy array."""
+    return x.detach().cpu().numpy()
 
-    # 2) 加载模型
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Configuration
+render = True
+policy_index = 300000
+run_dir = "../scripts/results/SingleControl/1/heading/sac/v0131/run61"
+experiment_name = run_dir.split('/')[-4]
 
-    # 创建 DummyArgs 类来定义网络结构参数
-    class DummyArgs:
-        hidden_size = '512 512'
-        act_hidden_size = '512 512'
-        activation_id = 1
-        use_feature_normalization = False
-        init_alpha = 0.2
-        gamma = 0.99
-        tau = 0.005
-        gain = 0.01
+# Check if file exists
+model_path = f"{run_dir}/sac_{policy_index}.pt"
+if not os.path.exists(model_path):
+    raise FileNotFoundError(f"Model file {model_path} not found!")
 
-    args = DummyArgs()
+# Initialize environment
+env = SingleControlEnv("heading")
+env.seed(0)
+args = Args()
 
-    # 构造 ActorNet
-    obs_space = env.observation_space
-    act_space = env.action_space
-    actor = ActorNet(args, obs_space, act_space, device=device)
+# Initialize SAC policy
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+policy = ActorNet(args, env.observation_space, env.action_space, device=device)
+policy.to(device)  # Ensure model is on the correct device
+policy.eval()
 
-    # 加载权重
-    ego_run_dir = "../scripts/results/SingleCombat/1v1_combat/sac/v0131/01312018"
-    checkpoint = torch.load(ego_run_dir + f"/sac_4920000.pt", map_location=device)
-    actor.load_state_dict(checkpoint["actor"])
-    actor.eval()
+# Load actor state_dict
+checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+policy.load_state_dict(checkpoint["actor"])
 
-    # 3) 开始推理并渲染
-    obs = env.reset()  # 获取初始状态
-    # 生成 acmi 文件路径
-    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-    acmi_path = f"{env_name}_{scenario}_{current_time}.acmi"
+print("Start render")
+obs = env.reset()
+# Log observation space and shape
+logging.info(f"Observation space: {env.observation_space}, Obs shape: {obs.shape}")
+# Remove batch dimension if present
+if obs.ndim == 2 and obs.shape[0] == 1:
+    obs = obs.squeeze(0)  # (1, 12) -> (12,)
+# Validate obs shape
+expected_shape = env.observation_space.shape
+if obs.shape != expected_shape:
+    raise ValueError(f"Expected obs shape {expected_shape}, got {obs.shape}")
+episode_rewards = 0
 
-    # 开启渲染
-    env.render(mode='txt', filepath=acmi_path)
+if render:
+    env.render(mode='txt', filepath=f'{experiment_name}.txt.acmi')
 
-    done = False
-    episode_reward = 0.0
+while True:
+    # Convert obs to tensor and add batch dimension
+    obs_tensor = torch.from_numpy(obs).float().to(device).unsqueeze(0)  # [12,] -> [1, 12]
 
-    while not done:
-        # 获取两个智能体的观察值
-        obs_tensor_1 = torch.as_tensor(obs[0], dtype=torch.float32, device=device).unsqueeze(0)  # 智能体1
-        obs_tensor_2 = torch.as_tensor(obs[1], dtype=torch.float32, device=device).unsqueeze(0)  # 智能体2
+    # Get action from SAC policy
+    actions, _ = policy(obs_tensor, deterministic=True)  # actions: [1, 4]
+    actions = _t2n(actions.detach())  # [1, 4]
 
-        # 根据 SAC 推理生成动作
-        with torch.no_grad():
-            action_1, _ = actor(obs_tensor_1, deterministic=True)  # 对智能体1推理
-            action_2, _ = actor(obs_tensor_2, deterministic=True)  # 对智能体2推理
+    # Clip actions to ensure within bounds
+    actions = np.clip(actions, env.action_space.low, env.action_space.high)
 
-        action_1_np = action_1.cpu().numpy().squeeze(0)  # 获取动作
-        action_2_np = action_2.cpu().numpy().squeeze(0)
+    # Log step details
+    logging.debug(f"Step {env.current_step}: obs={obs.tolist()}, actions={actions.tolist()}")
 
-        # 环境步进
-        next_obs, reward, done, info = env.step([action_1_np, action_2_np])  # 双智能体环境步进
-        episode_reward += reward.sum()  # 总奖励
+    # Step the environment
+    obs, rewards, dones, infos = env.step(actions)
+    # Remove batch dimension if present
+    if obs.ndim == 2 and obs.shape[0] == 1:
+        obs = obs.squeeze(0)  # (1, 12) -> (12,)
+    episode_rewards += rewards
 
-        # 每步渲染
-        env.render(mode='txt', filepath=acmi_path)
+    if render:
+        env.render(mode='txt', filepath=f'{experiment_name}.txt.acmi')
 
-        # 更新观察
-        obs = next_obs
+    print(f"step:{env.current_step}, reward:{rewards}")
 
-    print(f"Episode finished, total reward={episode_reward}")
-    print(f"ACMI file saved to: {acmi_path}")
+    if dones:
+        if isinstance(infos, dict) and 'reward_items' in infos:
+            logging.info(f"Reward Breakdown: {infos['reward_items']}")
+        print(infos)
+        break
 
-
-if __name__ == "__main__":
-    main()
+print(f"Episode rewards: {episode_rewards}")
+env.close()

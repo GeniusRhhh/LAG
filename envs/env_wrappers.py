@@ -189,7 +189,7 @@ def worker(remote: Connection, parent_remote: Connection, env_fn_wrappers):
         env_fn_wrappers (method): functions to create gym.Env instance.
     """
     def step_env(env, action):
-        obs, reward, done, info = env.step(action)
+        obs, reward, done, info = env.step(action)  # 恢复为 4 个返回值
         if 'bool' in done.__class__.__name__:
             if done:
                 obs = env.reset()
@@ -216,7 +216,7 @@ def worker(remote: Connection, parent_remote: Connection, env_fn_wrappers):
                 remote.close()
                 break
             elif cmd == 'get_spaces':
-                remote.send(CloudpickleWrapper((envs[0].observation_space, envs[0].action_space)))
+                remote.send(CloudpickleWrapper((envs[0].observation_space, envs[0].action_space)))  # 只返回 2 个值
             elif cmd == 'get_num_agents':
                 remote.send(CloudpickleWrapper((getattr(envs[0], "num_agents", 1))))
             else:
@@ -226,7 +226,6 @@ def worker(remote: Connection, parent_remote: Connection, env_fn_wrappers):
     finally:
         for env in envs:
             env.close()
-
 
 class SubprocVecEnv(VecEnv):
     """

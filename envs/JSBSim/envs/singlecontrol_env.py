@@ -1,14 +1,11 @@
 from .env_base import BaseEnv
 from ..tasks.heading_task import HeadingTask
-import numpy as np
-import logging
 
 
 class SingleControlEnv(BaseEnv):
     """
     SingleControlEnv is an fly-control env for single agent with no enemy fighters.
     """
-
     def __init__(self, config_name: str):
         super().__init__(config_name)
         # Env-Specific initialization here!
@@ -28,20 +25,6 @@ class SingleControlEnv(BaseEnv):
         self.heading_turn_counts = 0
         self.task.reset(self)
         obs = self.get_obs()
-
-        # 添加调试信息，检查 obs 类型和值
-        # logging.info(f"Reset: obs type = {type(obs)}, obs = {obs}")
-
-        # # 假设 obs 是一个一维数组 (12,)，索引第 3 个元素 (altitude)
-        # if isinstance(obs, np.ndarray) and obs.size >= 4:
-        #     initial_altitude = obs[3] * 5000  # 单位：m
-        #     if not (14000 <= initial_altitude <= 30000):
-        #         logging.warning(f"Initial altitude {initial_altitude:.2f}m out of range [14000, 30000]")
-        # else:
-        #     logging.warning(f"Unexpected obs format: {obs}, skipping altitude check")
-        packed_obs = self._pack(obs)
-        # logging.info(
-        #     f"Reset: packed_obs type = {type(packed_obs)}, packed_obs shape = {packed_obs.shape}, packed_obs = {packed_obs}")
         return self._pack(obs)
 
     def reset_simulators(self):

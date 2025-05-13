@@ -252,99 +252,36 @@
 #         # 输出维度为动作的数量
 #         return self._num_outputs
 
-
+# algorithms/utils/distributions.py
 import torch
 import torch.nn as nn
-import numpy as np
-import logging
-
 from .utils import init
-
 
 class FixedCategorical(torch.distributions.Categorical):
     def sample(self):
         return super().sample().unsqueeze(-1)
-
     def log_probs(self, actions):
-        log_probs = super().log_prob(actions.squeeze(-1)).view(actions.squeeze(-1).unsqueeze(-1).size()).sum(-1, keepdim=True)
-        return torch.clamp(log_probs, -1000, 0)
-
+        return super().log_prob(actions.squeeze(-1)).view(actions.squeeze(-1).unsqueeze(-1).size()).sum(-1, keepdim=True)
     def mode(self):
         return self.probs.argmax(dim=-1, keepdim=True)
-
     def entropy(self):
         return super().entropy().unsqueeze(-1)
 
 class FixedNormal(torch.distributions.Normal):
     def log_probs(self, actions):
-        log_probs = super().log_prob(actions).sum(-1, keepdim=True)
-        return torch.clamp(log_probs, -1000, 0)
-
+        return super().log_prob(actions).sum(-1, keepdim=True)
     def entropy(self):
         return super().entropy().sum(-1, keepdim=True)
-
     def mode(self):
         return self.mean
-
-class FixedSquashedNormal(torch.distributions.Normal):
-    """
-    Squashed Normal distribution for SAC, applies tanh and scales to action bounds.
-    """
-    def __init__(self, loc, scale, low, high, epsilon=1e-6):
-        if torch.isnan(loc).any() or torch.isinf(loc).any():
-            logging.warning(f"Invalid loc in FixedSquashedNormal: {loc}")
-            loc = torch.clamp(loc, -10, 10)
-        if torch.isnan(scale).any() or torch.isinf(scale).any() or (scale <= 0).any():
-            logging.warning(f"Invalid scale in FixedSquashedNormal: {scale}")
-            scale = torch.clamp(scale, 1e-9, 7.4)
-        super().__init__(loc, scale)
-        self.low = torch.as_tensor(low, dtype=torch.float32, device=loc.device)
-        self.high = torch.as_tensor(high, dtype=torch.float32, device=loc.device)
-        self.epsilon = epsilon
-
-    def sample(self):
-        raw_samples = super().sample()
-        squashed = torch.tanh(raw_samples)
-        scaled = self.low + (self.high - self.low) * (squashed + 1) / 2
-        return scaled
-
-    def rsample(self):
-        raw_samples = super().rsample()
-        squashed = torch.tanh(raw_samples)
-        scaled = self.low + (self.high - self.low) * (squashed + 1) / 2
-        return scaled
-
-    def log_probs(self, actions):
-        squashed = 2 * (actions - self.low) / (self.high - self.low) - 1
-        squashed = torch.clamp(squashed, -1 + self.epsilon, 1 - self.epsilon)
-        raw_actions = torch.atanh(squashed)
-        if torch.isnan(raw_actions).any() or torch.isinf(raw_actions).any():
-            logging.warning(f"Invalid raw_actions in log_probs: {raw_actions}")
-            raw_actions = torch.clamp(raw_actions, -10, 10)
-        log_prob = super().log_prob(raw_actions)
-        log_prob -= torch.log(1 - squashed.pow(2) + self.epsilon).sum(-1, keepdim=True)
-        return log_prob.sum(-1, keepdim=True)
-
-    def entropy(self):
-        return super().entropy().sum(-1, keepdim=True)
-
-    def mode(self):
-        raw_mean = self.mean
-        squashed = torch.tanh(raw_mean)
-        scaled = self.low + (self.high - self.low) * (squashed + 1) / 2
-        return scaled
-
 
 class FixedBernoulli(torch.distributions.Bernoulli):
     def log_probs(self, actions):
         return super().log_prob(actions).sum(-1, keepdim=True)
-
     def entropy(self):
         return super().entropy().sum(-1, keepdim=True)
-
     def mode(self):
         return torch.gt(self.probs, 0.5).float()
-
 
 class Categorical(nn.Module):
     def __init__(self, num_inputs, num_outputs, gain=0.01):
@@ -361,32 +298,31 @@ class Categorical(nn.Module):
     def output_size(self) -> int:
         return 1
 
-
 class DiagGaussian(nn.Module):
-    def __init__(self, num_inputs, num_outputs, gain=0.01, low=None, high=None):
+    def __init__(self, num_inputs, num_outputs, gain=0.01, device='cpu'):
         super(DiagGaussian, self).__init__()
         def init_(m):
-            return init(m, nn.init.uniform_, lambda x: nn.init.constant_(x, 0), gain)
+            return init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), gain)
         self.mu_net = init_(nn.Linear(num_inputs, num_outputs))
-        # self.log_std = nn.Parameter(torch.full((num_outputs,), -1.0))
-        self.log_std = nn.Parameter(torch.full((num_outputs,), -0.5))  # 初始标准差约为 0.6
-        log_std = torch.clamp(self.log_std, -5.0, 0.0)  # 标准差范围 [0.0067, 1.0]
+        self.log_std = nn.Parameter(torch.full((num_outputs,), -0.5))
         self._num_outputs = num_outputs
-        self.low = low if low is not None else np.array([-1.0] * num_outputs, dtype=np.float32)
-        self.high = high if high is not None else np.array([1.0] * num_outputs, dtype=np.float32)
+        self.log_std_min = -2.0
+        self.log_std_max = 0.0
+        # 统一推力下限为 0.5
+        self.action_low = torch.tensor([-1.0, -1.0, -1.0, 0.4], dtype=torch.float32, device=device)
+        self.action_high = torch.tensor([1.0, 1.0, 1.0, 0.9], dtype=torch.float32, device=device)
 
     def forward(self, x):
-        # action_mean = self.mu_net(x)
-        action_mean = torch.clamp(self.mu_net(x), -10.0, 10.0)
-        log_std = torch.clamp(self.log_std, -10, 0)  # 限制 std 在 [0.000045, 1.0]
-        std = log_std.exp()
-        logging.debug(f"DiagGaussian: mean={action_mean.detach().cpu().numpy().squeeze()}, std={std.detach().cpu().numpy().squeeze()}")
-        return FixedSquashedNormal(action_mean, std, self.low, self.high)
+        action_mean = self.mu_net(x)
+        action_mean = torch.tanh(action_mean) * (self.action_high - self.action_low) / 2 + \
+                      (self.action_high + self.action_low) / 2
+        log_std = torch.clamp(self.log_std, self.log_std_min, self.log_std_max)
+        action_std = log_std.exp()
+        return FixedNormal(action_mean, action_std)
 
     @property
     def output_size(self) -> int:
         return self._num_outputs
-
 
 class BetaShootBernoulli(nn.Module):
     def __init__(self, num_inputs, num_outputs, gain=0.01):
@@ -400,7 +336,7 @@ class BetaShootBernoulli(nn.Module):
     def forward(self, x, **kwargs):
         x = self.net(x)
         x = self.constraint(x)
-        x = 100 - self.constraint(100 - x)
+        x = 100 - self.constraint(100-x)
         alpha = 1 + x[:, 0].unsqueeze(-1)
         beta = 1 + x[:, 1].unsqueeze(-1)
         alpha_0 = kwargs['alpha0']
@@ -411,7 +347,6 @@ class BetaShootBernoulli(nn.Module):
     @property
     def output_size(self) -> int:
         return self._num_outputs
-
 
 class Bernoulli(nn.Module):
     def __init__(self, num_inputs, num_outputs, gain=0.01):
