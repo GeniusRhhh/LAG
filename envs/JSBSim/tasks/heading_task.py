@@ -31,7 +31,7 @@ class HeadingTask(BaseTask):
         self.state_var = [
             c.delta_altitude,
             c.delta_heading,
-            c.delta_velocities_u,
+            c.delta_velocities_u,  # 替换 c.delta_speed
             c.position_h_sl_m,
             c.attitude_roll_rad,
             c.attitude_pitch_rad,
@@ -59,7 +59,7 @@ class HeadingTask(BaseTask):
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(12,), dtype=np.float32)
 
     def load_action_space(self):
-        low = np.array([-1.0, -1.0, -1.0, 0.4], dtype=np.float32)  # 0.4 → 0.5
+        low = np.array([-1.0, -1.0, -1.0, 0.4], dtype=np.float32)  # 保持 [0.4, 0.9]
         high = np.array([1.0, 1.0, 1.0, 0.9], dtype=np.float32)
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
@@ -68,7 +68,7 @@ class HeadingTask(BaseTask):
         norm_obs = np.zeros(12)
         norm_obs[0] = obs[0] / 2000
         norm_obs[1] = obs[1] / 180
-        norm_obs[2] = obs[2] / 340
+        norm_obs[2] = obs[2] / 340  # delta_velocities_u
         norm_obs[3] = obs[3] / 10000
         norm_obs[4] = np.sin(obs[4])
         norm_obs[5] = np.cos(obs[4])
@@ -81,15 +81,14 @@ class HeadingTask(BaseTask):
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
 
         self.step_count += 1
-        if self.step_count % 1000 == 0:
+        if self.step_count % 500 == 0:
             logging.info(
-                f"Agent {agent_id} observation (Step {self.step_count}): "
-                f"delta_altitude={obs[0]:.2f}m, delta_heading={obs[1]:.2f}°, "
-                f"altitude={obs[3]:.2f}m, velocity_u={obs[2]:.2f}m/s"
+                f"Agent {agent_id} Obs: delta_altitude={obs[0]:.2f}m, "
+                f"delta_heading={obs[1]:.2f}°, delta_velocities_u={obs[2]:.2f}m/s"
             )
 
         if np.any(np.isnan(norm_obs)) or np.any(np.isinf(norm_obs)):
-            logging.warning(f"Agent {agent_id} 观测值无效: {norm_obs}")
+            logging.warning(f"Agent {agent_id} Invalid obs: {norm_obs}")
 
         return norm_obs
 
@@ -99,10 +98,16 @@ class HeadingTask(BaseTask):
         norm_act = np.clip(action, low, high)
         if not np.allclose(action, norm_act, atol=1e-5):
             logging.warning(
-                f"Agent {agent_id} 动作在 Step {self.step_count} 被裁剪: "
-                f"原始={action.tolist()}, 裁剪后={norm_act.tolist()}"
+                f"Agent {agent_id} Action clipped: original={action.tolist()}, clipped={norm_act.tolist()}"
             )
         if np.any(np.isnan(norm_act)) or np.any(np.isinf(norm_act)):
-            logging.error(f"Agent {agent_id} 动作无效: {norm_act.tolist()}")
+            logging.error(f"Agent {agent_id} Invalid action: {norm_act.tolist()}")
             norm_act = np.clip(np.zeros_like(action), low, high)
+
+        if self.step_count % 500 == 0:
+            logging.info(
+                f"Agent {agent_id} Action: aileron={action[0]:.4f}, elevator={action[1]:.4f}, "
+                f"rudder={action[2]:.4f}, throttle={action[3]:.4f}"
+            )
+
         return norm_act

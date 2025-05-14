@@ -75,10 +75,12 @@
 #             f"Training metrics: critic_loss={metrics['critic_loss']:.4f}, actor_loss={metrics['actor_loss']:.4f}, alpha={metrics['alpha']:.4f}, q_mean={metrics['q_mean']:.4f}, reward_mean={metrics['reward_mean']:.4f}")
 #         return metrics
 
+# algorithms/sac/sac_trainer.py
 import logging
 import torch
 import torch.nn.functional as F
 import wandb
+import numpy as np
 
 class SACTrainer:
     """
@@ -121,14 +123,16 @@ class SACTrainer:
             q1_next, q2_next = self.policy.critic_target(next_obs_batch, next_a)  # shape=[B*N, 1]
             q_next = torch.min(q1_next, q2_next) - self.policy.alpha * next_logp  # shape=[B*N, 1]
 
-            # 计算目标 Q 值
+            # 计算目标 Q 值并裁剪
             q_target = rew_batch + self.policy.gamma * (1 - done_batch) * q_next  # shape=[B*N, 1]
+            q_target = torch.clamp(q_target, -100, 100)  # 防止 Q 值过大
 
         # --- 3) 优化 Critic ---
         q1, q2 = self.policy.critic(obs_batch, act_batch)  # shape=[B*N, 1], [B*N, 1]
         critic_loss = F.mse_loss(q1, q_target) + F.mse_loss(q2, q_target)
         self.policy.critic_optimizer.zero_grad()
         critic_loss.backward()
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.critic.parameters(), max_norm=1.0)  # 梯度裁剪
         self.policy.critic_optimizer.step()
 
         # --- 4) 优化 Actor ---
@@ -138,6 +142,7 @@ class SACTrainer:
         actor_loss = (self.policy.alpha * curr_logp - q_pi).mean()
         self.policy.actor_optimizer.zero_grad()
         actor_loss.backward()
+        actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.actor.parameters(), max_norm=1.0)  # 梯度裁剪
         self.policy.actor_optimizer.step()
 
         # --- 5) 优化 alpha ---
@@ -148,21 +153,50 @@ class SACTrainer:
 
         # --- 6) 软更新 ---
         self.policy.soft_update()
+
+        # --- 7) 日志记录动作分布 ---
+        action_mean = curr_a.mean(dim=0).cpu().detach().numpy()
+        action_std = curr_a.std(dim=0).cpu().detach().numpy()
+
         train_metrics = {
             "critic_loss": critic_loss.item(),
             "actor_loss": actor_loss.item(),
+            "q1_mean": q1.mean().item(),  # 新增
+            "q2_mean": q2.mean().item(),  # 新增
             "q_mean": q_pi.mean().item(),
-            "alpha": self.policy.alpha.item()
+            "alpha": self.policy.alpha.item(),
+            "actor_grad_norm": actor_grad_norm.item(),  # 新增
+            "critic_grad_norm": critic_grad_norm.item()  # 新增
         }
 
-        # Log metrics if total_steps is multiple of 100
-        if total_steps % 100 == 0 and total_steps > 0:
+        # Log metrics if total_steps is multiple of 500
+        if total_steps % 500 == 0 and total_steps > 0:
             logging.info(
                 f"Step {total_steps} Train Metrics - "
                 f"critic_loss={train_metrics['critic_loss']:.4f}, "
                 f"actor_loss={train_metrics['actor_loss']:.4f}, "
-                f"q_mean={train_metrics['q_mean']:.4f}, "
-                f"alpha={train_metrics['alpha']:.4f}"
+                f"q1_mean={train_metrics['q1_mean']:.4f}, q2_mean={train_metrics['q2_mean']:.4f}, "
+                f"q_mean={train_metrics['q_mean']:.4f}, alpha={train_metrics['alpha']:.4f}, "
+                f"actor_grad_norm={train_metrics['actor_grad_norm']:.4f}, "
+                f"critic_grad_norm={train_metrics['critic_grad_norm']:.4f}"
             )
+            logging.info(
+                f"Step {total_steps} Action Distribution: "
+                f"mean={action_mean.tolist()}, std={action_std.tolist()}"
+            )
+            if hasattr(self.policy, 'use_wandb') and self.policy.use_wandb:
+                wandb.log({
+                    "step": total_steps,
+                    "critic_loss": train_metrics['critic_loss'],
+                    "actor_loss": train_metrics['actor_loss'],
+                    "q1_mean": train_metrics['q1_mean'],
+                    "q2_mean": train_metrics['q2_mean'],
+                    "q_mean": train_metrics['q_mean'],
+                    "alpha": train_metrics['alpha'],
+                    "actor_grad_norm": train_metrics['actor_grad_norm'],
+                    "critic_grad_norm": train_metrics['critic_grad_norm'],
+                    "action_mean": action_mean.tolist(),
+                    "action_std": action_std.tolist()
+                })
 
         return train_metrics

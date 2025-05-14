@@ -106,6 +106,8 @@ def _get_replaybuffer_config(parser: argparse.ArgumentParser):
                        help='Whether to use generalized advantage estimation')
     group.add_argument("--gae-lambda", type=float, default=0.95,
                        help='gae lambda parameter (default: 0.95)')
+    group.add_argument("--normalize-reward", action='store_true', default=False,
+                       help='Whether to normalize rewards in the reward function')
     return parser
 
 

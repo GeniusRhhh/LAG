@@ -24,8 +24,8 @@ def _t2n(x):
 
 # Configuration
 render = True
-policy_index = 300000
-run_dir = "../scripts/results/SingleControl/1/heading/sac/v0131/run61"
+policy_index = 930000
+run_dir = "../scripts/results/SingleControl/1/heading/sac/v0131/run73"
 experiment_name = run_dir.split('/')[-4]
 
 # Check if file exists
