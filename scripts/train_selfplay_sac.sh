@@ -20,20 +20,20 @@ CUDA_VISIBLE_DEVICES=0 python train/train_jsbsim_sac.py \
     --experiment-name ${exp} \
     --seed ${seed} \
     --n-training-threads 1 \
-    --n-rollout-threads 8 \
+    --n-rollout-threads 4 \
     --cuda \
     --log-interval 1000 \
     --save-interval 10000 \
-    --num-env-steps 7e5 \
+    --num-env-steps 1e8 \
     --actor-lr 3e-4 \
     --critic-lr 3e-4 \
     --alpha-lr 3e-4 \
-    --batch-size 256 \
+    --batch-size 512 \
     --update-per-step 1 \
     --hidden-size "128 128" --act-hidden-size "128 128" \
-    --buffer-size 20000 \
-    --target_entropy -4 \
-    --init-alpha 0.2 \
+    --buffer-size 40000 \
+    --target_entropy -2 \
+    --init-alpha 1.0 \
     --max-episodes 2000 \
     --normalize-reward
 

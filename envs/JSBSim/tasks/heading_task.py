@@ -1,4 +1,3 @@
-# tasks/heading_task.py
 import logging
 import numpy as np
 from gymnasium import spaces
@@ -31,7 +30,7 @@ class HeadingTask(BaseTask):
         self.state_var = [
             c.delta_altitude,
             c.delta_heading,
-            c.delta_velocities_u,  # 替换 c.delta_speed
+            c.delta_velocities_u,
             c.position_h_sl_m,
             c.attitude_roll_rad,
             c.attitude_pitch_rad,
@@ -59,7 +58,7 @@ class HeadingTask(BaseTask):
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(12,), dtype=np.float32)
 
     def load_action_space(self):
-        low = np.array([-1.0, -1.0, -1.0, 0.4], dtype=np.float32)  # 保持 [0.4, 0.9]
+        low = np.array([-1.0, -1.0, -1.0, 0.4], dtype=np.float32)
         high = np.array([1.0, 1.0, 1.0, 0.9], dtype=np.float32)
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
@@ -68,7 +67,7 @@ class HeadingTask(BaseTask):
         norm_obs = np.zeros(12)
         norm_obs[0] = obs[0] / 2000
         norm_obs[1] = obs[1] / 180
-        norm_obs[2] = obs[2] / 340  # delta_velocities_u
+        norm_obs[2] = obs[2] / 340
         norm_obs[3] = obs[3] / 10000
         norm_obs[4] = np.sin(obs[4])
         norm_obs[5] = np.cos(obs[4])
@@ -111,3 +110,26 @@ class HeadingTask(BaseTask):
             )
 
         return norm_act
+
+    def get_reward(self, env, agent_id, info={}):
+        reward = 0.0
+        for reward_function in self.reward_functions:
+            r = reward_function.get_reward(self, env, agent_id)
+            reward += r
+            info[f'reward_{reward_function.__class__.__name__}'] = r
+        logging.debug(f"Agent {agent_id} Total Reward: {reward:.4f}, Components: {info}")
+        return reward, info
+
+    def get_termination(self, env, agent_id, info={}):
+        done = False
+        success = True
+        for condition in self.termination_conditions:
+            d, s, term_info = condition.get_termination(self, env, agent_id, info)
+            done = done or d
+            success = success and s
+            info.update(term_info)
+            if done:
+                info['termination_reason'] = condition.__class__.__name__
+                logging.debug(f"Agent {agent_id} Termination: {info['termination_reason']}, Info: {info}")
+                break
+        return done, info

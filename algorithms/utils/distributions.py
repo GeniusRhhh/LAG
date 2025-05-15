@@ -306,9 +306,8 @@ class DiagGaussian(nn.Module):
         self.mu_net = init_(nn.Linear(num_inputs, num_outputs))
         self.log_std = nn.Parameter(torch.full((num_outputs,), -0.5))
         self._num_outputs = num_outputs
-        self.log_std_min = -3.0
-        self.log_std_max = 1.0
-        # 统一推力下限为 0.4
+        self.log_std_min = -2.0
+        self.log_std_max = 0.0  # 收紧 log_std_max，限制 std
         self.action_low = torch.tensor([-1.0, -1.0, -1.0, 0.4], dtype=torch.float32, device=device)
         self.action_high = torch.tensor([1.0, 1.0, 1.0, 0.9], dtype=torch.float32, device=device)
 
@@ -318,7 +317,11 @@ class DiagGaussian(nn.Module):
                       (self.action_high + self.action_low) / 2
         log_std = torch.clamp(self.log_std, self.log_std_min, self.log_std_max)
         action_std = log_std.exp()
-        return FixedNormal(action_mean, action_std)
+        dist = FixedNormal(action_mean, action_std)
+        # 在采样前裁剪
+        sample = dist.rsample()
+        sample = torch.clamp(sample, self.action_low, self.action_high)
+        return FixedNormal(sample, action_std)  # 返回裁剪后的分布
 
     @property
     def output_size(self) -> int:

@@ -78,6 +78,9 @@ def _get_prepare_config(parser: argparse.ArgumentParser):
                        help="for setprobtitle use")
     group.add_argument("--wandb-name", type=str, default='liuqh',
                        help="[for wandb usage], to specify user's name for simply collecting training data.")
+    group.add_argument("--max-episodes", type=int, default=2000,
+                       help='Number of environment steps to train (default: 1e7)')
+
     return parser
 
 

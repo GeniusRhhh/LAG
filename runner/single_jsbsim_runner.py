@@ -1,4 +1,3 @@
-# runner/single_jsbsim_runner.py
 import time
 import torch
 import logging
@@ -17,7 +16,8 @@ class SingleJSBSimRunner:
         self.device = config["device"]
         self.run_dir = config["run_dir"]
 
-        self.max_episodes = getattr(self.all_args, "max_episodes", 1000)
+        self.num_env_steps = self.all_args.num_env_steps
+        self.max_episodes = self.all_args.max_episodes
         self.n_rollout_threads = self.all_args.n_rollout_threads
         self.batch_size = getattr(self.all_args, "batch_size", 256)
         self.update_per_step = getattr(self.all_args, "update_per_step", 1)
@@ -37,7 +37,7 @@ class SingleJSBSimRunner:
         self.policy = SACPolicy(self.all_args, obs_space, act_space)
         self.trainer = SACTrainer(self.policy)
 
-        buffer_capacity = getattr(self.all_args, "buffer_size", 10000)
+        buffer_capacity = self.all_args.buffer_size
         self.buffer = SACReplayBuffer(
             obs_space=obs_space,
             act_space=act_space,
@@ -58,7 +58,7 @@ class SingleJSBSimRunner:
         obs = np.array(obs, dtype=np.float32)
 
         start_time = time.time()
-        while self.episode_count < self.max_episodes:
+        while self.episode_count < self.max_episodes and self.total_env_steps < self.num_env_steps:
             obs = self._fix_obs_shape(obs)
             self.step_count += 1
 
@@ -67,11 +67,18 @@ class SingleJSBSimRunner:
             actions = actions.cpu().detach().numpy()
             # Clip actions
             actions = np.clip(actions, self.envs.action_space.low, self.envs.action_space.high)
-            # Check throttle bounds
-            throttle_violated = np.any(actions[:, 3] < 0.4) or np.any(actions[:, 3] > 0.9)
-            if throttle_violated:
+            # Encourage higher throttle
+            actions[:, 3] = np.clip(actions[:, 3] + 0.4, 0.4, 0.9)  # 按前文建议调整偏移到 0.4
+            # Constrain elevator to reduce negative values
+            actions[:, 1] = np.clip(actions[:, 1], -0.5, 0.5)  # 按前文建议调整范围
+            # Extra check for throttle
+            throttle = actions[:, 3]
+            throttle_clipped = np.clip(throttle, 0.4, 0.9)
+            if not np.allclose(throttle, throttle_clipped):
+                actions[:, 3] = throttle_clipped
                 logging.warning(
-                    f"Step {self.total_env_steps} Throttle out of bounds: {actions[:, 3].tolist()}"
+                    f"Step {self.total_env_steps} Throttle clipped: original={throttle.tolist()}, "
+                    f"clipped={throttle_clipped.tolist()}"
                 )
 
             actions_for_env = actions[:, np.newaxis, :]
@@ -85,28 +92,38 @@ class SingleJSBSimRunner:
             rewards = self._fix_rew_done_shape(rewards)
             dones = self._fix_rew_done_shape(dones)
 
+            # 调试日志
+            if self.step_count % 100 == 0:
+                logging.info(f"Step {self.total_env_steps}: "
+                             f"Rewards={rewards[0, 0]:.4f}, Dones={dones[0, 0]}, Infos={infos}")
+
             # Store in buffer
             self.buffer.store(obs, actions, rewards, next_obs, dones)
             self.total_rewards += rewards.sum()
 
-            # Simple log
+            # Detailed log
             if self.step_count % 500 == 0:
                 i = 0
                 logging.info(
                     f"Step {self.total_env_steps} (Env 0): "
-                    f"Reward={rewards[i, 0]:.4f}, Throttle={actions[i, 3]:.4f}"
+                    f"Reward={rewards[i, 0]:.4f}, Throttle={actions[i, 3]:.4f}, "
+                    f"Elevator={actions[i, 1]:.4f}"
                 )
 
             # Handle done signals
             if np.any(dones):
                 termination_reasons = []
-                for i, done in enumerate(dones):
+                for i, done in enumerate(dones.flatten()):  # 确保正确处理 dones 形状
                     if done:
                         info = infos[i]
                         reason = info.get('termination_reason', 'Unknown')
                         termination_reasons.append(f"Env {i}: {reason}")
-                        if 'heading_turn_counts' in info:
-                            self.heading_turn_counts.append(info['heading_turn_counts'])
+                        # 改进 heading_turn_counts 累积逻辑
+                        heading_turns = info.get('heading_turn_counts', 0)  # 如果没有，默认为 0
+                        self.heading_turn_counts.append(heading_turns)
+                        logging.debug(f"Env {i} at Step {self.total_env_steps}: heading_turn_counts={heading_turns}")
+
+                # 重置环境
                 next_obs = self.envs.reset()
                 next_obs = self._fix_obs_shape(next_obs)
                 next_obs = np.array(next_obs, dtype=np.float32)
@@ -155,12 +172,12 @@ class SingleJSBSimRunner:
                 avg_reward = np.mean(self.episode_rewards[-10:]) if self.episode_rewards else 0
                 avg_turns = np.mean(self.heading_turn_counts[-10:]) if self.heading_turn_counts else 0
                 logging.info(
-                    f"Episode {self.episode_count}/{self.max_episodes}, "
-                    f"Steps {self.total_env_steps}, FPS {fps}, "
-                    f"Avg reward={avg_reward:.4f}, Avg heading turns={avg_turns:.2f}"
+                    f"Scenario 1/heading Algo sac Exp v0131 updates {self.episode_count}/{self.max_episodes} episodes, "
+                    f"total num timesteps {self.total_env_steps}/{int(self.num_env_steps)}, FPS {fps}, "
+                    f"average episode rewards is {avg_reward:.4f}, "
+                    f"average heading turns is {avg_turns:.2f}"
                 )
 
-            # Eval and Save (unchanged)
             if self.use_eval and self.total_env_steps > 0 and (self.total_env_steps % self.eval_interval == 0):
                 self.eval()
             if self.total_env_steps > 0 and (self.total_env_steps % self.save_interval == 0):

@@ -21,7 +21,7 @@ class SACPolicy:
 
         # Alpha
         self.log_alpha = torch.tensor([float(args.init_alpha)], device=self.device).log().requires_grad_()
-        self.target_entropy = -act_dim
+        self.target_entropy = -2
         logging.info(f"SACPolicy 初始化: target_entropy={self.target_entropy}, init_alpha={args.init_alpha}")
 
         # 优化器
@@ -31,11 +31,9 @@ class SACPolicy:
 
     @property
     def alpha(self):
-        """Return the exponential of log_alpha as the SAC alpha parameter."""
         return self.log_alpha.exp()
 
     def prep_training(self):
-        """Set models to training mode."""
         self.actor.train()
         self.critic.train()
         self.critic_target.train()
@@ -43,10 +41,12 @@ class SACPolicy:
     def get_action(self, obs, deterministic=False):
         obs = check(obs).to(self.device)
         action, log_pi = self.actor.get_action(obs, deterministic=deterministic)
+        # 额外裁剪，确保动作范围
+        action = torch.clamp(action, torch.tensor([-1.0, -1.0, -1.0, 0.4], device=self.device),
+                            torch.tensor([1.0, 1.0, 1.0, 0.9], device=self.device))
         return action, log_pi
 
     def soft_update(self):
-        """Soft update the target critic network."""
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
 

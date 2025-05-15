@@ -219,6 +219,16 @@ import numpy as np
 from gymnasium import spaces
 from .distributions import BetaShootBernoulli, Categorical, DiagGaussian, Bernoulli
 from .mlp import MLPLayer
+import torch.nn.functional as F
+
+import logging
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from gymnasium import spaces
+from .distributions import BetaShootBernoulli, Categorical, DiagGaussian, Bernoulli
+from .mlp import MLPLayer
 
 class ACTLayer(nn.Module):
     def __init__(self, act_space, input_dim, hidden_size, activation_id, gain, device='cpu'):
@@ -272,7 +282,7 @@ class ACTLayer(nn.Module):
             action_outs.append(BetaShootBernoulli(input_dim, self._control_shoot_dim, gain))
             self.action_outs = nn.ModuleList(action_outs)
         else:
-            raise NotImplementedError(f"不支持的动作空间类型: {type(act_space)}!")
+            raise NotImplementedError(f"Unsupported action space type: {type(act_space)}!")
 
     def forward(self, x, deterministic=False, **kwargs):
         if self._mlp_actlayer:
@@ -289,6 +299,7 @@ class ACTLayer(nn.Module):
                 action_log_probs.append(action_log_prob)
             actions = torch.cat(actions, dim=-1)
             action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
+            logging.debug(f"Multidiscrete action log_probs shape: {action_log_probs.shape}")
 
         elif self._shoot_action:
             actions = []
@@ -304,45 +315,59 @@ class ACTLayer(nn.Module):
             actions.append(shoot_action)
             actions = torch.cat(actions, dim=-1)
             action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
+            logging.debug(f"Shoot action log_probs shape: {action_log_probs.shape}")
+
+        elif self._continuous_action:
+            action_dist = self.action_out(x)
+            z = action_dist.rsample()
+            actions = torch.tanh(z)
+            # 修改 log_prob 校正公式，增加数值稳定性
+            log_probs = action_dist.log_probs(z)
+            # 添加小的 epsilon 避免数值溢出
+            correction = 2 * (np.log(2) - z - F.softplus(-2 * z + 1e-6)).sum(dim=-1, keepdim=True)
+            action_log_probs = log_probs - correction
+            # 限制 log_prob 范围
+            action_log_probs = torch.clamp(action_log_probs, -10.0, 10.0)
+            logging.debug(f"Continuous action log_probs shape: {action_log_probs.shape}, values: {action_log_probs.mean().item()}")
+            self._global_step += 1
+            if self._global_step % 20000 == 0:
+                mean = action_dist.loc.cpu().detach().numpy()
+                std = action_dist.scale.cpu().detach().numpy()
+                actions_np = actions.cpu().detach().numpy()
+                sample_action = actions_np[0].tolist()
+                logging.info(
+                    f"ACTLayer Step {self._global_step}: "
+                    f"mean={mean[0].tolist()}, std={std[0].tolist()}, "
+                    f"sample_action={sample_action}"
+                )
+
+            # Clip actions to ensure they are within bounds
+            actions = torch.clamp(actions, self.action_low, self.action_high)
+
+            # Boundary check for logging
+            actions_np = actions.cpu().detach().numpy()
+            control_bounds_violated = np.any(
+                (actions_np[:, :3] < -1.0) | (actions_np[:, :3] > 1.0), axis=1
+            )
+            thrust_bounds_violated = (
+                (actions_np[:, 3] < 0.4) | (actions_np[:, 3] > 0.9)
+            )
+            actions_out_of_bounds = np.any(control_bounds_violated | thrust_bounds_violated)
+
+            if actions_out_of_bounds:
+                logging.warning(
+                    f"Step {self._global_step} Actions out of bounds: "
+                    f"actions={actions_np.tolist()}, "
+                    f"control_violated={control_bounds_violated.tolist()}, "
+                    f"thrust_violated={thrust_bounds_violated.tolist()}"
+                )
 
         else:
+            # Default case for Discrete action space
             action_dist = self.action_out(x)
             actions = action_dist.mode() if deterministic else action_dist.sample()
             action_log_probs = action_dist.log_probs(actions)
-
-            if self._continuous_action:
-                self._global_step += 1
-                if self._global_step % 20000 == 0:
-                    mean = action_dist.loc.cpu().detach().numpy()
-                    std = action_dist.scale.cpu().detach().numpy()
-                    actions_np = actions.cpu().detach().numpy()
-                    sample_action = actions_np[0].tolist()
-                    logging.info(
-                        f"ACTLayer Step {self._global_step}: "
-                        f"mean={mean[0].tolist()}, std={std[0].tolist()}, "
-                        f"sample_action={sample_action}"
-                    )
-
-                # Clip actions to ensure they are within bounds
-                actions = torch.clamp(actions, self.action_low, self.action_high)
-
-                # Boundary check for logging
-                actions_np = actions.cpu().detach().numpy()  # Add detach()
-                control_bounds_violated = np.any(
-                    (actions_np[:, :3] < -1.0) | (actions_np[:, :3] > 1.0), axis=1
-                )  # Shape: [8,]
-                thrust_bounds_violated = (
-                    (actions_np[:, 3] < 0.4) | (actions_np[:, 3] > 0.9)
-                )  # Shape: [8,]
-                actions_out_of_bounds = np.any(control_bounds_violated | thrust_bounds_violated)
-
-                if actions_out_of_bounds:
-                    logging.warning(
-                        f"Step {self._global_step} Actions out of bounds: "
-                        f"actions={actions_np.tolist()}, "
-                        f"control_violated={control_bounds_violated.tolist()}, "
-                        f"thrust_violated={thrust_bounds_violated.tolist()}"
-                    )
+            logging.debug(f"Discrete action log_probs shape: {action_log_probs.shape}")
 
         return actions, action_log_probs
 
