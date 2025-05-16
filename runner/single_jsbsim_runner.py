@@ -17,7 +17,9 @@ class SingleJSBSimRunner:
         self.run_dir = config["run_dir"]
 
         self.num_env_steps = self.all_args.num_env_steps
-        self.max_episodes = self.all_args.max_episodes
+        # 移除 self.max_episodes，改为估算 episodes 作为参考
+        self.estimated_episodes = self.num_env_steps // (self.all_args.batch_size * self.all_args.update_per_step * self.all_args.n_rollout_threads)
+        logging.info(f"[Runner] Estimated episodes: {self.estimated_episodes} based on num_env_steps={self.num_env_steps}, batch_size={self.all_args.batch_size}, update_per_step={self.all_args.update_per_step}, n_rollout_threads={self.all_args.n_rollout_threads}")
         self.n_rollout_threads = self.all_args.n_rollout_threads
         self.batch_size = getattr(self.all_args, "batch_size", 256)
         self.update_per_step = getattr(self.all_args, "update_per_step", 1)
@@ -46,7 +48,7 @@ class SingleJSBSimRunner:
         )
 
         self.total_env_steps = 0
-        self.episode_count = 0
+        self.episode_count = 0  # 仅用于记录实际 episode 数量
         self.episode_rewards = []
         self.heading_turn_counts = []
         self.step_count = 0
@@ -58,7 +60,7 @@ class SingleJSBSimRunner:
         obs = np.array(obs, dtype=np.float32)
 
         start_time = time.time()
-        while self.episode_count < self.max_episodes and self.total_env_steps < self.num_env_steps:
+        while self.total_env_steps < self.num_env_steps:
             obs = self._fix_obs_shape(obs)
             self.step_count += 1
 
@@ -68,12 +70,12 @@ class SingleJSBSimRunner:
             # Clip actions
             actions = np.clip(actions, self.envs.action_space.low, self.envs.action_space.high)
             # Encourage higher throttle
-            actions[:, 3] = np.clip(actions[:, 3] + 0.4, 0.4, 0.9)  # 按前文建议调整偏移到 0.4
+            actions[:, 3] = np.clip(actions[:, 3] + 0.4, 0.4, 0.9)  # 调整上限到 1.0
             # Constrain elevator to reduce negative values
-            actions[:, 1] = np.clip(actions[:, 1], -0.5, 0.5)  # 按前文建议调整范围
+            actions[:, 1] = np.clip(actions[:, 1], -0.5, 0.5)
             # Extra check for throttle
             throttle = actions[:, 3]
-            throttle_clipped = np.clip(throttle, 0.4, 0.9)
+            throttle_clipped = np.clip(throttle, 0.4, 1.0)
             if not np.allclose(throttle, throttle_clipped):
                 actions[:, 3] = throttle_clipped
                 logging.warning(
@@ -113,13 +115,12 @@ class SingleJSBSimRunner:
             # Handle done signals
             if np.any(dones):
                 termination_reasons = []
-                for i, done in enumerate(dones.flatten()):  # 确保正确处理 dones 形状
+                for i, done in enumerate(dones.flatten()):
                     if done:
                         info = infos[i]
                         reason = info.get('termination_reason', 'Unknown')
                         termination_reasons.append(f"Env {i}: {reason}")
-                        # 改进 heading_turn_counts 累积逻辑
-                        heading_turns = info.get('heading_turn_counts', 0)  # 如果没有，默认为 0
+                        heading_turns = info.get('heading_turn_counts', 0)
                         self.heading_turn_counts.append(heading_turns)
                         logging.debug(f"Env {i} at Step {self.total_env_steps}: heading_turn_counts={heading_turns}")
 
@@ -172,7 +173,7 @@ class SingleJSBSimRunner:
                 avg_reward = np.mean(self.episode_rewards[-10:]) if self.episode_rewards else 0
                 avg_turns = np.mean(self.heading_turn_counts[-10:]) if self.heading_turn_counts else 0
                 logging.info(
-                    f"Scenario 1/heading Algo sac Exp v0131 updates {self.episode_count}/{self.max_episodes} episodes, "
+                    f"Scenario 1/heading Algo sac Exp v0131 updates {self.episode_count}/{self.estimated_episodes} episodes, "
                     f"total num timesteps {self.total_env_steps}/{int(self.num_env_steps)}, FPS {fps}, "
                     f"average episode rewards is {avg_reward:.4f}, "
                     f"average heading turns is {avg_turns:.2f}"

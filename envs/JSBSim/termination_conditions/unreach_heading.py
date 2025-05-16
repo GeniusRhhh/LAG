@@ -12,8 +12,9 @@ class UnreachHeading(BaseTerminationCondition):
         self.max_altitude_increment = aircraft_config['max_altitude_increment']
         self.max_velocities_u_increment = aircraft_config['max_velocities_u_increment']
         self.check_interval = aircraft_config['check_interval']
-        self.increment_size = [0.2, 0.4, 0.6, 0.8, 1.0] + [1.0] * 10
-        self.heading_threshold = 15.0  # 放宽到 15°
+        self.increment_size = [0.5] * 20  # 固定增量 0.5
+        self.heading_threshold = 30.0  # 放宽到 30°
+        self.consecutive_steps = 50  # 连续 50 步超过阈值才终止
 
     def get_termination(self, task, env, agent_id, info={}):
         done = False
@@ -23,17 +24,19 @@ class UnreachHeading(BaseTerminationCondition):
         if env.agents[agent_id].get_property_value(c.simulation_sim_time_sec) >= check_time:
             delta_heading = math.fabs(env.agents[agent_id].get_property_value(c.delta_heading))
             if delta_heading > self.heading_threshold:
-                done = True
+                if 'consecutive_unreach' not in info:
+                    info['consecutive_unreach'] = 0
+                info['consecutive_unreach'] += 1
+                if info['consecutive_unreach'] >= self.consecutive_steps:
+                    done = True
             else:
-                delta = self.increment_size[env.heading_turn_counts]
-                delta_heading = env.np_random.uniform(-delta, delta) * self.max_heading_increment
-                delta_altitude = env.np_random.uniform(-delta, delta) * self.max_altitude_increment
-                delta_velocities_u = env.np_random.uniform(-delta, delta) * self.max_velocities_u_increment
-                new_heading = env.agents[agent_id].get_property_value(c.target_heading_deg) + delta_heading
+                info['consecutive_unreach'] = 0
+                delta = self.increment_size[env.heading_turn_counts % len(self.increment_size)]
+                new_heading = env.agents[agent_id].get_property_value(c.target_heading_deg) + delta * self.max_heading_increment
                 new_heading = (new_heading + 360) % 360
-                new_altitude = env.agents[agent_id].get_property_value(c.target_altitude_ft) + delta_altitude
+                new_altitude = env.agents[agent_id].get_property_value(c.target_altitude_ft) + delta * self.max_altitude_increment
                 new_altitude = max(new_altitude, 15000)
-                new_velocities_u = env.agents[agent_id].get_property_value(c.target_velocities_u_mps) + delta_velocities_u
+                new_velocities_u = env.agents[agent_id].get_property_value(c.target_velocities_u_mps) + delta * self.max_velocities_u_increment
                 new_velocities_u = max(new_velocities_u, 120.)
                 env.agents[agent_id].set_property_value(c.target_heading_deg, new_heading)
                 env.agents[agent_id].set_property_value(c.target_altitude_ft, new_altitude)

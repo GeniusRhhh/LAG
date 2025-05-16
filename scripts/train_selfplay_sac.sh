@@ -24,16 +24,15 @@ CUDA_VISIBLE_DEVICES=0 python train/train_jsbsim_sac.py \
     --cuda \
     --log-interval 1000 \
     --save-interval 10000 \
-    --num-env-steps 1e8 \
+    --num-env-steps 1e7 \
     --actor-lr 3e-4 \
-    --critic-lr 3e-4 \
+    --critic-lr 1e-4 \
     --alpha-lr 3e-4 \
     --batch-size 512 \
     --update-per-step 1 \
     --hidden-size "128 128" --act-hidden-size "128 128" \
-    --buffer-size 40000 \
-    --target_entropy -2 \
+    --buffer-size 100000 \
+    --target_entropy -1.0 \
     --init-alpha 1.0 \
-    --max-episodes 2000 \
     --normalize-reward
 

@@ -6,7 +6,7 @@ class AltitudeReward(BaseRewardFunction):
     def __init__(self, config):
         super().__init__(config)
         self.safe_altitude = getattr(self.config, f'{self.__class__.__name__}_safe_altitude', 5.0)
-        self.danger_altitude = getattr(self.config, f'{self.__class__.__name__}_danger_altitude', 1.5)  # 调整为 1.5 km
+        self.danger_altitude = getattr(self.config, f'{self.__class__.__name__}_danger_altitude', 1.5)
         self.Kv = getattr(self.config, f'{self.__class__.__name__}_Kv', 0.2)
         self.target_altitude = getattr(self.config, 'target_altitude', 10.0)
         self.reward_item_names = [self.__class__.__name__ + item for item in ['', '_Pv', '_PH', '_Ptarget']]
@@ -16,13 +16,13 @@ class AltitudeReward(BaseRewardFunction):
         ego_vz = env.agents[agent_id].get_velocity()[-1] / 340  # normalized vz
         Pv = 0.0
         if ego_z <= self.safe_altitude:
-            Pv = -0.005 * np.clip(ego_vz / self.Kv * (self.safe_altitude - ego_z) / self.safe_altitude, 0.0, 1.0)  # 进一步减弱
+            Pv = -0.01 * np.clip(ego_vz / self.Kv * (self.safe_altitude - ego_z) / self.safe_altitude, 0.0, 1.0)  # 加强惩罚
         PH = 0.0
         if ego_z <= self.danger_altitude:
-            PH = -0.3 * (1.0 - np.clip(ego_z / self.danger_altitude, 0.0, 1.0))  # 减弱惩罚
-        Ptarget = np.exp(-((ego_z - self.target_altitude) ** 2) / 5.0)  # 方差放宽到 5.0
-        Pvz = -0.01 * abs(ego_vz) if abs(ego_vz) > 0.5 else 0.0  # 进一步减弱
-        new_reward = Pv + PH + Ptarget * 5.0 + Pvz
+            PH = -0.5 * (1.0 - np.clip(ego_z / self.danger_altitude, 0.0, 1.0))  # 加强危险惩罚
+        Ptarget = np.exp(-((ego_z - self.target_altitude) ** 2) / 5.0)  # 权重降至 1.0
+        Pvz = -0.05 * abs(ego_vz) if abs(ego_vz) > 0.5 else 0.0  # 加强垂直速度惩罚
+        new_reward = Pv + PH + Ptarget + Pvz  # 移除 * 5.0
 
         if task.step_count % 500 == 0:
             logging.info(
