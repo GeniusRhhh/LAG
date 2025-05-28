@@ -547,7 +547,6 @@
 
 
 import logging
-
 import torch
 import numpy as np
 from gymnasium import spaces
@@ -556,7 +555,7 @@ from .task_base import BaseTask
 from ..core.simulatior import AircraftSimulator
 from ..core.catalog import Catalog as c
 from ..termination_conditions import ExtremeState, LowAltitude, Overload, Timeout, SafeReturn
-from ..reward_functions import AltitudeReward, PostureReward, EventDrivenReward,RelativeAltitudeReward
+from ..reward_functions import AltitudeReward, PostureReward, EventDrivenReward, RelativeAltitudeReward
 from ..utils.utils import get_AO_TA_R, get2d_AO_TA_R, in_range_rad, LLA2NEU, get_root_dir
 from ..model.baseline_actor import BaselineActor
 
@@ -569,15 +568,15 @@ class SingleCombatTask(BaseTask):
     def __init__(self, config):
         super().__init__(config)
         logging.info(f"Config loaded: {self.config}")  # 打印完整的 config
+        self.step_count = 0  # 添加 step_count 属性
 
         self.use_baseline = getattr(self.config, 'use_baseline', False)
-        logging.info(f"Using baseline: {self.use_baseline}")  # Debug log
+        print(f"Using baseline: {self.use_baseline}")  # Debug log
 
         self.use_artillery = getattr(self.config, 'use_artillery', False)
         if self.use_baseline:
             self.baseline_agent = self.load_agent(self.config.baseline_type)
         self.agent_ids = []  # 保存实际 Agent ID
-
         self.reward_functions = [
             AltitudeReward(self.config),
             PostureReward(self.config),
@@ -648,13 +647,24 @@ class SingleCombatTask(BaseTask):
         high = np.array([1, 1, 1, 0.9], dtype=np.float32)
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
+    # def normalize_action(self, env, agent_id, action):
+    #     """
+    #     规范化动作，确保动作在连续动作空间范围内。
+    #     """
+    #     if self.use_baseline and agent_id in env.enm_ids:
+    #         action = self.baseline_agent.get_action(env.agents[agent_id])
+    #         return action
+    #     low = self.action_space.low
+    #     high = self.action_space.high
+    #     return np.clip(action, low, high)
     def normalize_action(self, env, agent_id, action):
         """
         规范化动作，确保动作在连续动作空间范围内。
         """
         if self.use_baseline and agent_id in env.enm_ids:
-            action = self.baseline_agent.get_action(env.agents[agent_id])
-            return action
+            # 假设 baseline_agent.get_action 返回 (4,)，需要广播到 (n_rollout_threads, 4)
+            baseline_action = self.baseline_agent.get_action(env.agents[agent_id])
+            action = np.tile(baseline_action, (env.n_rollout_threads, 1))
         low = self.action_space.low
         high = self.action_space.high
         return np.clip(action, low, high)
@@ -699,16 +709,19 @@ class SingleCombatTask(BaseTask):
         任务特定的重置方法，包括奖励函数的重置。
         """
         self._agent_die_flag = {}
+        self.step_count = 0  # 重置 step_count
         if self.use_baseline:
             self.baseline_agent.reset()
-        self.agent_ids = list(env.agents.keys())  # 获取环境中的 Agent ID (如 ['agent_0100', 'agent_0200'])
+        self.agent_ids = list(env.agents.keys())  # 获取环境中的 Agent ID (如 ['A0100', 'B0100'])
         return super().reset(env)
 
     def step(self, env):
         """
         环境的单步执行方法，处理导弹避免和其他战斗动态。
+        每次调用时递增 step_count。
         """
-        logging.debug(f"step: entering step method, env={env.__dict__}")
+        self.step_count += 1  # 递增 step_count
+        logging.debug(f"step: entering step method, env={env.__dict__}, step_count={self.step_count}")
 
         # 处理 use_artillery 逻辑
         def _orientation_fn(AO):
@@ -729,22 +742,34 @@ class SingleCombatTask(BaseTask):
         if self.use_artillery:
             for agent_id in env.agents.keys():
                 ego_feature = np.hstack([env.agents[agent_id].get_position(),
-                                         env.agents[agent_id].get_velocity()])
+                                        env.agents[agent_id].get_velocity()])
                 for enm in env.agents[agent_id].enemies:
                     if enm.is_alive:
                         enm_feature = np.hstack([enm.get_position(),
-                                                 enm.get_velocity()])
+                                                enm.get_velocity()])
                         AO, _, R = get_AO_TA_R(ego_feature, enm_feature)
                         enm.bloods -= _orientation_fn(AO) * _distance_fn(R / 1000)
 
-        # 调用父类 step 方法
-        result = super().step(env)
-        if result is None:
-            logging.error(f"step: super().step(env) returned None, env={env.__dict__}")
-            raise ValueError("BaseTask.step returned None, expected (obs, rewards, dones, infos)")
+        # 为 baseline 代理生成动作（如果使用）
+        if self.use_baseline:
+            for agent_id in env.enm_ids:  # 例如 'B0100'
+                baseline_action = self.baseline_agent.get_action(env.agents[agent_id])
+                env.agents[agent_id].set_property_values(self.action_var, baseline_action)
 
-        obs, rewards, dones, infos = result
-        # logging.info(f"step: obs_shape={obs.shape}, rewards_shape={rewards.shape}, dones_shape={dones.shape}")
+        # 获取当前观察、奖励和终止条件
+        obs = {}
+        rewards = {}
+        dones = {}
+        infos = {"task_step": self.step_count}
+
+        for agent_id in env.agents.keys():
+            obs[agent_id] = self.get_obs(env, agent_id)
+            reward, info = self.get_reward(env, agent_id, infos)
+            rewards[agent_id] = [reward]
+            done, info = self.get_termination(env, agent_id, info)
+            dones[agent_id] = [done]
+            infos.update(info)
+
         return obs, rewards, dones, infos
 
     def get_reward(self, env, agent_id, info=None):
@@ -829,6 +854,7 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
         return super().reset(env)
 
+# 其余代理类 (StraightFlyAgent, BaselineAgent, PursueAgent, ManeuverAgent, DodgeMissileAgent) 保持不变
 class StraightFlyAgent:
     """
     直线飞行代理类，简单控制飞行器直线飞行。
@@ -859,6 +885,7 @@ class BaselineAgent:
     """
     def __init__(self):
         self.model_path = get_root_dir() + '/model/baseline_model.pt'
+        # self.model_path = get_root_dir() + '/model/sac_4480000.pt'
         self.actor = BaselineActor()
         self.actor.load_state_dict(
             torch.load(self.model_path, map_location=torch.device('cpu'), weights_only=True)

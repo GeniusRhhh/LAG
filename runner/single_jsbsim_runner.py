@@ -70,7 +70,7 @@ class SingleJSBSimRunner:
             # Clip actions
             actions = np.clip(actions, self.envs.action_space.low, self.envs.action_space.high)
             # Encourage higher throttle
-            actions[:, 3] = np.clip(actions[:, 3] + 0.4, 0.4, 0.9)  # 调整上限到 1.0
+            actions[:, 3] = np.clip(actions[:, 3] + 0.4, 0.4, 0.9)
             # Constrain elevator to reduce negative values
             actions[:, 1] = np.clip(actions[:, 1], -0.5, 0.5)
             # Extra check for throttle

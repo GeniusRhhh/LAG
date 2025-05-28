@@ -1,8 +1,10 @@
+from typing import Tuple
+import logging
 import numpy as np  # 导入 NumPy 库，用于处理数值数据和数组
 from .env_base import BaseEnv  # 从 env_base 模块导入 BaseEnv 类，作为环境基类
 from ..tasks import SingleCombatTask, SingleCombatDodgeMissileTask, HierarchicalSingleCombatDodgeMissileTask, \
     HierarchicalSingleCombatShootTask, SingleCombatShootMissileTask, HierarchicalSingleCombatTask  # 导入不同的任务类
-
+import time
 class SingleCombatEnv(BaseEnv):
     """
     SingleCombatEnv 是一个一对一的竞技环境。
@@ -56,3 +58,88 @@ class SingleCombatEnv(BaseEnv):
         for idx, sim in enumerate(self.agents.values()):  # 遍历所有代理
             sim.reload(init_states[idx])  # 为每个代理加载对应的初始状态
         self._tempsims.clear()  # 清空临时模拟器数据
+
+    # def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    #     self.current_step += 1
+    #     info = {"current_step": self.current_step}
+    #     action = self._unpack(action)
+    #     for agent_id in self.agents.keys():
+    #         a_action = self.task.normalize_action(self, agent_id, action[agent_id])
+    #         self.agents[agent_id].set_property_values(self.task.action_var, a_action)
+    #     for _ in range(self.agent_interaction_steps):
+    #         for sim in self._jsbsims.values():
+    #             sim.run()
+    #         for sim in self._tempsims.values():
+    #             sim.run()
+    #     self.task.step(self)
+    #
+    #     obs = self.get_obs()
+    #     dones = {}
+    #     for agent_id in self.agents.keys():
+    #         termination_result = self.task.get_termination(self, agent_id, info)
+    #         if len(termination_result) == 2:
+    #             done, info = termination_result
+    #         elif len(termination_result) >= 2:
+    #             done, info = termination_result[0], {**info, **termination_result[1]}
+    #         else:
+    #             raise ValueError(f"get_termination returned {len(termination_result)} values, expected at least 2")
+    #         dones[agent_id] = [done]
+    #
+    #     rewards = {}
+    #     for agent_id in self.agents.keys():
+    #         reward, info = self.task.get_reward(self, agent_id, info)
+    #         rewards[agent_id] = [reward]
+    #
+    #     return self._pack(obs), self._pack(rewards), self._pack(dones), info
+
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+        logging.debug("Entering SingleCombatEnv.step...")
+        start_time = time.time()
+        self.current_step += 1
+        info = {"current_step": self.current_step}
+        action = self._unpack(action)
+        logging.debug(f"Unpacked action in {time.time() - start_time:.2f}s: {action}")
+
+        start_action = time.time()
+        for agent_id in self.agents.keys():
+            a_action = self.task.normalize_action(self, agent_id, action[agent_id])
+            logging.debug(f"Normalized action for {agent_id}: shape={a_action.shape}")
+            for i in range(self.n_rollout_threads):
+                logging.debug(f"Setting action for {agent_id}, thread {i}: {a_action[i]}")
+                self.agents[agent_id].set_property_values(self.task.action_var, a_action[i])
+        logging.debug(f"Actions set in {time.time() - start_action:.2f}s")
+
+        start_sim = time.time()
+        for _ in range(self.agent_interaction_steps):
+            for sim in self._jsbsims.values():
+                sim.run()
+            for sim in self._tempsims.values():
+                sim.run()
+        logging.debug(f"Simulators finished running in {time.time() - start_sim:.2f}s")
+
+        start_task = time.time()
+        self.task.step(self)
+        logging.debug(f"Task stepped in {time.time() - start_task:.2f}s")
+
+        obs = self.get_obs()
+        logging.debug(f"Observations obtained: {obs}")
+        dones = {}
+        for agent_id in self.agents.keys():
+            termination_result = self.task.get_termination(self, agent_id, info)
+            if len(termination_result) == 2:
+                done, info = termination_result
+            elif len(termination_result) >= 2:
+                done, info = termination_result[0], {**info, **termination_result[1]}
+            else:
+                raise ValueError(f"get_termination returned {len(termination_result)} values, expected at least 2")
+            dones[agent_id] = [done]
+        logging.debug(f"Dones: {dones}")
+
+        rewards = {}
+        for agent_id in self.agents.keys():
+            reward, info = self.task.get_reward(self, agent_id, info)
+            rewards[agent_id] = [reward]
+        logging.debug(f"Rewards: {rewards}")
+
+        logging.debug(f"Exiting SingleCombatEnv.step in {time.time() - start_time:.2f}s")
+        return self._pack(obs), self._pack(rewards), self._pack(dones), info

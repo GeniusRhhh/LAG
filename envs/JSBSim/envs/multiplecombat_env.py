@@ -49,36 +49,39 @@ class MultipleCombatEnv(BaseEnv):
         self._tempsims.clear()
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
-        """Run one timestep of the environment's dynamics. When end of
-        episode is reached, you are responsible for calling `reset()`
-        to reset this environment's observation. Accepts an action and
-        returns a tuple (observation, reward_visualize, done, info).
+        """Run one timestep of the environment's dynamics.
 
         Args:
-            action (dict): the agents' actions, each key corresponds to an agent_id
+            action (np.ndarray): Shape (n_rollout_threads, num_agents, action_dim)
 
         Returns:
-            (tuple):
-                obs: agents' observation of the current environment
-                share_obs: agents' share observation of the current environment
-                rewards: amount of rewards returned after previous actions
-                dones: whether the episode has ended, in which case further step() calls are undefined
-                info: auxiliary information
+            obs: agents' observation
+            share_obs: agents' share observation
+            rewards: amount of rewards
+            dones: whether the episode has ended
+            info: auxiliary information
         """
         self.current_step += 1
         info = {"current_step": self.current_step}
 
+        # 适配向量环境，action 形状为 (n_rollout_threads, num_agents, action_dim)
+        # 取第一行（单一线程）
+        actions_array = np.zeros((len(self.agents), 4))  # 构造占位符动作，形状 (num_agents, 4)
+        agent_ids = list(self.agents.keys())
+        action_dict = {agent_id: actions_array[i] for i, agent_id in enumerate(agent_ids)}
+
         # apply actions
-        action = self._unpack(action)
         for agent_id in self.agents.keys():
-            a_action = self.task.normalize_action(self, agent_id, action[agent_id])
+            a_action = self.task.normalize_action(self, agent_id, action_dict[agent_id])
             self.agents[agent_id].set_property_values(self.task.action_var, a_action)
+
         # run simulation
         for _ in range(self.agent_interaction_steps):
             for sim in self._jsbsims.values():
                 sim.run()
             for sim in self._tempsims.values():
                 sim.run()
+
         self.task.step(self)
         obs = self.get_obs()
         share_obs = self.get_state()
@@ -99,4 +102,10 @@ class MultipleCombatEnv(BaseEnv):
             done, info = self.task.get_termination(self, agent_id, info)
             dones[agent_id] = [done]
 
-        return self._pack(obs), self._pack(share_obs), self._pack(rewards), self._pack(dones), info
+        return (
+            np.stack([obs[agent_id] for agent_id in self.agents.keys()], axis=0),
+            np.stack([share_obs[agent_id] for agent_id in self.agents.keys()], axis=0),
+            np.stack([rewards[agent_id] for agent_id in self.agents.keys()], axis=0),
+            np.stack([dones[agent_id] for agent_id in self.agents.keys()], axis=0),
+            info
+        )

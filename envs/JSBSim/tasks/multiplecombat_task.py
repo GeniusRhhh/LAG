@@ -130,9 +130,9 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
     
     def __init__(self, config: str):
         super().__init__(config)
-        self.lowlevel_policy = BaselineActor()
-        self.lowlevel_policy.load_state_dict(torch.load(get_root_dir() + '/model/baseline_model.pt', map_location=torch.device('cpu')))
-        self.lowlevel_policy.eval()
+        # self.lowlevel_policy = BaselineActor()
+        # self.lowlevel_policy.load_state_dict(torch.load(get_root_dir() + '/model/baseline_model.pt', map_location=torch.device('cpu')))
+        # self.lowlevel_policy.eval()
         self.norm_delta_altitude = np.array([0.1, 0, -0.1])
         self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
         self.norm_delta_velocity = np.array([0.05, 0, -0.05])
@@ -172,7 +172,6 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         return super().reset(env)
 
 
-
 class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def __init__(self, config: str):
         super().__init__(config)
@@ -185,90 +184,108 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             AltitudeReward(self.config),
             EventDrivenReward(self.config)
         ]
-    
+
+        # 初始化规则模板
+        self.current_stage = "接敌引导"  # 初始阶段
+        self.time = 0  # 战斗时间（秒）
+        self.rules = {  # 简单规则库
+            "接敌引导": {"distance": ">100km", "action": {"A0100": "adjust_heading", "A0200": "follow"}},
+            "目标搜索": {"distance": ">100km", "action": {"A0100": "radar_on", "A0200": "radar_on"}},
+            "发射导弹": {"distance": "30-50km", "action": {"A0100": "fire_missile", "A0200": "follow"}},
+            "导弹效果评估": {"distance": "any", "action": {"A0100": "assess_hit", "A0200": "assess_hit"}}
+        }
+
     def load_observation_space(self):
-        self.obs_length = 9 + self.num_agents  * 6
+        self.obs_length = 9 + self.num_agents * 6
         self.observation_space = spaces.Box(low=-10, high=10., shape=(self.obs_length,))
         self.share_observation_space = spaces.Box(low=-10, high=10., shape=(self.num_agents * self.obs_length,))
-    
+
     def load_action_space(self):
-        self.action_space = spaces.MultiDiscrete([3, 5, 3, 2])
+        # 移除 RL 动作空间，改用规则控制
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
 
+    def get_enemy_distance(self, env, agent_id):
+        obs = self.get_obs(env, agent_id)
+        offset = 8 + 6  # 第一个敌机的距离（跳过己方伙伴）
+        distance = obs[offset + 5] * 10000  # 转换为米
+        return distance
 
-    def get_obs(self, env, agent_id):
-        norm_obs = np.zeros(self.obs_length)
-        # (1) ego info normalization
-        ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
-        ego_cur_ned = LLA2NEU(*ego_state[:3], env.center_lon, env.center_lat, env.center_alt)
-        ego_feature = np.array([*ego_cur_ned, *(ego_state[6:9])])
-        norm_obs[0] = ego_state[2] / 5000            # 0. ego altitude   (unit: 5km)
-        norm_obs[1] = np.sin(ego_state[3])           # 1. ego_roll_sin
-        norm_obs[2] = np.cos(ego_state[3])           # 2. ego_roll_cos
-        norm_obs[3] = np.sin(ego_state[4])           # 3. ego_pitch_sin
-        norm_obs[4] = np.cos(ego_state[4])           # 4. ego_pitch_cos
-        norm_obs[5] = ego_state[9] / 340             # 5. ego v_body_x   (unit: mh)
-        norm_obs[6] = ego_state[10] / 340            # 6. ego v_body_y   (unit: mh)
-        norm_obs[7] = ego_state[11] / 340            # 7. ego v_body_z   (unit: mh)
-        norm_obs[8] = ego_state[12] / 340            # 8. ego vc   (unit: mh)(unit: 5G)
-        # (2) relative inof w.r.t partner+enemies state
-        offset = 8
-        for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
-            state = np.array(sim.get_property_values(self.state_var))
-            cur_ned = LLA2NEU(*state[:3], env.center_lon, env.center_lat, env.center_alt)
-            feature = np.array([*cur_ned, *(state[6:9])])
-            AO, TA, R, side_flag = get_AO_TA_R(ego_feature, feature, return_side=True)
-            norm_obs[offset+1] = (state[9] - ego_state[9]) / 340
-            norm_obs[offset+2] = (state[2] - ego_state[2]) / 1000
-            norm_obs[offset+3] = AO
-            norm_obs[offset+4] = TA
-            norm_obs[offset+5] = R / 10000
-            norm_obs[offset+6] = side_flag
-            offset += 6
-        norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
-        # (3) missile info TODO: multiple missile and parnter's missile?
-        missile_sim = env.agents[agent_id].check_missile_warning() #
-        if missile_sim is not None:
-            missile_feature = np.concatenate((missile_sim.get_position(), missile_sim.get_velocity()))
-            ego_AO, ego_TA, R, side_flag = get_AO_TA_R(ego_feature, missile_feature, return_side=True)
-            norm_obs[offset + 1] = (np.linalg.norm(missile_sim.get_velocity()) - ego_state[9]) / 340
-            norm_obs[offset + 2] = (missile_feature[2] - ego_state[2]) / 1000
-            norm_obs[offset + 3] = ego_AO
-            norm_obs[offset + 4] = ego_TA
-            norm_obs[offset + 5] = R / 10000
-            norm_obs[offset + 6] = side_flag
-        return norm_obs
+    def normalize_action(self, env, agent_id, action):
+        self.time += 1 / env.sim_freq
+
+        # 获取距离
+        if agent_id == "A0100":
+            distance = self.get_enemy_distance(env, agent_id)
+        else:
+            distance = self.get_enemy_distance(env, "A0100")
+
+        # 阶段切换
+        if self.time < 30 and distance > 100000:
+            self.current_stage = "接敌引导"
+        elif 30 <= self.time < 60 and distance > 100000:
+            self.current_stage = "目标搜索"
+        elif 60 <= self.time < 90 and 30000 <= distance <= 50000:
+            self.current_stage = "发射导弹"
+        else:
+            self.current_stage = "导弹效果评估"
+
+        # 敌机动作
+        if agent_id in ["B0100", "B0200"]:
+            norm_act = np.zeros(4)
+            norm_act[3] = 0.8  # 直飞
+            return norm_act
+
+        # 获取观测
+        obs = self.get_obs(env, agent_id)
+        current_altitude = obs[0] * 5000  # 高度（单位：米）
+        current_heading = obs[5]  # 航向（单位：rad，归一化值需调整）
+
+        # 高度控制
+        target_altitude = 5000  # 目标高度
+        altitude_error = (target_altitude - current_altitude) / 5000
+        elevator = np.clip(altitude_error * 0.5, -1, 1)  # 简单比例控制
+
+        # Crank 机动：航向偏转 30°
+        stage_action = self.rules[self.current_stage]["action"][agent_id]
+        norm_act = np.zeros(4)
+        if stage_action == "adjust_heading":
+            # Crank：目标航向 = 当前航向 + 30°
+            target_heading = current_heading + np.pi / 6  # 30°（π/6 弧度）
+            heading_error = target_heading - current_heading
+            aileron = np.clip(heading_error * 0.5, -1, 1)  # 简单比例控制
+            norm_act[0] = aileron
+            norm_act[1] = elevator
+            norm_act[2] = 0.0
+            norm_act[3] = 0.9
+        elif stage_action == "follow":
+            norm_act[0] = 0.0
+            norm_act[1] = elevator
+            norm_act[2] = 0.0
+            norm_act[3] = 0.8
+        elif stage_action == "radar_on":
+            norm_act[0] = 0.0
+            norm_act[1] = elevator
+            norm_act[2] = 0.0
+            norm_act[3] = 0.8
+        elif stage_action == "fire_missile":
+            norm_act[0] = 0.0
+            norm_act[1] = elevator
+            norm_act[2] = 0.0
+            norm_act[3] = 0.8
+            self._shoot_action[agent_id] = True
+        elif stage_action == "assess_hit":
+            norm_act[0] = 0.0
+            norm_act[1] = elevator
+            norm_act[2] = 0.0
+            norm_act[3] = 0.8
+            self._shoot_action[agent_id] = False
+
+        return norm_act
 
     def reset(self, env):
-        """Reset fighter blood & missile status
-        """
+        self.time = 0  # 重置时间
+        self.current_stage = "接敌引导"  # 重置阶段
         self._last_shoot_time = {agent_id: -self.min_attack_interval for agent_id in env.agents.keys()}
         self._remaining_missiles = {agent_id: agent.num_missiles for agent_id, agent in env.agents.items()}
         self._shoot_action = {agent_id: False for agent_id in env.agents.keys()}
         return super().reset(env)
-
-    def normalize_action(self, env, agent_id, action):
-        self._shoot_action[agent_id] = action[3] > 0
-        return super().normalize_action(env, agent_id, action[:3])
-
-    def step(self, env):
-        SingleCombatTask.step(self, env)
-        for agent_id, agent in env.agents.items():
-            # [RL-based missile launch with limited condition]
-            # Determine whether can launch missile at the nearest enemy aircraft
-            target_list = list(map(lambda x: x.get_position() - agent.get_position(), agent.enemies))
-            target_distance = list(map(np.linalg.norm, target_list))
-            target_index = np.argmin(target_distance)
-            target = target_list[target_index]
-            heading = agent.get_velocity()
-            distance = target_distance[target_index]
-            attack_angle = np.rad2deg(np.arccos(np.clip(np.sum(target * heading) / (distance * np.linalg.norm(heading) + 1e-8), -1, 1)))
-            shoot_interval = env.current_step - self._last_shoot_time[agent_id]
-
-            shoot_flag = agent.is_alive and self._shoot_action[agent_id] and self._remaining_missiles[agent_id] > 0 \
-                and attack_angle <= self.max_attack_angle and distance <= self.max_attack_distance and shoot_interval >= self.min_attack_interval
-            if shoot_flag:
-                new_missile_uid = agent_id + str(self._remaining_missiles[agent_id])
-                env.add_temp_simulator(
-                    MissileSimulator.create(parent=agent, target=agent.enemies[target_index], uid=new_missile_uid))
-                self._remaining_missiles[agent_id] -= 1
-                self._last_shoot_time[agent_id] = env.current_step

@@ -227,25 +227,22 @@ class SACReplayBuffer:
         """
         # 确保 obs, next_obs 符合是 (n_env, obs_dim) 而不是 (n_env, n_agents, obs_dim)
         if obs.ndim == 3 and obs.shape[1] == 1:
-            obs = obs.squeeze(1)  # (n_env, obs_dim)
+            obs = obs.squeeze(1)
             next_obs = next_obs.squeeze(1)
 
         if act.ndim == 3 and act.shape[1] == 1:
-            act = act.squeeze(1)  # (n_env, act_dim)
+            act = act.squeeze(1)
 
-        idx = self.ptr  # 当前存储指针索引
-        # print(f"[DEBUG] Storing obs in buffer: {obs.shape}")
+        idx = self.ptr
+        self.obs_buf[idx] = obs
+        self.act_buf[idx] = act
+        self.rew_buf[idx] = rew
+        self.next_obs_buf[idx] = next_obs
+        self.done_buf[idx] = done
 
-        # print(f"[DEBUG] Store: obs.shape={obs.shape}, act.shape={act.shape}")
-        self.obs_buf[idx] = obs  # shape (n_env, obs_dim)
-        self.act_buf[idx] = act  # shape (n_env, act_dim)
-        self.rew_buf[idx] = rew  # shape (n_env, 1)
-        self.next_obs_buf[idx] = next_obs  # shape (n_env, obs_dim)
-        self.done_buf[idx] = done  # shape (n_env, 1)
-
-        # 更新存储指针计数
         self.ptr = (self.ptr + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+        # 每次 store 增加 n_env 个样本
+        self.size = min(self.size + self.n_env, self.capacity)
 
     def sample_batch(self, batch_size=256):
         """

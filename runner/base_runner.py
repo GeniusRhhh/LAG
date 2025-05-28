@@ -9,7 +9,7 @@ from algorithms.utils.selfplay import PSRO
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from algorithms.utils.buffer import ReplayBuffer
-from algorithms.utils.buffer import SACReplayBuffer
+from algorithms.sac.sac_replay_buffer import SACReplayBuffer
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -87,6 +87,7 @@ class Runner(object):
 
     @torch.no_grad()
     def compute(self):
+        logging.info("Calling Runner.compute - this should not happen!")
         self.policy.prep_rollout()
         next_values = self.policy.get_values(np.concatenate(self.buffer.obs[-1]),
                                              np.concatenate(self.buffer.rnn_states_critic[-1]),
@@ -106,54 +107,54 @@ class Runner(object):
         policy_critic = self.policy.critic
         torch.save(policy_critic.state_dict(), str(self.save_dir) + "/critic_latest.pt")
 
-    # def restore(self):
-    #     policy_actor_state_dict = torch.load(str(self.model_dir) + '/actor_latest.pt')
-    #     self.policy.actor.load_state_dict(policy_actor_state_dict)
-    #     policy_critic_state_dict = torch.load(str(self.model_dir) + '/critic_latest.pt')
-    #     self.policy.critic.load_state_dict(policy_critic_state_dict)
-    def restore(self, episode=None):
-        if episode is None:
-            # 加载最新的保存状态
-            actor_path = str(self.model_dir) + '/actor_latest.pt'
-            critic_path = str(self.model_dir) + '/critic_latest.pt'
-            optimizer_path = str(self.model_dir) + '/optimizer_latest.pt'
-            buffer_path = str(self.model_dir) + '/buffer_latest.pt'
-            training_state_path = str(self.model_dir) + '/training_state_latest.pt'
-        else:
-            # 加载特定 episode 的状态（仅 actor 和 critic 支持特定 episode）
-            actor_path = str(self.model_dir) + f'/actor_{episode}.pt'
-            critic_path = str(self.model_dir) + f'/critic_latest.pt'
-            optimizer_path = str(self.model_dir) + '/optimizer_latest.pt'
-            buffer_path = str(self.model_dir) + '/buffer_latest.pt'
-            training_state_path = str(self.model_dir) + '/training_state_latest.pt'
-        # 加载支付矩阵（仅 PSRO）
-        if isinstance(self.selfplay_algo, PSRO) and os.path.exists(str(self.model_dir) + '/payoff_matrix.npy'):
-            self.selfplay_algo.payoff_matrix = np.load(str(self.model_dir) + '/payoff_matrix.npy')
-        else:
-            # 如果没有保存的支付矩阵，调整大小与 policy_pool 匹配
-            if isinstance(self.selfplay_algo, PSRO):
-                n = len(self.policy_pool)
-                self.selfplay_algo.payoff_matrix = np.zeros((n, n))
-        # 加载模型参数
-        self.policy.actor.load_state_dict(torch.load(actor_path))
-        self.policy.critic.load_state_dict(torch.load(critic_path))
-
-        # 加载优化器状态（总是加载最新版本）
-        if hasattr(self.trainer, 'optimizer') and os.path.exists(optimizer_path):
-            self.trainer.optimizer.load_state_dict(torch.load(optimizer_path))
-
-        # 加载回放缓冲区（总是加载最新版本）
-        if os.path.exists(buffer_path):
-            self.buffer = torch.load(buffer_path)
-
-        # 加载训练进度（总是加载最新版本）
-        if os.path.exists(training_state_path):
-            training_state = torch.load(training_state_path)
-            self.start_episode = training_state['episode'] + 1  # 从下一个 episode 恢复
-            self.total_num_steps = training_state['total_num_steps']
-        else:
-            self.start_episode = 0
-            self.total_num_steps = 0
+    def restore(self):
+        policy_actor_state_dict = torch.load(str(self.model_dir) + '/actor_latest.pt')
+        self.policy.actor.load_state_dict(policy_actor_state_dict)
+        policy_critic_state_dict = torch.load(str(self.model_dir) + '/critic_latest.pt')
+        self.policy.critic.load_state_dict(policy_critic_state_dict)
+    # def restore(self, episode=None):
+    #     if episode is None:
+    #         # 加载最新的保存状态
+    #         actor_path = str(self.model_dir) + '/actor_latest.pt'
+    #         critic_path = str(self.model_dir) + '/critic_latest.pt'
+    #         optimizer_path = str(self.model_dir) + '/optimizer_latest.pt'
+    #         buffer_path = str(self.model_dir) + '/buffer_latest.pt'
+    #         training_state_path = str(self.model_dir) + '/training_state_latest.pt'
+    #     else:
+    #         # 加载特定 episode 的状态（仅 actor 和 critic 支持特定 episode）
+    #         actor_path = str(self.model_dir) + f'/actor_{episode}.pt'
+    #         critic_path = str(self.model_dir) + f'/critic_latest.pt'
+    #         optimizer_path = str(self.model_dir) + '/optimizer_latest.pt'
+    #         buffer_path = str(self.model_dir) + '/buffer_latest.pt'
+    #         training_state_path = str(self.model_dir) + '/training_state_latest.pt'
+    #     # 加载支付矩阵（仅 PSRO）
+    #     if isinstance(self.selfplay_algo, PSRO) and os.path.exists(str(self.model_dir) + '/payoff_matrix.npy'):
+    #         self.selfplay_algo.payoff_matrix = np.load(str(self.model_dir) + '/payoff_matrix.npy')
+    #     else:
+    #         # 如果没有保存的支付矩阵，调整大小与 policy_pool 匹配
+    #         if isinstance(self.selfplay_algo, PSRO):
+    #             n = len(self.policy_pool)
+    #             self.selfplay_algo.payoff_matrix = np.zeros((n, n))
+    #     # 加载模型参数
+    #     self.policy.actor.load_state_dict(torch.load(actor_path))
+    #     self.policy.critic.load_state_dict(torch.load(critic_path))
+    #
+    #     # 加载优化器状态（总是加载最新版本）
+    #     if hasattr(self.trainer, 'optimizer') and os.path.exists(optimizer_path):
+    #         self.trainer.optimizer.load_state_dict(torch.load(optimizer_path))
+    #
+    #     # 加载回放缓冲区（总是加载最新版本）
+    #     if os.path.exists(buffer_path):
+    #         self.buffer = torch.load(buffer_path)
+    #
+    #     # 加载训练进度（总是加载最新版本）
+    #     if os.path.exists(training_state_path):
+    #         training_state = torch.load(training_state_path)
+    #         self.start_episode = training_state['episode'] + 1  # 从下一个 episode 恢复
+    #         self.total_num_steps = training_state['total_num_steps']
+    #     else:
+    #         self.start_episode = 0
+    #         self.total_num_steps = 0
 
     def log_info(self, infos, total_num_steps):
         if self.use_wandb:

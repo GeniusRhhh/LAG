@@ -9,7 +9,6 @@ from ..core.simulatior import AircraftSimulator, BaseSimulator
 from ..tasks.task_base import BaseTask
 from ..utils.utils import parse_config
 
-
 class BaseEnv(gymnasium.Env):
     """
     A class wrapping the JSBSim flight dynamics module (FDM) for simulating
@@ -18,7 +17,7 @@ class BaseEnv(gymnasium.Env):
 
     An BaseEnv is instantiated with a Task that implements a specific
     aircraft control task with its own specific observation/action space and
-    variables and agent_reward calculation.
+    reward calculation.
     """
     metadata = {"render.modes": ["human", "txt"]}
 
@@ -28,6 +27,7 @@ class BaseEnv(gymnasium.Env):
         self.max_steps = getattr(self.config, 'max_steps', 100)  # type: int
         self.sim_freq = getattr(self.config, 'sim_freq', 60)  # type: int
         self.agent_interaction_steps = getattr(self.config, 'agent_interaction_steps', 12)  # type: int
+        self.n_rollout_threads = getattr(self.config, 'n_rollout_threads', 1)  # 添加 n_rollout_threads，默认值为 1
         self.center_lon, self.center_lat, self.center_alt = \
             getattr(self.config, 'battle_field_center', (120.0, 60.0, 0.0))
         self._create_records = False
@@ -264,7 +264,7 @@ class BaseEnv(gymnasium.Env):
         return [seed]
 
     def _pack(self, data: Dict[str, Any]) -> np.ndarray:
-        """Pack seperated key-value dict into grouped np.ndarray"""
+        """Pack separated key-value dict into grouped np.ndarray"""
         ego_data = np.array([data[uid] for uid in self.ego_ids])
         enm_data = np.array([data[uid] for uid in self.enm_ids])
         if enm_data.shape[0] > 0:
@@ -280,23 +280,23 @@ class BaseEnv(gymnasium.Env):
         return data[:self.num_agents, ...]
 
     def _unpack(self, data: np.ndarray) -> Dict[str, Any]:
-        """Unpack grouped np.ndarray into seperated key-value dict"""
-        # print(
-        #     f"Unpack data (before conversion): type={type(data)}, shape={getattr(data, 'shape', 'N/A')}, len={len(data) if hasattr(data, '__len__') else 'N/A'}, num_agents={self.num_agents}")
-        # 如果 data 是 torch.Tensor，转换为 np.ndarray
+        """Unpack grouped np.ndarray into separated key-value dict"""
         if isinstance(data, torch.Tensor):
             data = data.cpu().numpy()
-            # print(f"Unpack data (after conversion): type={type(data)}, shape={data.shape}")
         if isinstance(data, np.ndarray):
-            if data.ndim == 3 and data.shape[1] == 1:  # (n_env, 1, act_dim)
-                data = data.squeeze(1)  # 转换为 (n_env, act_dim)
-            elif data.ndim == 2:  # (n_env, act_dim)
+            if data.ndim == 3 and data.shape[1] == self.num_agents:  # (n_env, num_agents, act_dim)
                 pass
+            elif data.ndim == 2 and data.shape[0] == self.n_rollout_threads and data.shape[1] == self.action_space.shape[0]:  # (n_env, act_dim)
+                data = data[:, np.newaxis, :]  # 转换为 (n_env, 1, act_dim)
+            elif data.ndim == 1 and data.shape[0] == self.action_space.shape[0]:  # (act_dim,)，兼容降维情况
+                data = data[np.newaxis, np.newaxis, :]  # 转换为 (1, 1, act_dim)
             else:
                 raise ValueError(f"Unsupported action shape: {data.shape}")
-        assert isinstance(data, (np.ndarray, list, tuple)) and len(data) == self.num_agents
+        assert isinstance(data, (np.ndarray, list, tuple)) and data.shape[0] == self.n_rollout_threads
         # unpack data in the same order to packing process
-        unpack_data = dict(zip((self.ego_ids + self.enm_ids)[:self.num_agents], data))
+        unpack_data = {}
+        for i, agent_id in enumerate((self.ego_ids + self.enm_ids)[:self.num_agents]):
+            unpack_data[agent_id] = data[:, i, :] if data.ndim == 3 else data
         # fill in None for other not-RL agents
         for agent_id in (self.ego_ids + self.enm_ids)[self.num_agents:]:
             unpack_data[agent_id] = None
