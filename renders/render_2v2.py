@@ -20,17 +20,17 @@ class Args:
         self.recurrent_hidden_layers = 1
         self.tpdv = dict(dtype=torch.float32, device=torch.device('cpu'))
         self.use_prior = True
-    
+
 def _t2n(x):
     return x.detach().cpu().numpy()
 
 num_agents = 4
 render = True
-ego_policy_index = 30
-enm_policy_index = 0
+ego_policy_index = 18
+enm_policy_index = 5
 episode_rewards = 0
-ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run2"
-enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run2"
+ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run35"
+enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run35"
 experiment_name = ego_run_dir.split('/')[-4]
 
 env = MultipleCombatEnv("2v2/ShootMissile/HierarchySelfplay")
@@ -41,8 +41,8 @@ ego_policy = PPOActor(args, env.observation_space, env.action_space, device=torc
 enm_policy = PPOActor(args, env.observation_space, env.action_space, device=torch.device("cuda"))
 ego_policy.eval()
 enm_policy.eval()
-ego_policy.load_state_dict(torch.load(ego_run_dir + f"/actor_{ego_policy_index}.pt"))
-enm_policy.load_state_dict(torch.load(enm_run_dir + f"/actor_{enm_policy_index}.pt"))
+ego_policy.load_state_dict(torch.load(ego_run_dir + f"/actor_episode_{ego_policy_index}.pt"))
+enm_policy.load_state_dict(torch.load(enm_run_dir + f"/actor_episode_{enm_policy_index}.pt"))
 
 
 print("Start render")

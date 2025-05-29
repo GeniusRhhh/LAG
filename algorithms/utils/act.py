@@ -27,7 +27,6 @@ class ACTLayer(nn.Module):
             self._continuous_action = True
             action_dim = act_space.shape[0]
             self.action_out = DiagGaussian(input_dim, action_dim, gain).to(device)
-            # 初始化 action_high 和 action_low 并移至设备
             self.action_high = torch.FloatTensor(act_space.high).to(device)
             self.action_low = torch.FloatTensor(act_space.low).to(device)
         elif isinstance(act_space, gym.spaces.MultiBinary):
@@ -35,7 +34,7 @@ class ACTLayer(nn.Module):
             self.action_out = Bernoulli(input_dim, action_dim, gain).to(device)
         elif isinstance(act_space, gym.spaces.MultiDiscrete):
             self._multidiscrete_action = True
-            action_dims = act_space.nvec
+            action_dims = act_space.nvec  # e.g., [15, 2] for template_id and shoot
             action_outs = []
             for action_dim in action_dims:
                 action_outs.append(Categorical(input_dim, action_dim, gain).to(device))
@@ -82,7 +81,7 @@ class ACTLayer(nn.Module):
                 actions.append(action)
                 action_log_probs.append(action_log_prob)
             actions = torch.cat(actions, dim=-1)
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
+            action_log_probs = torch.sum(torch.cat(action_log_probs, dim=-1), dim=-1, keepdim=True)  # Sum log probs for MultiDiscrete
 
         elif self._shoot_action:
             actions = []
@@ -96,8 +95,9 @@ class ACTLayer(nn.Module):
             shoot_action_dist = self.action_outs[-1](x.to(device), **kwargs)
             shoot_action = shoot_action_dist.mode() if deterministic else shoot_action_dist.sample()
             actions.append(shoot_action)
+            action_log_probs.append(shoot_action_dist.log_probs(shoot_action))
             actions = torch.cat(actions, dim=-1)
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
+            action_log_probs = torch.sum(torch.cat(action_log_probs, dim=-1), dim=-1, keepdim=True)  # Sum log probs
 
         else:
             action_dist = self.action_out(x.to(device))
@@ -123,18 +123,19 @@ class ACTLayer(nn.Module):
             x = self.mlp(x)
 
         if self._multidiscrete_action:
-            action = torch.transpose(action, 0, 1)
+            action = torch.transpose(action, 0, 1)  # [batch, n_actions] -> [n_actions, batch]
             action_log_probs = []
             dist_entropy = []
             for action_out, act in zip(self.action_outs, action):
                 action_dist = action_out(x.to(device))
                 action_log_probs.append(action_dist.log_probs(act.unsqueeze(-1)))
                 if active_masks is not None:
-                    dist_entropy.append((action_dist.entropy() * active_masks.to(device)) / active_masks.sum())
+                    entropy = action_dist.entropy() * active_masks.to(device)
+                    dist_entropy.append(entropy / active_masks.sum())
                 else:
                     dist_entropy.append(action_dist.entropy() / action_log_probs[-1].size(0))
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
-            dist_entropy = torch.cat(dist_entropy, dim=-1).sum(dim=-1, keepdim=True)
+            action_log_probs = torch.sum(torch.cat(action_log_probs, dim=-1), dim=-1, keepdim=True)  # Sum log probs
+            dist_entropy = torch.sum(torch.cat(dist_entropy, dim=-1), dim=-1, keepdim=True)  # Sum entropy
 
         elif self._shoot_action:
             dis_action, shoot_action = action.split((self._discrete_dim, self._shoot_dim), dim=-1)
@@ -145,19 +146,21 @@ class ACTLayer(nn.Module):
                 action_dist = action_out(x.to(device))
                 action_log_probs.append(action_dist.log_probs(act.unsqueeze(-1)))
                 if active_masks is not None:
-                    dist_entropy.append((action_dist.entropy() * active_masks.to(device)) / active_masks.sum())
+                    entropy = action_dist.entropy() * active_masks.to(device)
+                    dist_entropy.append(entropy / active_masks.sum())
                 else:
                     dist_entropy.append(action_dist.entropy() / action_log_probs[-1].size(0))
 
             shoot_action_dist = self.action_outs[-1](x.to(device), **kwargs)
             action_log_probs.append(shoot_action_dist.log_probs(shoot_action))
             if active_masks is not None:
-                dist_entropy.append((shoot_action_dist.entropy() * active_masks.to(device)) / active_masks.sum())
+                entropy = shoot_action_dist.entropy() * active_masks.to(device)
+                dist_entropy.append(entropy / active_masks.sum())
             else:
                 dist_entropy.append(shoot_action_dist.entropy() / action_log_probs[-1].size(0))
 
-            action_log_probs = torch.cat(action_log_probs, dim=-1).sum(dim=-1, keepdim=True)
-            dist_entropy = torch.cat(dist_entropy, dim=-1).sum(dim=-1, keepdim=True)
+            action_log_probs = torch.sum(torch.cat(action_log_probs, dim=-1), dim=-1, keepdim=True)  # Sum log probs
+            dist_entropy = torch.sum(torch.cat(dist_entropy, dim=-1), dim=-1, keepdim=True)  # Sum entropy
 
         else:
             action_dist = self.action_out(x.to(device))
@@ -202,6 +205,7 @@ class ACTLayer(nn.Module):
             return len(self.action_outs)
         else:
             return self.action_out.output_size
+
 
 # import logging
 # import torch

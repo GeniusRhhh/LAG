@@ -581,7 +581,7 @@ class SingleCombatTask(BaseTask):
             AltitudeReward(self.config),
             PostureReward(self.config),
             EventDrivenReward(self.config),
-            RelativeAltitudeReward(self.config)
+            # RelativeAltitudeReward(self.config)
         ]
 
         self.termination_conditions = [

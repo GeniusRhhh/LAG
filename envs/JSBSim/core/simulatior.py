@@ -78,14 +78,12 @@ class BaseSimulator(ABC):
     def __del__(self):
         logging.debug(f"{self.__class__.__name__}:{self.uid} is deleted!")
 
-
 class AircraftSimulator(BaseSimulator):
-    """A class which wraps an instance of JSBSim and manages communication with it.
-    """
+    """封装 JSBSim 实例并管理通信的飞机模拟器类。"""
 
     ALIVE = 0
-    CRASH = 1       # low altitude / extreme state / overload
-    SHOTDOWN = 2    # missile attack
+    CRASH = 1       # 坠毁：低高度/极端状态/过载
+    SHOTDOWN = 2    # 被击落：导弹攻击
 
     def __init__(self,
                  uid: str = "A0100",
@@ -93,17 +91,18 @@ class AircraftSimulator(BaseSimulator):
                  model: str = 'f16',
                  init_state: dict = {},
                  origin: tuple = (120.0, 60.0, 0.0),
-                 sim_freq: int = 60, **kwargs):
-        """Constructor. Creates an instance of JSBSim, loads an aircraft and sets initial conditions.
+                 sim_freq: int = 60,
+                 **kwargs):
+        """构造函数：创建 JSBSim 实例，加载飞机模型并设置初始条件。
 
         Args:
-            uid (str): 5-digits hexadecimal numbers for unique identification. Default = `"A0100"`.
-            color (TeamColors): use different color strings to represent diferent teams
-            model (str): name of aircraft to be loaded. Default = `"f16"`.
-                model path: './data/aircraft_name/aircraft_name.xml'
-            init_state (dict): dict mapping properties to their initial values. Input empty dict to use a default set of initial props.
-            origin (tuple): origin point (longitude, latitude, altitude) of the Global Combat Field. Default = `(120.0, 60.0, 0.0)`
-            sim_freq (int): JSBSim integration frequency. Default = `60`.
+            uid (str): 5 位十六进制唯一标识符，默认为 "A0100"。
+            color (TeamColors): 团队颜色，用于区分红蓝方。
+            model (str): 飞机模型名称，默认为 "f16"。
+            init_state (dict): 初始状态字典，映射属性到初始值，空字典使用默认值。
+            origin (tuple): 全局战斗场的原点（经度，纬度，高度），默认为 (120.0, 60.0, 0.0)。
+            sim_freq (int): JSBSim 仿真频率，默认为 60 Hz。
+            **kwargs: 其他参数，如 num_missiles。
         """
         super().__init__(uid, color, 1 / sim_freq)
         self.model = model
@@ -111,58 +110,99 @@ class AircraftSimulator(BaseSimulator):
         self.lon0, self.lat0, self.alt0 = origin
         self.bloods = 100
         self.__status = AircraftSimulator.ALIVE
+        self._is_leader = uid.endswith("100")  # 若 uid 以 "100" 结尾（如 A0100, B0100），设为领机
         for key, value in kwargs.items():
             if key == 'num_missiles':
-                self.num_missiles = value  # type: int
-                self.num_left_missiles = self.num_missiles  # type: int
-        # fixed simulator links
-        self.partners = []  # type: List[AircraftSimulator]
-        self.enemies = []   # type: List[AircraftSimulator]
-        # temp simulator links
-        self.launch_missiles = []   # type: List[MissileSimulator]
-        self.under_missiles = []    # type: List[MissileSimulator]
-        # initialize simulator
+                self.num_missiles = value
+                self.num_left_missiles = self.num_missiles
+        # 固定模拟器链接
+        self.partners: List[AircraftSimulator] = []  # 队友列表
+        self.enemies: List[AircraftSimulator] = []   # 敌方列表
+        # 临时模拟器链接
+        self.launch_missiles: List[MissileSimulator] = []   # 已发射的导弹
+        self.under_missiles: List[MissileSimulator] = []    # 正在追踪的导弹
+        # 初始化模拟器
         self.reload()
 
     @property
     def is_alive(self):
+        """检查飞机是否存活。
+
+        Returns:
+            bool: 如果存活，返回 True。
+        """
         return self.__status == AircraftSimulator.ALIVE
 
     @property
     def is_crash(self):
+        """检查飞机是否坠毁。
+
+        Returns:
+            bool: 如果坠毁，返回 True。
+        """
         return self.__status == AircraftSimulator.CRASH
 
     @property
     def is_shotdown(self):
+        """检查飞机是否被击落。
+
+        Returns:
+            bool: 如果被击落，返回 True。
+        """
         return self.__status == AircraftSimulator.SHOTDOWN
 
+    def is_leader(self):
+        """检查是否为领机。
+
+        Returns:
+            bool: 如果是领机，返回 True，否则返回 False。
+        """
+        return self._is_leader
+
+    def set_leader(self, is_leader: bool):
+        """设置领机状态。
+
+        Args:
+            is_leader (bool): 是否为领机。
+        """
+        self._is_leader = is_leader
+        logging.info(f"Set Agent {self.uid} as {'Leader' if is_leader else 'Wingman'}")
+
     def crash(self):
+        """标记飞机为坠毁状态。"""
         self.__status = AircraftSimulator.CRASH
+        logging.info(f"Agent {self.uid} crashed")
 
     def shotdown(self):
+        """标记飞机为被击落状态。"""
         self.__status = AircraftSimulator.SHOTDOWN
+        logging.info(f"Agent {self.uid} shot down")
 
     def reload(self, new_state: Union[dict, None] = None, new_origin: Union[tuple, None] = None):
-        """Reload aircraft simulator
+        """重新加载飞机模拟器，恢复初始状态。
+
+        Args:
+            new_state (dict, optional): 新的状态字典，覆盖初始状态。
+            new_origin (tuple, optional): 新的战场原点坐标，覆盖默认原点。
         """
         super().reload()
 
-        # reset temp simulator links
+        # 重置状态
         self.bloods = 100
         self.__status = AircraftSimulator.ALIVE
         self.launch_missiles.clear()
         self.under_missiles.clear()
         self.num_left_missiles = self.num_missiles
 
-        # load JSBSim FDM
+        # 加载 JSBSim
         self.jsbsim_exec = jsbsim.FGFDMExec(os.path.join(get_root_dir(), 'data'))
         self.jsbsim_exec.set_debug_level(0)
         self.jsbsim_exec.load_model(self.model)
         Catalog.add_jsbsim_props(self.jsbsim_exec.query_property_catalog(""))
         self.jsbsim_exec.set_dt(self.dt)
-        self.clear_defalut_condition()
+        self.clear_default_condition()
 
-        # assign new properties
+        # 分配新属性
         if new_state is not None:
             self.init_state = new_state
         if new_origin is not None:
@@ -171,126 +211,127 @@ class AircraftSimulator(BaseSimulator):
             self.set_property_value(Catalog[key], value)
         success = self.jsbsim_exec.run_ic()
         if not success:
+            logging.error("JSBSim 初始化仿真条件失败")
             raise RuntimeError("JSBSim failed to init simulation conditions.")
 
-        # propulsion init running
+        # 初始化引擎
         propulsion = self.jsbsim_exec.get_propulsion()
         n = propulsion.get_num_engines()
         for j in range(n):
             propulsion.get_engine(j).init_running()
         propulsion.get_steady_state()
-        # update inner property
+        # 更新内部属性
         self._update_properties()
 
-    def clear_defalut_condition(self):
+    def clear_default_condition(self):
+        """清除默认仿真条件，设置初始值。"""
         default_condition = {
-            Catalog.ic_long_gc_deg: 120.0,  # geodesic longitude [deg]
-            Catalog.ic_lat_geod_deg: 60.0,  # geodesic latitude  [deg]
-            Catalog.ic_h_sl_ft: 20000,      # altitude above mean sea level [ft]
-            Catalog.ic_psi_true_deg: 0.0,   # initial (true) heading [deg] (0, 360)
-            Catalog.ic_u_fps: 800.0,        # body frame x-axis velocity [ft/s]  (-2200, 2200)
-            Catalog.ic_v_fps: 0.0,          # body frame y-axis velocity [ft/s]  (-2200, 2200)
-            Catalog.ic_w_fps: 0.0,          # body frame z-axis velocity [ft/s]  (-2200, 2200)
-            Catalog.ic_p_rad_sec: 0.0,      # roll rate  [rad/s]  (-2 * pi, 2 * pi)
-            Catalog.ic_q_rad_sec: 0.0,      # pitch rate [rad/s]  (-2 * pi, 2 * pi)
-            Catalog.ic_r_rad_sec: 0.0,      # yaw rate   [rad/s]  (-2 * pi, 2 * pi)
-            Catalog.ic_roc_fpm: 0.0,        # initial rate of climb [ft/min]
-            Catalog.ic_terrain_elevation_ft: 0,
+            Catalog.ic_long_gc_deg: 120.0,  # 地理经度 [°]
+            Catalog.ic_lat_geod_deg: 60.0,  # 地理纬度 [°]
+            Catalog.ic_h_sl_ft: 20000,      # 海拔高度 [ft]
+            Catalog.ic_psi_true_deg: 0.0,   # 初始航向 [°] (0, 360]
+            Catalog.ic_u_fps: 800.0,        # x轴速度 [ft/s] (-2200, 2200)
+            Catalog.ic_v_fps: 0.0,          # y轴速度 [ft/s] (-2200, 2200)
+            Catalog.ic_w_fps: 0.0,          # z轴速度 [ft/s] (-2200, 2200)
+            Catalog.ic_p_rad_sec: 0.0,      # 滚转角速度 [rad/s]
+            Catalog.ic_q_rad_sec: 0.0,      # 俯仰角速度 [rad/s]
+            Catalog.ic_r_rad_sec: 0.0,      # 偏航角速度 [rad/s]
+            Catalog.ic_roc_fpm: 0.0,        # 爬升率 [ft/min]
+            Catalog.ic_terrain_elevation_ft: 0,  # 地形高度
         }
         for prop, value in default_condition.items():
             self.set_property_value(prop, value)
 
     def run(self):
-        """Runs JSBSim simulation until the agent interacts and update custom properties.
-
-        JSBSim monitors the simulation and detects whether it thinks it should
-        end, e.g. because a simulation time was specified. False is returned
-        if JSBSim termination criteria are met.
+        """运行 JSBSim 仿真，更新状态。
 
         Returns:
-            (bool): False if sim has met JSBSim termination criteria else True.
+            bool: 如果仿真达到 JSBSim 终止条件，返回 False，否则返回 True。
         """
-        # 这里被击中的话，还是返回true吗？
-        # 第二个问题，被击中的话，还在仿真运行，意思是飞机还会动？
-        # 这里继续调用run方法，调用的是哪个run方法，还是说继续调用自己
         if self.is_alive:
             if self.bloods <= 0:
                 self.shotdown()
             result = self.jsbsim_exec.run()
             if not result:
+                logging.error("JSBSim 仿真运行失败")
                 raise RuntimeError("JSBSim failed.")
             self._update_properties()
             return result
         else:
-            return True
+            return False  # 非存活状态返回 False，停止仿真
 
     def close(self):
-        """ Closes the simulation and any plots. """
+        """关闭仿真器并清理资源。"""
         if self.jsbsim_exec:
             self.jsbsim_exec = None
         self.partners = []
         self.enemies = []
+        logging.info(f"Agent {self.uid} simulator closed")
 
     def _update_properties(self):
-        # update position
+        """更新内部位置、姿态和速度属性。"""
+        # 更新位置
         self._geodetic[:] = self.get_property_values([
             Catalog.position_long_gc_deg,
             Catalog.position_lat_geod_deg,
             Catalog.position_h_sl_m
         ])
         self._position[:] = LLA2NEU(*self._geodetic, self.lon0, self.lat0, self.alt0)
-        # update posture
+        # 更新姿态
         self._posture[:] = self.get_property_values([
             Catalog.attitude_roll_rad,
             Catalog.attitude_pitch_rad,
-            Catalog.attitude_heading_true_rad,
+            Catalog.attitude_heading_true_rad
         ])
-        # update velocity
+        # 更新速度
         self._velocity[:] = self.get_property_values([
             Catalog.velocities_v_north_mps,
             Catalog.velocities_v_east_mps,
-            Catalog.velocities_v_down_mps,
+            Catalog.velocities_v_down_mps
         ])
         # v_down -> v_up
         self._velocity[2] = -self._velocity[2]
 
     def get_sim_time(self):
-        """ Gets the simulation time from JSBSim, a float. """
+        """获取仿真时间。
+
+        Returns:
+            float: JSBSim 的仿真时间。
+        """
         return self.jsbsim_exec.get_sim_time()
 
     def get_property_values(self, props):
-        """Get the values of the specified properties
+        """获取指定属性的值。
 
-        :param props: list of Properties
+        Args:
+            props: 属性列表。
 
-        : return: NamedTupl e with properties name and their values
+        Returns:
+            list: 属性值列表。
         """
         return [self.get_property_value(prop) for prop in props]
 
     def set_property_values(self, props, values):
-        """Set the values of the specified properties
+        """设置指定属性的值。
 
-        :param props: list of Properties
-        :param values: list of float
+        Args:
+            props: 属性列表。
+            values: 值列表。
         """
-        # print("[DEBUG] In set_property_values:")
-        # print(f"  Number of properties: {len(props)}")
-        # print(f"  Properties: {props}")
-        # print(f"  Number of values: {len(values)}")
-        # print(f"  Values: {values}")
-        # for i, (prop, value) in enumerate(zip(props, values)):
-        #     logging.info(f"[DEBUG] In set_property_values: Property {i}: {prop}, Value {i}: {value} (type: {type(value)})")
-        if not len(props) == len(values):
+        if len(props) != len(values):
+            logging.error(f"属性和值的数量不匹配: props={len(props)}, values={len(values)}")
             raise ValueError("mismatch between properties and values size")
         for prop, value in zip(props, values):
             self.set_property_value(prop, value)
 
     def get_property_value(self, prop):
-        """Get the value of the specified property from the JSBSim simulation
+        """从 JSBSim 获取指定属性的值。
 
-        :param prop: Property
+        Args:
+            prop: 属性对象。
 
-        :return : float
+        Returns:
+            float: 属性值。
         """
         if isinstance(prop, Property):
             if prop.access == "R":
@@ -298,37 +339,39 @@ class AircraftSimulator(BaseSimulator):
                     prop.update(self)
             return self.jsbsim_exec.get_property_value(prop.name_jsbsim)
         else:
+            logging.error(f"无效的属性类型: {type(prop)} ({prop})")
             raise ValueError(f"prop type unhandled: {type(prop)} ({prop})")
 
     def set_property_value(self, prop, value):
-        """Set the values of the specified property
+        """设置指定属性的值。
 
-        :param prop: Property
-
-        :param value: float
+        Args:
+            prop: 属性对象。
+            value: float 值。
         """
-        # set value in property bounds
         if isinstance(prop, Property):
             if value < prop.min:
                 value = prop.min
             elif value > prop.max:
                 value = prop.max
-
             self.jsbsim_exec.set_property_value(prop.name_jsbsim, value)
-
             if "W" in prop.access:
                 if prop.update:
                     prop.update(self)
         else:
+            logging.error(f"无效的属性类型: {type(prop)} ({prop})")
             raise ValueError(f"prop type unhandled: {type(prop)} ({prop})")
 
     def check_missile_warning(self):
+        """检查是否有导弹威胁。
+
+        Returns:
+            MissileSimulator or None: 如果存在威胁的导弹，返回该导弹实例，否则返回 None。
+        """
         for missile in self.under_missiles:
             if missile.is_alive:
                 return missile
         return None
-
-
 class MissileSimulator(BaseSimulator):
 
     INACTIVE = -1
