@@ -3,6 +3,7 @@ import logging
 from typing import Tuple, Dict, Any
 from .env_base import BaseEnv
 from ..core.simulatior import AircraftSimulator, BaseSimulator
+from ..core.catalog import Catalog as c
 from ..tasks.multiplecombat_task import HierarchicalMultipleCombatShootTask, HierarchicalMultipleCombatTask, MultipleCombatTask
 
 class MultipleCombatEnv(BaseEnv):
@@ -43,14 +44,30 @@ class MultipleCombatEnv(BaseEnv):
 
     def load_simulator(self):
         """初始化模拟器，覆盖 BaseEnv 的方法以设置 2v2 智能体。"""
+        # 调用基类的 load_simulator 初始化 _jsbsims
         super().load_simulator()
+        # 清空现有模拟器（确保不重复）
         self._jsbsims.clear()
-        self._jsbsims.update({
-            "A0100": AircraftSimulator(uid="A0100", color="Red", num_missiles=4),
-            "A0200": AircraftSimulator(uid="A0200", color="Red", num_missiles=4),
-            "B0100": AircraftSimulator(uid="B0100", color="Blue", num_missiles=4),
-            "B0200": AircraftSimulator(uid="B0200", color="Blue", num_missiles=4)
-        })
+        # 从配置动态加载 2v2 智能体
+        for uid, config in self.config.aircraft_configs.items():
+            init_state = config.get("init_state", {})
+            self._jsbsims[uid] = AircraftSimulator(
+                uid=uid,
+                color=config.get("color", "Red"),
+                model=config.get("model", "f16"),
+                init_state=init_state,
+                origin=getattr(self.config, 'battle_field_center', (120.0, 60.0, 0.0)),
+                sim_freq=self.sim_freq,
+                num_missiles=config.get("missile", 0)
+            )
+            # 调试日志：记录初始位置
+            state = self._jsbsims[uid].get_property_values([
+                c.position_long_gc_deg,
+                c.position_lat_geod_deg,
+                c.position_h_sl_ft
+            ])
+            logging.debug(f"Initialized {uid} at position: Long={state[0]}, Lat={state[1]}, Alt={state[2]} ft")
+        # 固定 2v2 配置，设置队友和敌方关系
         self._jsbsims["A0100"].partners = [self._jsbsims["A0200"]]
         self._jsbsims["A0100"].enemies = [self._jsbsims["B0100"], self._jsbsims["B0200"]]
         self._jsbsims["A0200"].partners = [self._jsbsims["A0100"]]
@@ -59,6 +76,7 @@ class MultipleCombatEnv(BaseEnv):
         self._jsbsims["B0100"].enemies = [self._jsbsims["A0100"], self._jsbsims["A0200"]]
         self._jsbsims["B0200"].partners = [self._jsbsims["B0100"]]
         self._jsbsims["B0200"].enemies = [self._jsbsims["A0100"], self._jsbsims["A0200"]]
+        # 设置领机/僚机角色
         for agent_id, sim in self._jsbsims.items():
             is_leader = agent_id.endswith("100")
             sim.set_leader(is_leader)
@@ -84,6 +102,13 @@ class MultipleCombatEnv(BaseEnv):
         """重置所有模拟器状态。"""
         for sim in self._jsbsims.values():
             sim.reload()
+            # 调试日志：记录重置后的位置
+            state = sim.get_property_values([
+                c.position_long_gc_deg,
+                c.position_lat_geod_deg,
+                c.position_h_sl_ft
+            ])
+            logging.debug(f"Reset {sim.uid} at position: Long={state[0]}, Lat={state[1]}, Alt={state[2]} ft")
         self._tempsims.clear()
         logging.info("All simulators reset")
 
@@ -133,7 +158,7 @@ class MultipleCombatEnv(BaseEnv):
                     "has_warning": state["has_warning"],
                     "targets_assigned": len(self.task._target_allocation.get(agent_id, []))
                 }
-                logging.info(f"Agent {agent_id} tactical info: maneuver={tactical_action['maneuver']}, phase={tactical_action['phase']}, shoot={self.task._shoot_action.get(agent_id, False)}")
+                # logging.info(f"Agent {agent_id} tactical info: maneuver={tactical_action['maneuver']}, phase={tactical_action['phase']}, shoot={self.task._shoot_action.get(agent_id, False)}")
         # 运行仿真
         for _ in range(self.agent_interaction_steps):
             for sim in self._jsbsims.values():
@@ -160,6 +185,9 @@ class MultipleCombatEnv(BaseEnv):
         for agent_id in self._jsbsims.keys():
             done, info = self.task.get_termination(self, agent_id, info)
             dones[agent_id] = [done]
+        # 添加 bloods 信息到 info
+        bloods = {agent_id: self._jsbsims[agent_id].bloods for agent_id in self._jsbsims.keys()}
+        info["bloods"] = bloods
         return (
             np.stack([obs[agent_id] for agent_id in self._jsbsims.keys()], axis=0),
             np.stack([share_obs[agent_id] for agent_id in self._jsbsims.keys()], axis=0),
