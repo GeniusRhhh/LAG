@@ -68,15 +68,12 @@ class ShareJSBSimRunner(Runner):
         episodes = self.num_env_steps // self.buffer_size // self.n_rollout_threads
         win_rates = []
         for episode in range(episodes):
-            episode_rewards = []
+            episode_rewards = []  # 存储每个步骤的奖励数组
             for step in range(self.buffer_size):
                 values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.collect(step)
                 obs, share_obs, rewards, dones, infos = self.envs.step(actions)
-                # if "tactical_info" in infos:
-                #     for agent_id, tact_info in infos["tactical_info"].items():
-                #         logging.info(
-                #             f"Agent {agent_id} tactical info: maneuver={tact_info['maneuver']}, phase={tact_info['phase']}, shoot={tact_info['shoot']}, radar_lock={tact_info['radar_lock']}, targets_assigned={tact_info['targets_assigned']}")
-                episode_rewards.append(rewards[:, :self.num_agents // 2].mean())
+                # 存储每个智能体的奖励，而不是均值
+                episode_rewards.append(rewards[0, :self.num_agents // 2])  # 只取红方智能体奖励
                 data = obs, share_obs, actions, rewards, dones, action_log_probs, values, rnn_states_actor, rnn_states_critic
                 self.insert(data)
             self.compute()
@@ -88,11 +85,34 @@ class ShareJSBSimRunner(Runner):
                 self.save(episode)
             if episode % self.log_interval == 0:
                 end = time.time()
-                avg_reward = np.mean(episode_rewards)
+                avg_reward = np.mean([r.mean() for r in episode_rewards])  # 计算平均奖励
                 win_rate = np.mean(win_rates[-self.log_interval:]) if win_rates else 0
-                logging.info(f"Scenario: {self.all_args.scenario_name} Algorithm: {self.algorithm_name} Experiment: {self.experiment_name} "
-                             f"Update: {episode}/{episodes} episodes, Total steps: {self.total_num_steps}/{self.num_env_steps}, "
-                             f"FPS: {int(self.total_num_steps / (end - start))}")
+                # 从 infos 数组中提取 current_phase，兼容一维和二维数组
+                for agent_id in range(self.num_agents // 2):
+                    # 调试输出 obs 形状
+                    logging.debug(f"obs shape: {obs.shape}, obs[0, {agent_id}] shape: {obs[0, agent_id].shape}")
+                    state = obs[0, agent_id]  # 确保 state 是一个数组
+                    action = actions[0, agent_id]
+                    if len(infos.shape) == 2:  # 形状为 (n_rollout_threads, num_agents)
+                        info_dict = infos[0, agent_id] if infos.shape[0] > 0 else {}
+                    else:  # 形状为 (num_agents,)
+                        info_dict = infos[agent_id] if len(infos) > agent_id else {}
+                    phase = info_dict.get("current_phase", "unknown")
+                    # 确保 episode_rewards[step] 是一个标量
+                    reward = float(episode_rewards[step][agent_id].item()) if isinstance(episode_rewards[step][agent_id], np.ndarray) else float(episode_rewards[step][agent_id])
+                    # 从 state 中正确提取高度、速度和距离，并转换为标量
+                    altitude = float(state[0].item()) * 5000  # 反归一化高度 (norm_obs[0] = height / 5000)
+                    velocity = float(state[5].item()) * 340  # 反归一化速度 (norm_obs[5] = u_mps / 340)
+                    distance_idx = 14 + 4  # 第一个敌机的 R/10000 (offset=14, R 在第 4 维)
+                    distance = float(state[distance_idx].item()) * 10000 if len(state) > distance_idx else float('inf')  # 反归一化距离
+                    # 如果 action 是数组，选择合适的方式打印
+                    action_scalar = action.tolist() if isinstance(action, np.ndarray) and action.size > 1 else float(action.item())
+                    # 调试输出 state 和 reward
+                    logging.debug(f"Agent {agent_id} state: {state}, reward: {reward}")
+                    logging.info(
+                        f"Agent {agent_id} - Episode {episode}: Altitude={altitude:.1f}m, Velocity={velocity:.1f}m/s, Distance={distance:.1f}m, Action={action_scalar}, Phase={phase}, Reward={reward:.2f}")
+                logging.info(
+                    f"Scenario: {self.all_args.scenario_name} ... FPS: {int(self.total_num_steps / (end - start))}")
                 train_infos["average_episode_rewards"] = avg_reward
                 train_infos["win_rate"] = win_rate
                 logging.info(f"Average episode reward: {avg_reward}, Win rate: {win_rate}")
@@ -266,7 +286,6 @@ class ShareJSBSimRunner(Runner):
                     f"eval_masks shape: {eval_masks.shape}, eval_opponent_masks shape: {eval_opponent_masks.shape}")
 
             self.policy.prep_rollout()
-            logging.info(f"Before policy.act: concatenated masks shape: {np.concatenate(eval_masks).shape}")
             eval_actions, eval_rnn_states_ego = self.policy.act(
                 np.concatenate(eval_obs),
                 np.concatenate(eval_rnn_states[:, :self.num_agents // 2, ...]),  # Only ego agents
@@ -283,7 +302,7 @@ class ShareJSBSimRunner(Runner):
                     deterministic=True)
                 eval_opponent_actions = np.array(np.split(_t2n(eval_opponent_actions), self.n_eval_rollout_threads))
                 eval_opponent_rnn_states = np.array(
-                    np.split(_t2n(eval_opponent_rnn_states), self.n_eval_rollout_threads))
+                    np.split(_t2n(eval_opponent_rnn_states), self.n_rollout_threads))
                 eval_actions = np.concatenate((eval_actions, eval_opponent_actions), axis=1)
                 # Update eval_rnn_states: ego agents
                 eval_rnn_states[:, :self.num_agents // 2, ...] = eval_rnn_states_ego

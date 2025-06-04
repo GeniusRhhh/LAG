@@ -14,18 +14,13 @@ class AltitudeReward(BaseRewardFunction):
     def get_reward(self, task, env, agent_id):
         ego_z = env.agents[agent_id].get_position()[-1] / 1000  # km
         ego_vz = env.agents[agent_id].get_velocity()[-1] / 340  # normalized vz
-        Pv = 0.0
-        if ego_z <= self.safe_altitude:
-            Pv = -0.01 * np.clip(ego_vz / self.Kv * (self.safe_altitude - ego_z) / self.safe_altitude, 0.0, 1.0)  # 加强惩罚
-        PH = 0.0
-        if ego_z <= self.danger_altitude:
-            PH = -0.5 * (1.0 - np.clip(ego_z / self.danger_altitude, 0.0, 1.0))  # 加强危险惩罚
-        Ptarget = np.exp(-((ego_z - self.target_altitude) ** 2) / 5.0)  # 权重降至 1.0
-        Pvz = -0.05 * abs(ego_vz) if abs(ego_vz) > 0.5 else 0.0  # 加强垂直速度惩罚
-        new_reward = Pv + PH + Ptarget + Pvz  # 移除 * 5.0
-
+        Pv = -0.1 * np.clip(ego_vz / self.Kv * (self.safe_altitude - ego_z) / self.safe_altitude, 0.0,
+                            1.0) if ego_z <= self.safe_altitude else 0.0
+        PH = -1.0 * (1.0 - np.clip(ego_z / self.danger_altitude, 0.0, 1.0)) if ego_z <= self.danger_altitude else 0.0
+        Ptarget = 0.5 * np.exp(-((ego_z - self.target_altitude) ** 2) / 2.0)  # 增强目标高度奖励
+        Pvz = -0.02 * abs(ego_vz) if abs(ego_vz) > 0.2 else 0.0  # 降低惩罚阈值
+        new_reward = Pv + PH + Ptarget + Pvz
         if task.step_count % 500 == 0:
             logging.info(
-                f"Agent {agent_id} AltitudeReward: total={new_reward:.4f}, Pv={Pv:.4f}, PH={PH:.4f}, Ptarget={Ptarget:.4f}, Pvz={Pvz:.4f}, altitude={ego_z * 1000:.2f}m"
-            )
+                f"Agent {agent_id} AltitudeReward: total={new_reward:.4f}, Pv={Pv:.4f}, PH={PH:.4f}, Ptarget={Ptarget:.4f}, Pvz={Pvz:.4f}, altitude={ego_z * 1000:.2f}m")
         return self._process(new_reward, agent_id, (Pv, PH, Ptarget, Pvz))

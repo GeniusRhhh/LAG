@@ -166,7 +166,7 @@ class AircraftSimulator(BaseSimulator):
             is_leader (bool): 是否为领机。
         """
         self._is_leader = is_leader
-        logging.info(f"Set Agent {self.uid} as {'Leader' if is_leader else 'Wingman'}")
+        # logging.info(f"Set Agent {self.uid} as {'Leader' if is_leader else 'Wingman'}")
 
     def crash(self):
         """标记飞机为坠毁状态。"""
@@ -372,6 +372,8 @@ class AircraftSimulator(BaseSimulator):
             if missile.is_alive:
                 return missile
         return None
+
+
 class MissileSimulator(BaseSimulator):
 
     INACTIVE = -1
