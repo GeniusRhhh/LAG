@@ -375,62 +375,52 @@ class AircraftSimulator(BaseSimulator):
 
 
 class MissileSimulator(BaseSimulator):
-
     INACTIVE = -1
     LAUNCHED = 0
     HIT = 1
     MISS = 2
 
     @classmethod
-    def create(cls, parent: AircraftSimulator, target: AircraftSimulator, uid: str, missile_model: str = "AIM-9L"):
-        assert parent.dt == target.dt, "integration timestep must be same!" #时间步长
+    def create(cls, parent: AircraftSimulator, target: AircraftSimulator, uid: str, missile_model: str = "AIM-120"):
+        assert parent.dt == target.dt, "integration timestep must be same!"
         missile = MissileSimulator(uid, parent.color, missile_model, parent.dt)
         missile.launch(parent)
         missile.target(target)
         return missile
 
-    def __init__(self,
-                 uid="A0101",
-                 color="Red",
-                 model="AIM-9L",
-                 dt=1 / 12):
+    def __init__(self, uid="A0101", color="Red", model="AIM-120", dt=1 / 12):
         super().__init__(uid, color, dt)
         self.__status = MissileSimulator.INACTIVE
         self.model = model
-        self.parent_aircraft = None  # type: AircraftSimulator
-        self.target_aircraft = None  # type: AircraftSimulator
+        self.parent_aircraft = None
+        self.target_aircraft = None
         self.render_explosion = False
 
-        # 定义导弹的物理参数
-        self._g = 9.81  # 重力加速度
-        self._t_max = 60  # 导弹最大飞行时间
-        self._t_thrust = 3  # 发动机推力时间
-        self._Isp = 120  # 平均比冲
-        self._Length = 2.87  # 导弹长度
-        self._Diameter = 0.127  # 导弹直径
-        self._cD = 0.4  # 空气阻力系数
-        self._m0 = 84  # 初始质量
-        self._dm = 6  # 燃料消耗速率
-        self._K = 3  # 比例导航常数
-        self._nyz_max = 30  # 最大过载
-        self._Rc = 300  # 爆炸半径
-        self._v_min = 150  # 最小速度
+        self._g = 9.81
+        self._t_max = 120
+        self._t_thrust = 5
+        self._Isp = 200
+        self._Length = 3.66
+        self._Diameter = 0.18
+        self._cD = 0.3
+        self._m0 = 150
+        self._dm = 5
+        self._K = 4
+        self._nyz_max = 40
+        self._Rc = 10
+        self._v_min = 200
 
     @property
     def is_alive(self):
-        """Missile is still flying"""
         return self.__status == MissileSimulator.LAUNCHED
 
     @property
     def is_success(self):
-        """Missile has hit the target"""
         return self.__status == MissileSimulator.HIT
 
     @property
     def is_done(self):
-        """Missile is already exploded"""
-        return self.__status == MissileSimulator.HIT \
-            or self.__status == MissileSimulator.MISS
+        return self.__status == MissileSimulator.HIT or self.__status == MissileSimulator.MISS
 
     @property
     def Isp(self):
@@ -438,60 +428,42 @@ class MissileSimulator(BaseSimulator):
 
     @property
     def K(self):
-        """Proportional Guidance Coefficient"""
-        # return self._K
         return max(self._K * (self._t_max - self._t) / self._t_max, 0)
 
     @property
     def S(self):
-        """Cross-Sectional area, unit m^2"""
         S0 = np.pi * (self._Diameter / 2)**2
         S0 += np.linalg.norm([np.sin(self._dtheta), np.sin(self._dphi)]) * self._Diameter * self._Length
         return S0
 
     @property
     def rho(self):
-        """Air Density, unit: kg/m^3"""
-        # approximate expression
         return 1.225 * np.exp(-self._geodetic[-1] / 9300)
-        # exact expression (Reference: https://www.cnblogs.com/pathjh/p/9127352.html)
-        rho0, T0, h = 1.225, 288.15, self._geodetic[-1]
-        if h <= 11000:  # Troposphere
-            T = T0 - 0.0065 * h
-            return rho0 * (T / T0)**4.25588
-        elif h <= 20000:  # Lower Stratosphere
-            T = 216.65
-            return 0.36392 * np.exp((11000 - h) / 6341.62)
-        else:  # Upper Stratosphere
-            T = 216.65 + 0.001 * (h - 20000)
-            return 0.088035 * (T / 216.65)**(-35.1632)
 
     @property
     def target_distance(self) -> float:
         return np.linalg.norm(self.target_aircraft.get_position() - self.get_position())
 
     def launch(self, parent: AircraftSimulator):
-        # inherit kinetic parameters from parent aricraft
         self.parent_aircraft = parent
         self.parent_aircraft.launch_missiles.append(self)
         self._geodetic[:] = parent.get_geodetic()
         self._position[:] = parent.get_position()
         self._velocity[:] = parent.get_velocity()
         self._posture[:] = parent.get_rpy()
-        self._posture[0] = 0  # missile's roll remains zero
+        self._posture[0] = 0
         self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
-        # init status
         self._t = 0
         self._m = self._m0
         self._dtheta, self._dphi = 0, 0
         self.__status = MissileSimulator.LAUNCHED
         self._distance_pre = np.inf
-        self._distance_increment = deque(maxlen=int(5 / self.dt))  # 5s of distance increment -- can't hit 存储最近 5 秒内的导弹与目标距离增量
-        self._left_t = int(1 / self.dt)  # remove missile 1s after its destroying
+        self._distance_increment = deque(maxlen=int(5 / self.dt))
+        self._left_t = int(1 / self.dt)
 
     def target(self, target: AircraftSimulator):
-        self.target_aircraft = target  # TODO: change target? #指定导弹的目标飞机。
-        self.target_aircraft.under_missiles.append(self) #将导弹添加到目标飞机的受攻击列表中。
+        self.target_aircraft = target
+        self.target_aircraft.under_missiles.append(self)
 
     def run(self):
         self._t += self.dt
@@ -499,105 +471,76 @@ class MissileSimulator(BaseSimulator):
         self._distance_increment.append(distance > self._distance_pre)
         self._distance_pre = distance
         if distance < self._Rc and self.target_aircraft.is_alive:
-            self.__status = MissileSimulator.HIT #如果距离目标小于爆炸半径且目标仍存活，设为 HIT
-            #self.hit_reward_flag=True
+            self.__status = MissileSimulator.HIT
             self.target_aircraft.shotdown()
-            #如果飞行时间超过限制或速度过低等，设为 MISS
-        elif (self._t > self._t_max) or (np.linalg.norm(self.get_velocity()) < self._v_min) \
-                or np.sum(self._distance_increment) >= self._distance_increment.maxlen or not self.target_aircraft.is_alive:
+        elif (self._t > self._t_max) or (np.linalg.norm(self.get_velocity()) < self._v_min) or \
+             np.sum(self._distance_increment) >= self._distance_increment.maxlen or not self.target_aircraft.is_alive:
             self.__status = MissileSimulator.MISS
         else:
             self._state_trans(action)
 
     def log(self):
         if self.is_alive:
-            log_msg = super().log()
-        elif self.is_done and (not self.render_explosion):
+            return super().log()
+        elif self.is_done and not self.render_explosion:
             self.render_explosion = True
-            # remove missile model
             log_msg = f"-{self.uid}\n"
-            # add explosion
             lon, lat, alt = self.get_geodetic()
             roll, pitch, yaw = self.get_rpy() * 180 / np.pi
             log_msg += f"{self.uid}F,T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
             log_msg += f"Type=Misc+Explosion,Color={self.color},Radius={self._Rc}"
-        else:
-            log_msg = None
-        return log_msg
+            return log_msg
+        return None
 
     def close(self):
         self.target_aircraft = None
 
-    def _guidance(self):  # 实现比例导航制导算法
-        x_m, y_m, z_m = self.get_position()  # 获取导弹当前位置的东北天坐标
-        dx_m, dy_m, dz_m = self.get_velocity()  # 获取导弹当前速度分量
-        v_m = np.linalg.norm([dx_m, dy_m, dz_m])  # 计算导弹的速度大小（标量）
-        theta_m = np.arcsin(dz_m / v_m)  # 计算导弹的俯仰角（theta）
+    def _guidance(self):
+        x_m, y_m, z_m = self.get_position()
+        dx_m, dy_m, dz_m = self.get_velocity()
+        v_m = np.linalg.norm([dx_m, dy_m, dz_m])
+        theta_m = np.arcsin(dz_m / v_m)
 
-        x_t, y_t, z_t = self.target_aircraft.get_position()  # 获取目标飞机的当前位置
-        dx_t, dy_t, dz_t = self.target_aircraft.get_velocity()  # 获取目标飞机的速度分量
+        x_t, y_t, z_t = self.target_aircraft.get_position()
+        dx_t, dy_t, dz_t = self.target_aircraft.get_velocity()
 
-        Rxy = np.linalg.norm([x_m - x_t, y_m - y_t])  # 计算导弹与目标的水平距离（X-Y 平面投影）
-        Rxyz = np.linalg.norm([x_m - x_t, y_m - y_t, z_t - z_m])  # 计算导弹与目标的三维空间距离
-        # calculate beta & eps, but no need actually...
-        # beta = np.arctan2(y_m - y_t, x_m - x_t)  # relative yaw
-        # eps = np.arctan2(z_m - z_t, np.linalg.norm([x_m - x_t, y_m - y_t]))  # relative pitch
+        Rxy = np.linalg.norm([x_m - x_t, y_m - y_t])
+        Rxyz = np.linalg.norm([x_m - x_t, y_m - y_t, z_t - z_m])
 
-        # 计算相对航向角变化率（dbeta）和相对俯仰角变化率（deps）
         dbeta = ((dy_t - dy_m) * (x_t - x_m) - (dx_t - dx_m) * (y_t - y_m)) / Rxy ** 2
         deps = ((dz_t - dz_m) * Rxy ** 2 - (z_t - z_m) * (
                 (x_t - x_m) * (dx_t - dx_m) + (y_t - y_m) * (dy_t - dy_m))) / (Rxyz ** 2 * Rxy)
 
-        # 计算导弹的横向过载指令（ny），基于比例导航算法
         ny = self.K * v_m / self._g * np.cos(theta_m) * dbeta
-        # 计算导弹的纵向过载指令（nz），结合俯仰角的影响
         nz = self.K * v_m / self._g * deps + np.cos(theta_m)
 
-        # 将横向和纵向过载指令限制在最大过载范围内，返回过载指令和当前距离
         return np.clip([ny, nz], -self._nyz_max, self._nyz_max), Rxyz
 
-    def _state_trans(self, action):  # 状态转移函数，更新导弹的运动状态
-        # 更新导弹的位置，根据当前速度进行积分
+    def _state_trans(self, action):
         self._position[:] += self.dt * self.get_velocity()
-        # 将更新后的东北天坐标转换为地理坐标（经度、纬度、高度）
-        self._geodetic[:] = NEU2LLA(*self.get_position(), self.lon0, self.lat0, self.alt0)
+        self._geodetic[:] = LLA2NEU(*self.get_position(), self.lon0, self.lat0, self.alt0)
 
-        # 获取当前速度的大小（标量）
         v = np.linalg.norm(self.get_velocity())
-        # 获取导弹当前的俯仰角（theta）和偏航角（phi）
         theta, phi = self.get_rpy()[1:]
-        # 计算推力（T），基于比冲和质量流失速率
         T = self._g * self.Isp * self._dm
-        # 计算空气阻力（D），基于速度平方和导弹的截面积
         D = 0.5 * self._cD * self.S * self.rho * v ** 2
-        # 计算导弹沿着 x 方向的加速度分量
         nx = (T - D) / (self._m * self._g)
-        # 提取导航指令的横向和纵向过载
         ny, nz = action
 
-        # 更新导弹的速度变化（dv），结合推力、阻力和俯仰角
         dv = self._g * (nx - np.sin(theta))
-        # 计算偏航角变化率（dphi），与横向过载和速度相关
         self._dphi = self._g / v * (ny / np.cos(theta))
-        # 计算俯仰角变化率（dtheta），与纵向过载和速度相关
         self._dtheta = self._g / v * (nz - np.cos(theta))
 
-        # 更新速度标量（v），结合速度变化率
         v += self.dt * dv
-        # 更新偏航角（phi），结合偏航角变化率
         phi += self.dt * self._dphi
-        # 更新俯仰角（theta），结合俯仰角变化率
         theta += self.dt * self._dtheta
 
-        # 更新导弹的速度分量（速度在 x、y、z 方向上的投影）
         self._velocity[:] = np.array([
-            v * np.cos(theta) * np.cos(phi),  # x 方向速度分量
-            v * np.cos(theta) * np.sin(phi),  # y 方向速度分量
-            v * np.sin(theta)  # z 方向速度分量
+            v * np.cos(theta) * np.cos(phi),
+            v * np.cos(theta) * np.sin(phi),
+            v * np.sin(theta)
         ])
-        # 更新导弹的姿态角（俯仰角和偏航角）
         self._posture[:] = np.array([0, theta, phi])
 
-        # 更新导弹的质量，如果仍在推力阶段（_t < _t_thrust）
         if self._t < self._t_thrust:
-            self._m = self._m - self.dt * self._dm  # 减少燃料质量
+            self._m = self._m - self.dt * self._dm

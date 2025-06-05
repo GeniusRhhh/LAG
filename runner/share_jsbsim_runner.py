@@ -60,59 +60,75 @@ class ShareJSBSimRunner(Runner):
         if self.model_dir is not None:
             self.restore()
 
+    # 文件：share_jsbsim_runner.py
     def run(self):
-        """运行训练循环。"""
         self.warmup()
         start = time.time()
         self.total_num_steps = 0
         episodes = self.num_env_steps // self.buffer_size // self.n_rollout_threads
         win_rates = []
         for episode in range(episodes):
-            episode_rewards = []  # 存储每个步骤的奖励数组
+            episode_rewards = []
+            episode_actions = []
+            episode_phases = []
             for step in range(self.buffer_size):
                 values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.collect(step)
                 obs, share_obs, rewards, dones, infos = self.envs.step(actions)
-                # 存储每个智能体的奖励，而不是均值
-                episode_rewards.append(rewards[0, :self.num_agents // 2])  # 只取红方智能体奖励
+                episode_rewards.append(rewards[0, :self.num_agents // 2])
+                episode_actions.append(actions[0, :self.num_agents // 2])
+                phase_list = []
+                # 统一处理 infos 的形状
+                infos_dict = infos[0] if len(infos.shape) == 2 else infos
+                for agent_id in range(self.num_agents // 2):
+                    phase_list.append(infos_dict[agent_id].get("current_phase", "unknown"))
+                episode_phases.append(phase_list)
                 data = obs, share_obs, actions, rewards, dones, action_log_probs, values, rnn_states_actor, rnn_states_critic
                 self.insert(data)
             self.compute()
             train_infos = self.train()
             self.total_num_steps = (episode + 1) * self.buffer_size * self.n_rollout_threads
-            if "win" in infos:
-                win_rates.append(infos["win"])
+            if "win" in infos_dict:
+                win_rates.append(infos_dict["win"])
             if episode % self.save_interval == 0 or episode == episodes - 1:
                 self.save(episode)
             if episode % self.log_interval == 0:
                 end = time.time()
-                avg_reward = np.mean([r.mean() for r in episode_rewards])  # 计算平均奖励
+                avg_reward = np.mean([r.mean() for r in episode_rewards])
                 win_rate = np.mean(win_rates[-self.log_interval:]) if win_rates else 0
-                # 从 infos 数组中提取 current_phase，兼容一维和二维数组
+                actions_array = np.array(episode_actions)
+                template_ids = actions_array[:, :, 0]
+                shoot_flags = actions_array[:, :, 1]
+                template_dist = {i: np.sum(template_ids == i) / template_ids.size for i in range(15)}
+                shoot_ratio = np.mean(shoot_flags)
+                phases_array = np.array(episode_phases)
+                phase_counts = {p: np.sum(phases_array == p) / phases_array.size for p in np.unique(phases_array)}
+                # 修复 reward_comps 提取
+                reward_comps = {}
                 for agent_id in range(self.num_agents // 2):
-                    # 调试输出 obs 形状
+                    agent_name = f"A0{agent_id + 1}00"
+                    reward_comps[agent_name] = infos_dict[agent_id].get("reward_details", {})
+                for agent_id in range(self.num_agents // 2):
                     logging.debug(f"obs shape: {obs.shape}, obs[0, {agent_id}] shape: {obs[0, agent_id].shape}")
-                    state = obs[0, agent_id]  # 确保 state 是一个数组
+                    state = obs[0, agent_id]
                     action = actions[0, agent_id]
-                    if len(infos.shape) == 2:  # 形状为 (n_rollout_threads, num_agents)
-                        info_dict = infos[0, agent_id] if infos.shape[0] > 0 else {}
-                    else:  # 形状为 (num_agents,)
-                        info_dict = infos[agent_id] if len(infos) > agent_id else {}
-                    phase = info_dict.get("current_phase", "unknown")
-                    # 确保 episode_rewards[step] 是一个标量
-                    reward = float(episode_rewards[step][agent_id].item()) if isinstance(episode_rewards[step][agent_id], np.ndarray) else float(episode_rewards[step][agent_id])
-                    # 从 state 中正确提取高度、速度和距离，并转换为标量
-                    altitude = float(state[0].item()) * 5000  # 反归一化高度 (norm_obs[0] = height / 5000)
-                    velocity = float(state[5].item()) * 340  # 反归一化速度 (norm_obs[5] = u_mps / 340)
-                    distance_idx = 14 + 4  # 第一个敌机的 R/10000 (offset=14, R 在第 4 维)
-                    distance = float(state[distance_idx].item()) * 10000 if len(state) > distance_idx else float('inf')  # 反归一化距离
-                    # 如果 action 是数组，选择合适的方式打印
-                    action_scalar = action.tolist() if isinstance(action, np.ndarray) and action.size > 1 else float(action.item())
-                    # 调试输出 state 和 reward
+                    phase = infos_dict[agent_id].get("current_phase", "unknown")
+                    reward = float(episode_rewards[step][agent_id].item()) if isinstance(
+                        episode_rewards[step][agent_id], np.ndarray) else float(episode_rewards[step][agent_id])
+                    altitude = float(state[0].item()) * 5000
+                    velocity = float(state[5].item()) * 340
+                    distance_idx = 14 + 4
+                    distance = float(state[distance_idx].item()) * 10000 if len(state) > distance_idx else float('inf')
+                    action_scalar = action.tolist() if isinstance(action, np.ndarray) and action.size > 1 else float(
+                        action.item())
                     logging.debug(f"Agent {agent_id} state: {state}, reward: {reward}")
                     logging.info(
                         f"Agent {agent_id} - Episode {episode}: Altitude={altitude:.1f}m, Velocity={velocity:.1f}m/s, Distance={distance:.1f}m, Action={action_scalar}, Phase={phase}, Reward={reward:.2f}")
                 logging.info(
                     f"Scenario: {self.all_args.scenario_name} ... FPS: {int(self.total_num_steps / (end - start))}")
+                logging.info(f"Action Distribution (template_id): {template_dist}")
+                logging.info(f"Shoot Action Ratio: {shoot_ratio:.3f}")
+                logging.info(f"Phase Distribution: {phase_counts}")
+                logging.info(f"Reward Components: {reward_comps}")
                 train_infos["average_episode_rewards"] = avg_reward
                 train_infos["win_rate"] = win_rate
                 logging.info(f"Average episode reward: {avg_reward}, Win rate: {win_rate}")
