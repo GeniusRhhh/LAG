@@ -77,7 +77,6 @@ class ShareJSBSimRunner(Runner):
                 episode_rewards.append(rewards[0, :self.num_agents // 2])
                 episode_actions.append(actions[0, :self.num_agents // 2])
                 phase_list = []
-                # 统一处理 infos 的形状
                 infos_dict = infos[0] if len(infos.shape) == 2 else infos
                 for agent_id in range(self.num_agents // 2):
                     phase_list.append(infos_dict[agent_id].get("current_phase", "unknown"))
@@ -102,13 +101,11 @@ class ShareJSBSimRunner(Runner):
                 shoot_ratio = np.mean(shoot_flags)
                 phases_array = np.array(episode_phases)
                 phase_counts = {p: np.sum(phases_array == p) / phases_array.size for p in np.unique(phases_array)}
-                # 修复 reward_comps 提取
                 reward_comps = {}
                 for agent_id in range(self.num_agents // 2):
                     agent_name = f"A0{agent_id + 1}00"
                     reward_comps[agent_name] = infos_dict[agent_id].get("reward_details", {})
                 for agent_id in range(self.num_agents // 2):
-                    logging.debug(f"obs shape: {obs.shape}, obs[0, {agent_id}] shape: {obs[0, agent_id].shape}")
                     state = obs[0, agent_id]
                     action = actions[0, agent_id]
                     phase = infos_dict[agent_id].get("current_phase", "unknown")
