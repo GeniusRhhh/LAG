@@ -559,6 +559,7 @@ from ..reward_functions import AltitudeReward, PostureReward, EventDrivenReward,
 from ..utils.utils import get_AO_TA_R, get2d_AO_TA_R, in_range_rad, LLA2NEU, get_root_dir
 from ..model.baseline_actor import BaselineActor
 
+
 class SingleCombatTask(BaseTask):
     """
     单一战斗任务类，继承自基础任务类 BaseTask。
@@ -647,16 +648,6 @@ class SingleCombatTask(BaseTask):
         high = np.array([1, 1, 1, 0.9], dtype=np.float32)
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
-    # def normalize_action(self, env, agent_id, action):
-    #     """
-    #     规范化动作，确保动作在连续动作空间范围内。
-    #     """
-    #     if self.use_baseline and agent_id in env.enm_ids:
-    #         action = self.baseline_agent.get_action(env.agents[agent_id])
-    #         return action
-    #     low = self.action_space.low
-    #     high = self.action_space.high
-    #     return np.clip(action, low, high)
     def normalize_action(self, env, agent_id, action):
         """
         规范化动作，确保动作在连续动作空间范围内。
@@ -796,7 +787,6 @@ class SingleCombatTask(BaseTask):
             return StraightFlyAgent()
         else:
             raise NotImplementedError
-
 class HierarchicalSingleCombatTask(SingleCombatTask):
     """
     分层单一战斗任务，扩展自单一战斗任务，增加了更复杂的动作和策略处理。

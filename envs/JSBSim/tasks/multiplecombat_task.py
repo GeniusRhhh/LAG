@@ -2,11 +2,20 @@ import logging
 import numpy as np
 import torch
 from gymnasium import spaces
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List
 from ..tasks import SingleCombatTask
 from ..core.catalog import Catalog as c
-from ..core.simulatior import MissileSimulator
-from ..reward_functions import TemplateReward, TacticalReward, AltitudeReward, PostureReward, EventDrivenReward, MissilePostureReward
+from ..core.simulatior import BaseSimulator,AircraftSimulator,MissileSimulator
+from ..reward_functions import (
+    TemplateReward,
+    TacticalReward,
+    AltitudeReward,
+    PostureReward,
+    EventDrivenReward,
+    MissilePostureReward,
+    RadarLockReward,
+    MissileHitReward
+)
 from ..termination_conditions import ExtremeState, LowAltitude, Overload, Timeout, SafeReturn
 from ..utils.utils import get_AO_TA_R, LLA2NEU, get_root_dir
 from ..model.baseline_actor import BaselineActor
@@ -25,7 +34,9 @@ class MultipleCombatTask(SingleCombatTask):
         self.reward_functions = [
             AltitudeReward(self.config),
             PostureReward(self.config),
-            EventDrivenReward(self.config)
+            EventDrivenReward(self.config),
+            RadarLockReward(self.config),  # 新增雷达锁定奖励
+            MissileHitReward(self.config)  # 新增导弹命中奖励
         ]
         self.termination_conditions = [
             SafeReturn(self.config),
@@ -34,6 +45,10 @@ class MultipleCombatTask(SingleCombatTask):
             LowAltitude(self.config),
             Timeout(self.config),
         ]
+        self.allocation_counter = 0
+        self.allocation_frequency = 120  # 每 12 秒（0.1s * 120）重新分配目标
+        logging.info(f"MultipleCombatTask initialized: num_agents={self.num_agents}, "
+                     f"allocation_frequency={self.allocation_frequency}")
 
     @property
     def num_agents(self) -> int:
@@ -126,6 +141,7 @@ class MultipleCombatTask(SingleCombatTask):
             norm_obs[offset + 5] = side_flag
             offset += 6
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
+        logging.debug(f"Agent {agent_id} observation: {norm_obs.tolist()}")
         return norm_obs
 
     def normalize_action(self, env, agent_id, action):
@@ -144,6 +160,9 @@ class MultipleCombatTask(SingleCombatTask):
         norm_act[1] = action[1] * 2. / (self.action_space.nvec[1] - 1.) - 1.
         norm_act[2] = action[2] * 2. / (self.action_space.nvec[2] - 1.) - 1.
         norm_act[3] = action[3] * 0.5 / (self.action_space.nvec[3] - 1.) + 0.4
+        # 约束俯仰角速度，防止坠毁
+        norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
+        logging.debug(f"Agent {agent_id} normalized action: raw={action.tolist()}, norm={norm_act.tolist()}")
         return norm_act
 
     def get_reward(self, env, agent_id, info: dict = ...) -> Tuple[float, dict]:
@@ -161,6 +180,56 @@ class MultipleCombatTask(SingleCombatTask):
             return super().get_reward(env, agent_id, info=info)
         else:
             return 0.0, info
+
+    def allocate_targets(self, env):
+        """动态分配目标。
+
+        Args:
+            env: 环境对象。
+        """
+        alive_agents = {k: v for k, v in env.agents.items() if v.is_alive}
+        red_team = {k: v for k, v in alive_agents.items() if v.color == "Red"}
+        blue_team = {k: v for k, v in alive_agents.items() if v.color == "Blue"}
+
+        # 为红方分配目标
+        for agent_id, agent in red_team.items():
+            if not agent.is_leader():
+                continue
+            min_threat = float("inf")
+            closest_enemy = None
+            for enemy_id, enemy in blue_team.items():
+                distance = np.linalg.norm(agent.get_position() - enemy.get_position())
+                threat_score = distance / (1 + np.linalg.norm(enemy.get_velocity()) / 1000)  # 速度加权
+                if threat_score < min_threat:
+                    min_threat = threat_score
+                    closest_enemy = enemy
+            if closest_enemy:
+                self._target_allocation[agent_id] = [closest_enemy]
+                for wingman_id in red_team:
+                    if wingman_id != agent_id:
+                        self._target_allocation[wingman_id] = [closest_enemy]
+                logging.info(f"Red leader {agent_id} allocated target: {closest_enemy.uid}, "
+                             f"distance={min_threat:.1f}m, threat_score={threat_score:.2f}")
+
+        # 为蓝方分配目标
+        for agent_id, agent in blue_team.items():
+            if not agent.is_leader():
+                continue
+            min_threat = float("inf")
+            closest_enemy = None
+            for enemy_id, enemy in red_team.items():
+                distance = np.linalg.norm(agent.get_position() - enemy.get_position())
+                threat_score = distance / (1 + np.linalg.norm(enemy.get_velocity()) / 1000)
+                if threat_score < min_threat:
+                    min_threat = threat_score
+                    closest_enemy = enemy
+            if closest_enemy:
+                self._target_allocation[agent_id] = [closest_enemy]
+                for wingman_id in blue_team:
+                    if wingman_id != agent_id:
+                        self._target_allocation[wingman_id] = [closest_enemy]
+                logging.info(f"Blue leader {agent_id} allocated target: {closest_enemy.uid}, "
+                             f"distance={min_threat:.1f}m, threat_score={threat_score:.2f}")
 
 
 class HierarchicalMultipleCombatTask(MultipleCombatTask):
@@ -211,6 +280,9 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         norm_act[1] = action[1] / 20 - 1.
         norm_act[2] = action[2] / 20 - 1.
         norm_act[3] = action[3] / 58 + 0.4
+        # 约束俯仰角速度
+        norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
+        logging.debug(f"Agent {agent_id} hierarchical normalized action: raw={action.tolist()}, norm={norm_act.tolist()}")
         return norm_act
 
     def reset(self, env):
@@ -223,22 +295,25 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
             dict: 初始观测。
         """
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
+        self.allocation_counter = 0
         return super().reset(env)
 
 
 class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def __init__(self, config: str):
         super().__init__(config)
-        self.max_attack_angle = getattr(self.config, 'max_attack_angle', 75)  # 放宽角度限制
-        self.max_attack_distance = getattr(self.config, 'max_attack_distance', 60000)  # 放宽距离
-        self.min_attack_interval = getattr(self.config, 'min_attack_interval', 30)  # 缩短间隔
+        self.max_attack_angle = getattr(self.config, 'max_attack_angle', 60)  # 调整为 60 度
+        self.max_attack_distance = getattr(self.config, 'max_attack_distance', 35000)  # 调整为 35km
+        self.min_attack_interval = getattr(self.config, 'min_attack_interval', 60)  # 12s（60 * 0.2s）
         self.reward_functions = [
             AltitudeReward(self.config),
             PostureReward(self.config),
             MissilePostureReward(self.config),
             EventDrivenReward(self.config),
             TacticalReward(self.config),
-            TemplateReward(self.config)
+            TemplateReward(self.config),
+            RadarLockReward(self.config),  # 新增
+            MissileHitReward(self.config)  # 新增
         ]
         self.termination_conditions = [
             SafeReturn(self.config),
@@ -259,6 +334,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         self._maneuver_history = []
         self._target_allocation = {}
         self.rewards = {agent_id: 0.0 for agent_id in ['A0100', 'A0200', 'B0100', 'B0200']}
+        logging.info(f"HierarchicalMultipleCombatShootTask initialized: max_attack_angle={self.max_attack_angle}, "
+                     f"max_attack_distance={self.max_attack_distance}, min_attack_interval={self.min_attack_interval}")
 
     def load_observation_space(self):
         self.obs_length = 14 + self.num_agents * 6 + 6 + 2
@@ -317,6 +394,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         norm_obs[offset] = 1 if partner and partner.is_alive else 0
         norm_obs[offset + 1] = self._remaining_missiles.get(agent_id, 0) / 2
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
+        logging.debug(f"Agent {agent_id} detailed observation: {norm_obs.tolist()}")
         return norm_obs
 
     def normalize_action(self, env, agent_id, action):
@@ -340,6 +418,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_act[1] = np.clip(action[1] / 20 - 1., -1, 1)
             norm_act[2] = np.clip(action[2] / 20 - 1., -1, 1)
             norm_act[3] = np.clip(action[3] / 58 + 0.4, 0.4, 0.9)
+            # 约束俯仰角速度
+            norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
             logging.debug(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
                          f"raw_action={action.tolist()}, norm_act={norm_act.tolist()}, lowlevel_policy_output")
         else:
@@ -352,19 +432,21 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             else:
                 heading_cmd = float(heading_cmd)
             altitude_cmd = tactical_action["altitude_cmd"]
-            if state["has_warning"] and current_altitude > 2000:  # 提高安全高度
-                altitude_cmd = max(altitude_cmd, -500)  # 限制下降率
+            if state["has_warning"] and current_altitude > 2000:
+                altitude_cmd = max(altitude_cmd, -500)
             action = [
-                heading_cmd / np.pi,  # 调整归一化因子
-                altitude_cmd / 5000,  # 与 JSBSimController 一致
+                heading_cmd / np.pi,
+                altitude_cmd / 5000,
                 0,
-                np.clip(tactical_action["velocity_cmd"] / 340, 0.8, 2.0)  # 动态速度
+                np.clip(tactical_action["velocity_cmd"] / 340, 0.8, 2.0)
             ]
             norm_act = np.zeros(4)
             norm_act[0] = np.clip(action[0], -1, 1)
             norm_act[1] = np.clip(action[1], -1, 1)
             norm_act[2] = np.clip(action[2], -1, 1)
             norm_act[3] = np.clip(action[3], 0.4, 0.9)
+            # 约束俯仰角速度
+            norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
             logging.debug(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
                          f"raw_action={action}, norm_act={norm_act.tolist()}, "
                          f"heading_cmd={heading_cmd}, altitude_cmd={altitude_cmd}, velocity_cmd={tactical_action['velocity_cmd']}")
@@ -374,6 +456,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
         enemies = env.agents[agent_id].enemies
         enemy_distances = [np.linalg.norm(enemy.get_position() - env.agents[agent_id].get_position()) for enemy in enemies]
+        enemy_velocities = [np.linalg.norm(enemy.get_velocity()) for enemy in enemies]
         partners = env.agents[agent_id].partners
         partner_angle = np.arctan2(partners[0].get_position()[1] - ego_state[1],
                                    partners[0].get_position()[0] - ego_state[0]) if partners else 0
@@ -384,21 +467,31 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             "enemy_angle_off": self.get_enemy_angle(env, agent_id),
             "missile_distance": missile_distance
         })
-        return {
-            "current_altitude": ego_state[2],  # 添加当前高度
-            "enemy_distance": min(enemy_distances) if enemy_distances else 100000,  # 避免 np.inf
+        # 动态射击概率
+        shoot_probability = 0.1
+        if radar_state["radar_lock"] and min(enemy_distances) <= self.max_attack_distance:
+            shoot_probability = 0.5 * (1 - min(enemy_distances) / self.max_attack_distance)
+        state_dict = {
+            "current_altitude": ego_state[2],
+            "enemy_distance": min(enemy_distances) if enemy_distances else 100000,
+            "enemy_velocity": min(enemy_velocities) if enemy_velocities else 340.0,  # 新增目标速度
             "enemy_angle_off": self.get_enemy_angle(env, agent_id),
             "missile_distance": missile_distance,
             "radar_lock": radar_state["radar_lock"],
-            "has_warning": missile_distance < 60000 or radar_state["has_warning"],  # 放宽警告范围
+            "has_warning": missile_distance < 60000 or radar_state["has_warning"],
             "missile_launched": self._shoot_action.get(agent_id, False),
             "missile_active": bool(env.agents[agent_id].launch_missiles),
             "missile_hit": any(missile.is_success for missile in env.agents[agent_id].launch_missiles),
             "is_leader": env.agents[agent_id].is_leader(),
             "partner_angle": np.rad2deg(partner_angle),
             "targets_assigned": bool(self._target_allocation.get(agent_id)),
-            "attack_decided": self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[5]
+            "attack_decided": self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[5],
+            "shoot_probability": shoot_probability  # 供 BetaShootBernoulli 使用
         }
+        logging.debug(f"Agent {agent_id} state_dict: distance={state_dict['enemy_distance']:.1f}m, "
+                      f"velocity={state_dict['enemy_velocity']:.1f}m/s, radar_lock={state_dict['radar_lock']}, "
+                      f"shoot_prob={state_dict['shoot_probability']:.3f}")
+        return state_dict
 
     def get_enemy_angle(self, env, agent_id):
         ego_pos = env.agents[agent_id].get_position()
@@ -412,28 +505,11 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         return np.rad2deg(angle)
 
     def allocate_targets(self, env):
-        for agent_id in env.agents.keys():
-            if env.agents[agent_id].is_leader():
-                state = self.get_state_dict(env, agent_id)
-                if state["radar_lock"] and 10000 <= state["enemy_distance"] <= 60000:  # 放宽分配范围
-                    enemies = sorted(
-                        env.agents[agent_id].enemies,
-                        key=lambda e: np.linalg.norm(e.get_velocity()) + 0.1 * np.linalg.norm(e.get_position() - env.agents[agent_id].get_position())
-                    )
-                    if len(enemies) >= 2:
-                        self._target_allocation[agent_id] = [enemies[0]]
-                        partner_id = env.agents[agent_id].partners[0].uid if env.agents[agent_id].partners else None
-                        if partner_id:
-                            self._target_allocation[partner_id] = [enemies[1]]
-                            logging.info(f"Target allocation: Leader {agent_id} -> {enemies[0].uid}, Wingman {partner_id} -> {enemies[1].uid}")
-                    elif enemies:
-                        self._target_allocation[agent_id] = [enemies[0]]
-                        partner_id = env.agents[agent_id].partners[0].uid if env.agents[agent_id].partners else None
-                        if partner_id:
-                            self._target_allocation[partner_id] = [enemies[0]]
-                            logging.info(f"Target allocation: Leader {agent_id} -> {enemies[0].uid}, Wingman {partner_id} -> {enemies[0].uid}")
-                    else:
-                        logging.warning(f"Leader {agent_id} has no enemy targets to allocate")
+        self.allocation_counter += 1
+        if self.allocation_counter < self.allocation_frequency:
+            return
+        self.allocation_counter = 0
+        super().allocate_targets(env)
 
     def reset(self, env):
         self._last_shoot_time = {agent_id: -self.min_attack_interval for agent_id in env.agents.keys()}
@@ -448,9 +524,11 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             for agent_id in env.agents.keys()
         }
         self.rewards = {agent_id: 0.0 for agent_id in env.agents.keys()}
+        self.allocation_counter = 0
         for agent_id in env.agents.keys():
             is_leader = agent_id.endswith("100")
             env.agents[agent_id].set_leader(is_leader)
+        logging.info("HierarchicalMultipleCombatShootTask reset: tactical templates and allocations cleared")
         return super().reset(env)
 
     def get_tactical_state(self, agent_id):
@@ -465,7 +543,12 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         super().step(env)
         for agent_id in env.agents.keys():
             state = self.get_state_dict(env, agent_id)
+            prev_phase = self.tactical_templates[agent_id].current_phase
             self.tactical_templates[agent_id].update_phase(state)
+            curr_phase = self.tactical_templates[agent_id].current_phase
+            if prev_phase != curr_phase:
+                logging.info(f"Agent {agent_id} phase changed: {prev_phase} -> {curr_phase}, "
+                             f"distance={state['enemy_distance']:.1f}m, radar_lock={state['radar_lock']}")
             if self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[4]:
                 self.allocate_targets(env)
 
@@ -478,7 +561,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             distance = target_distance[target_index] if target_distance else np.inf
             attack_angle = np.rad2deg(
                 np.arccos(np.clip(np.sum(target * heading) / (distance * np.linalg.norm(heading) + 1e-8), -1, 1)))
-            shoot_interval = env.current_step - self._last_shoot_time[agent_id]
+            shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
             state = self.get_state_dict(env, agent_id)
             shoot_flag = (
                 agent.is_alive and
@@ -502,7 +585,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 self._remaining_missiles[agent_id] -= 1
                 self._last_shoot_time[agent_id] = env.current_step
                 logging.info(
-                    f"Agent {agent_id} launched missile: target={target_list[target_index].uid}, remaining missiles={self._remaining_missiles[agent_id]}")
+                    f"Agent {agent_id} launched missile: target={target_list[target_index].uid}, "
+                    f"remaining_missiles={self._remaining_missiles[agent_id]}")
                 self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
             # 记录战术动作
             if self._last_action.get(agent_id, [0, 0])[0] != 0:
@@ -511,9 +595,9 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 self._maneuver_history.append((agent_id, maneuver_name, env.current_step))
 
         obs = {agent_id: self.get_obs(env, agent_id) for agent_id in env.agents.keys()}
-        all_obs = np.stack([obs[agent_id] for agent_id in env.agents.keys()], axis=0)
-        share_obs = np.tile(all_obs.flatten(), (len(env.agents), 1))
-        share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(env.agents.keys())}
+        all_obs = np.stack([obs[agent_id] for agent_id in sorted(env.agents.keys())], axis=0)
+        share_obs = np.tile(all_obs.flatten(), (len(env.agents.keys()), 1))
+        share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(sorted(env.agents.keys()))}
 
         rewards = {}
         dones = {}
@@ -521,9 +605,13 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         for agent_id in env.agents.keys():
             reward_sum = 0.0
             reward_details = {}
+            state_dict = self.get_state_dict(env, agent_id)
             for func in self.reward_functions:
-                reward_info = func.get_reward(self, env, agent_id)
-                if isinstance(reward_info, (tuple, list)) and len(reward_info) > 0:
+                if isinstance(func, (RadarLockReward, MissileHitReward)):
+                    reward_info = func.get_reward(self, env, agent_id, state_dict)
+                else:
+                    reward_info = func.get_reward(self, env, agent_id)
+                if isinstance(reward_info, (tuple, list)) and reward_info:
                     reward_value = reward_info[0]
                     reward_details[func.__class__.__name__] = reward_value
                 else:
@@ -536,18 +624,17 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             dones[agent_id] = [done]
             infos[agent_id] = self.get_tactical_state(agent_id)
             infos[agent_id]["reward_details"] = reward_details
-            if env.current_step % 50 == 0:  # 增加日志频率
-                state_dict = self.get_state_dict(env, agent_id)
-                logging.debug(
+            if env.current_step % 50 == 0:
+                logging.info(
                     f"Step {env.current_step} - Agent {agent_id}: "
-                    f"Reward={reward_sum:.3f}, Reward Details={reward_details}, "
+                    f"Reward={reward_sum:.3f}, RewardDetails={reward_details}, "
                     f"Action={self._last_action.get(agent_id, [0, 0])}, "
                     f"Phase={self.tactical_templates[agent_id].current_phase}, "
-                    f"Enemy Distance={state_dict['enemy_distance']:.1f}m, "
-                    f"Attack Angle={state_dict['enemy_angle_off']:.1f}deg, "
-                    f"Radar Lock={state_dict['radar_lock']}, "
-                    f"Missile Launched={state_dict['missile_launched']}, "
-                    f"Remaining Missiles={self._remaining_missiles.get(agent_id, 0)}, "
-                    f"Altitude={state_dict['current_altitude']:.1f}m"
-                )
+                    f"EnemyDistance={state_dict['enemy_distance']:.1f}m, "
+                    f"AttackAngle={state_dict['enemy_angle_off']:.1f}deg, "
+                    f"RadarLock={state_dict['radar_lock']}, "
+                    f"MissileLaunched={state_dict['missile_launched']}, "
+                    f"MissileHit={state_dict['missile_hit']}, "
+                    f"RemainingMissiles={self._remaining_missiles.get(agent_id, 0)}, "
+                    f"Altitude={state_dict['current_altitude']:.1f}m")
         return obs, share_obs, rewards, dones, infos

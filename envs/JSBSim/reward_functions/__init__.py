@@ -7,3 +7,5 @@ from .missile_posture_reward import MissilePostureReward
 from .shoot_penalty_reward import ShootPenaltyReward
 from .TacticalReward import TacticalReward
 from .TemplateReward import TemplateReward
+from .RadarLockReward import RadarLockReward
+from .MissileHitReward import MissileHitReward

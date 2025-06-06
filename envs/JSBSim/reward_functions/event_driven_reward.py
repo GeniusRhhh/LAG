@@ -21,6 +21,6 @@ class EventDrivenReward(BaseRewardFunction):
         for missile in env.agents[agent_id].launch_missiles:
             if missile.is_success:
                 reward += 50
-            elif missile.is_active:
+            elif missile.is_alive:
                 reward += 5  # 中间过程奖励
         return self._process(reward, agent_id)

@@ -5,6 +5,12 @@ from abc import ABC, abstractmethod
 from ..core.catalog import Catalog as c
 
 
+from abc import ABC, abstractmethod
+import numpy as np
+from gymnasium import spaces
+from typing import Tuple, Dict, Any
+from ..core.catalog import Catalog as c
+
 class BaseTask(ABC):
     """
     基础任务类。
@@ -79,9 +85,17 @@ class BaseTask(ABC):
                 reward(float): 当前时间步的总奖励
                 info(dict): 附加信息
         """
+        from ..reward_functions import RadarLockReward, MissileHitReward
         reward = 0.0
+        state_dict = self.get_state_dict(env, agent_id) if hasattr(self, 'get_state_dict') else {}
         for reward_function in self.reward_functions:
-            reward += reward_function.get_reward(self, env, agent_id)
+            if isinstance(reward_function, (RadarLockReward, MissileHitReward)):
+                reward_info = reward_function.get_reward(self, env, agent_id, state_dict)
+                reward_value = reward_info[0] if isinstance(reward_info, (tuple, list)) else reward_info
+            else:
+                reward_info = reward_function.get_reward(self, env, agent_id)
+                reward_value = reward_info[0] if isinstance(reward_info, (tuple, list)) else reward_info
+            reward += reward_value
         return reward, info
 
     def get_termination(self, env, agent_id, info={}) -> Tuple[bool, dict]:
@@ -115,7 +129,6 @@ class BaseTask(ABC):
     def normalize_action(self, env, agent_id, action):
         """将动作标准化，以符合动作空间。"""
         return np.array(action)
-
 
 
 # import logging
