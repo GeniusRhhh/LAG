@@ -116,7 +116,7 @@ class PostureReward(BaseRewardFunction):
                                          (1. + np.exp(-(R - self.target_dist + 1) * 0.8)), 0.3, 1), np.sign(7 - R))
         elif version == 'v3':
             # 版本 v3 的距离奖励函数（默认版本）
-            return lambda R: 1 * (R < 5) + (R >= 5) * np.clip(-0.032 * R**2 + 0.284 * R + 0.38, 0, 1) + np.clip(np.exp(-0.16 * R), 0, 0.2)
+            return lambda R: 1 * (R < 5) + (R >= 5) * np.clip(-0.05 * R**2 + 0.3 * R + 0.4, 0, 1)
         else:
             # 如果版本号未知，抛出异常
             raise NotImplementedError(f"未知的距离奖励函数版本：{version}")

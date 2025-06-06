@@ -290,7 +290,7 @@ class MissileSimulator(BaseSimulator):
         missile.target(target)
         return missile
 
-    def __init__(self, uid="A0101", color="Red", model="AIM-120", dt=1 / 12):
+    def __init__(self, uid="A0101", color="Red", model="AIM-120C", dt=1 / 12):
         super().__init__(uid, color, dt)
         self.__status = MissileSimulator.INACTIVE
         self.model = model

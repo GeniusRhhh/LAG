@@ -246,8 +246,10 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         self.lowlevel_policy.load_state_dict(torch.load(get_root_dir() + '/model/baseline_model.pt', map_location=torch.device('cpu')))
         self.lowlevel_policy.eval()
         self.norm_delta_altitude = np.array([0.1, 0, -0.1])
-        self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
-        self.norm_delta_velocity = np.array([0.05, 0, -0.05])
+        # self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
+        # self.norm_delta_velocity = np.array([0.05, 0, -0.05])
+        self.norm_delta_heading = np.array([-np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3])
+        self.norm_delta_altitude = np.array([0.2, 0, -0.2])
         self._inner_rnn_states = {}
 
     def load_action_space(self):
@@ -302,7 +304,7 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
 class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def __init__(self, config: str):
         super().__init__(config)
-        self.max_attack_angle = getattr(self.config, 'max_attack_angle', 60)  # 调整为 60 度
+        self.max_attack_angle = getattr(self.config, 'max_attack_angle', 30)  # 调整为 60 度
         self.max_attack_distance = getattr(self.config, 'max_attack_distance', 35000)  # 调整为 35km
         self.min_attack_interval = getattr(self.config, 'min_attack_interval', 60)  # 12s（60 * 0.2s）
         self.reward_functions = [
@@ -312,8 +314,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             EventDrivenReward(self.config),
             TacticalReward(self.config),
             TemplateReward(self.config),
-            RadarLockReward(self.config),  # 新增
-            MissileHitReward(self.config)  # 新增
+            RadarLockReward(self.config),
+            MissileHitReward(self.config)
         ]
         self.termination_conditions = [
             SafeReturn(self.config),
@@ -419,8 +421,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_act[2] = np.clip(action[2] / 20 - 1., -1, 1)
             norm_act[3] = np.clip(action[3] / 58 + 0.4, 0.4, 0.9)
             # 约束俯仰角速度
-            norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
-            logging.debug(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
+            norm_act[1] = np.clip(norm_act[1], -0.8, 0.8)
+            logging.info(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
                          f"raw_action={action.tolist()}, norm_act={norm_act.tolist()}, lowlevel_policy_output")
         else:
             tactical_action = self.tactical_templates[agent_id].get_action(template_id, state)
