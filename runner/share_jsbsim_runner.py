@@ -158,10 +158,14 @@ class ShareJSBSimRunner(Runner):
             tuple: 值、动作、概率、RNN 状态等。
         """
         self.policy.prep_rollout()
+        obs = np.concatenate(self.buffer.obs[step])
+        rnn_states_actor = np.concatenate(self.buffer.rnn_states_actor[step])
+        if np.isnan(obs).any() or np.isnan(rnn_states_actor).any():
+            logging.error(f"NaN detected in obs or rnn_states at step {step}: obs={obs}, rnn_states={rnn_states_actor}")
         values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.policy.get_actions(
             np.concatenate(self.buffer.share_obs[step]),
-            np.concatenate(self.buffer.obs[step]),
-            np.concatenate(self.buffer.rnn_states_actor[step]),
+            obs,
+            rnn_states_actor,
             np.concatenate(self.buffer.rnn_states_critic[step]),
             np.concatenate(self.buffer.masks[step]))
         values = np.array(np.split(_t2n(values), self.n_rollout_threads))

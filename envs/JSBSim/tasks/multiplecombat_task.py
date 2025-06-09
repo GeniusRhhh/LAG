@@ -46,7 +46,7 @@ class MultipleCombatTask(SingleCombatTask):
             Timeout(self.config),
         ]
         self.allocation_counter = 0
-        self.allocation_frequency = 120  # 每 12 秒（0.1s * 120）重新分配目标
+        self.allocation_frequency = 25  # 每 4 秒（0.2s * 20）重新分配目标
         logging.info(f"MultipleCombatTask initialized: num_agents={self.num_agents}, "
                      f"allocation_frequency={self.allocation_frequency}")
 
@@ -245,11 +245,12 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         self.lowlevel_policy = BaselineActor()
         self.lowlevel_policy.load_state_dict(torch.load(get_root_dir() + '/model/baseline_model.pt', map_location=torch.device('cpu')))
         self.lowlevel_policy.eval()
-        self.norm_delta_altitude = np.array([0.1, 0, -0.1])
+        # self.norm_delta_altitude = np.array([0.1, 0, -0.1])
         # self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
         # self.norm_delta_velocity = np.array([0.05, 0, -0.05])
-        self.norm_delta_heading = np.array([-np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3])
-        self.norm_delta_altitude = np.array([0.2, 0, -0.2])
+        self.norm_delta_altitude = np.array([0.5, 0.25, 0, -0.25, -0.5])  # 扩展高度范围
+        self.norm_delta_heading = np.array([-np.pi / 2, -np.pi / 4, 0, np.pi / 4, np.pi / 2])  # 扩展航向范围
+        self.norm_delta_velocity = np.array([0.1, 0.05, 0, -0.05, -0.1])  # 扩展速度范围
         self._inner_rnn_states = {}
 
     def load_action_space(self):
@@ -304,9 +305,9 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
 class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def __init__(self, config: str):
         super().__init__(config)
-        self.max_attack_angle = getattr(self.config, 'max_attack_angle', 30)  # 调整为 60 度
+        self.max_attack_angle = getattr(self.config, 'max_attack_angle', 60)  # 调整为 60 度
         self.max_attack_distance = getattr(self.config, 'max_attack_distance', 35000)  # 调整为 35km
-        self.min_attack_interval = getattr(self.config, 'min_attack_interval', 60)  # 12s（60 * 0.2s）
+        self.min_attack_interval = getattr(self.config, 'min_attack_interval', 30)  # 12s（60 * 0.2s）
         self.reward_functions = [
             AltitudeReward(self.config),
             PostureReward(self.config),
@@ -367,7 +368,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         norm_obs[10] = 1 if radar_state["has_warning"] else 0
         norm_obs[11] = 1 if env.agents[agent_id].is_leader() else 0
         norm_obs[12] = len(self._target_allocation.get(agent_id, []))
-        norm_obs[13] = self.tactical_templates[agent_id].PHASES.index(self.tactical_templates[agent_id].current_phase) / len(self.tactical_templates[agent_id].PHASES)
+        norm_obs[13] = self.tactical_templates[agent_id].PHASES.index(
+            self.tactical_templates[agent_id].current_phase) / len(self.tactical_templates[agent_id].PHASES)
         offset = 14
         for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
             state = np.array(sim.get_property_values(self.state_var))
@@ -381,6 +383,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[offset + 4] = R / 10000
             norm_obs[offset + 5] = side_flag
             offset += 6
+        # 处理导弹数据，添加默认值
         missile_sim = env.agents[agent_id].check_missile_warning()
         if missile_sim is not None:
             missile_feature = np.concatenate((missile_sim.get_position(), missile_sim.get_velocity()))
@@ -391,6 +394,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[offset + 3] = ego_TA
             norm_obs[offset + 4] = R / 10000
             norm_obs[offset + 5] = side_flag
+        else:
+            norm_obs[offset:offset + 6] = 0.0  # 默认值，避免 nan
         offset += 6
         partner = env.agents[agent_id].partners[0] if env.agents[agent_id].partners else None
         norm_obs[offset] = 1 if partner and partner.is_alive else 0
@@ -404,12 +409,13 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         self._shoot_action[agent_id] = shoot
         self._last_action[agent_id] = action
         state = self.get_state_dict(env, agent_id)
+
         if template_id == 0:
             raw_obs = self.get_obs(env, agent_id)
             input_obs = np.zeros(12)
-            input_obs[0] = 0.0
-            input_obs[1] = 0.0
-            input_obs[2] = 0.0
+            input_obs[0] = self.norm_delta_altitude[np.random.randint(5)]  # 随机选择高度指令
+            input_obs[1] = self.norm_delta_heading[np.random.randint(5)]  # 随机选择航向指令
+            input_obs[2] = self.norm_delta_velocity[np.random.randint(5)]  # 随机选择速度指令
             input_obs[3:12] = raw_obs[:9]
             input_obs = np.expand_dims(input_obs, axis=0)
             _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])
@@ -419,11 +425,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_act[0] = np.clip(action[0] / 20 - 1., -1, 1)
             norm_act[1] = np.clip(action[1] / 20 - 1., -1, 1)
             norm_act[2] = np.clip(action[2] / 20 - 1., -1, 1)
-            norm_act[3] = np.clip(action[3] / 58 + 0.4, 0.4, 0.9)
-            # 约束俯仰角速度
-            norm_act[1] = np.clip(norm_act[1], -0.8, 0.8)
-            logging.info(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
-                         f"raw_action={action.tolist()}, norm_act={norm_act.tolist()}, lowlevel_policy_output")
+            norm_act[3] = np.clip(action[3] / 58 + 0.4, 0.4, 0.9)  # 提高油门下限
+            norm_act[1] = np.clip(norm_act[1], -0.8, 0.8)  # 放宽俯仰角限制
         else:
             tactical_action = self.tactical_templates[agent_id].get_action(template_id, state)
             ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
@@ -435,48 +438,39 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 heading_cmd = float(heading_cmd)
             altitude_cmd = tactical_action["altitude_cmd"]
             if state["has_warning"] and current_altitude > 2000:
-                altitude_cmd = max(altitude_cmd, -500)
-            action = [
-                heading_cmd / np.pi,
-                altitude_cmd / 5000,
-                0,
-                np.clip(tactical_action["velocity_cmd"] / 340, 0.8, 2.0)
-            ]
+                altitude_cmd = max(altitude_cmd, -1000)  # 更强的下降机动
             norm_act = np.zeros(4)
-            norm_act[0] = np.clip(action[0], -1, 1)
-            norm_act[1] = np.clip(action[1], -1, 1)
-            norm_act[2] = np.clip(action[2], -1, 1)
-            norm_act[3] = np.clip(action[3], 0.4, 0.9)
-            # 约束俯仰角速度
-            norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
-            logging.debug(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
-                         f"raw_action={action}, norm_act={norm_act.tolist()}, "
-                         f"heading_cmd={heading_cmd}, altitude_cmd={altitude_cmd}, velocity_cmd={tactical_action['velocity_cmd']}")
+            norm_act[0] = np.clip(heading_cmd / np.pi, -1, 1)
+            norm_act[1] = np.clip(altitude_cmd / 5000, -0.8, 0.8)
+            norm_act[2] = 0  # 方向舵保持中立
+            norm_act[3] = np.clip(tactical_action["velocity_cmd"] / 340, 0.4, 0.9)
+
+        logging.debug(f"Agent {agent_id} norm_act: {norm_act.tolist()}")
         return norm_act
 
     def get_state_dict(self, env, agent_id):
         ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
         enemies = env.agents[agent_id].enemies
-        enemy_distances = [np.linalg.norm(enemy.get_position() - env.agents[agent_id].get_position()) for enemy in enemies]
-        enemy_velocities = [np.linalg.norm(enemy.get_velocity()) for enemy in enemies]
+        enemy_distances = [np.linalg.norm(enemy.get_position() - env.agents[agent_id].get_position()) for enemy in
+                           enemies] if enemies else [100000]
+        enemy_velocities = [np.linalg.norm(enemy.get_velocity()) for enemy in enemies] if enemies else [340.0]
         partners = env.agents[agent_id].partners
         partner_angle = np.arctan2(partners[0].get_position()[1] - ego_state[1],
                                    partners[0].get_position()[0] - ego_state[0]) if partners else 0
         missile_sim = env.agents[agent_id].check_missile_warning()
         missile_distance = np.linalg.norm(missile_sim.get_position() - ego_state[:3]) if missile_sim else np.inf
         radar_state = self.tactical_templates[agent_id].get_radar_state({
-            "enemy_distance": min(enemy_distances) if enemy_distances else np.inf,
+            "enemy_distance": min(enemy_distances) if enemy_distances else 100000,
             "enemy_angle_off": self.get_enemy_angle(env, agent_id),
             "missile_distance": missile_distance
         })
-        # 动态射击概率
         shoot_probability = 0.1
-        if radar_state["radar_lock"] and min(enemy_distances) <= self.max_attack_distance:
-            shoot_probability = 0.5 * (1 - min(enemy_distances) / self.max_attack_distance)
+        if radar_state["radar_lock"] and min(enemy_distances, default=100000) <= self.max_attack_distance:
+            shoot_probability = 0.5 * (1 - min(enemy_distances, default=100000) / self.max_attack_distance)
         state_dict = {
             "current_altitude": ego_state[2],
-            "enemy_distance": min(enemy_distances) if enemy_distances else 100000,
-            "enemy_velocity": min(enemy_velocities) if enemy_velocities else 340.0,  # 新增目标速度
+            "enemy_distance": min(enemy_distances, default=100000),
+            "enemy_velocity": min(enemy_velocities, default=340.0),
             "enemy_angle_off": self.get_enemy_angle(env, agent_id),
             "missile_distance": missile_distance,
             "radar_lock": radar_state["radar_lock"],
@@ -487,8 +481,9 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             "is_leader": env.agents[agent_id].is_leader(),
             "partner_angle": np.rad2deg(partner_angle),
             "targets_assigned": bool(self._target_allocation.get(agent_id)),
-            "attack_decided": self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[5],
-            "shoot_probability": shoot_probability  # 供 BetaShootBernoulli 使用
+            "attack_decided": self.tactical_templates[agent_id].current_phase ==
+                              self.tactical_templates[agent_id].PHASES[5],
+            "shoot_probability": shoot_probability
         }
         logging.debug(f"Agent {agent_id} state_dict: distance={state_dict['enemy_distance']:.1f}m, "
                       f"velocity={state_dict['enemy_velocity']:.1f}m/s, radar_lock={state_dict['radar_lock']}, "
@@ -572,11 +567,11 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 attack_angle <= self.max_attack_angle and
                 distance <= self.max_attack_distance and
                 shoot_interval >= self.min_attack_interval and
-                self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[6] and
+                # self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[6] and
                 state.get("radar_lock", False)
             )
             if shoot_flag:
-                new_missile_uid = f"{agent_id}_missile_{self._remaining_missiles[agent_id]}"
+                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"  # 例如 A01002
                 env.add_temp_simulator(
                     MissileSimulator.create(
                         parent=agent,

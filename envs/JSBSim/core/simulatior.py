@@ -174,9 +174,9 @@ class AircraftSimulator(BaseSimulator):
         default_condition = {
             Catalog.ic_long_gc_deg: 120.0,
             Catalog.ic_lat_geod_deg: 60.0,
-            Catalog.ic_h_sl_ft: 30000,
+            Catalog.ic_h_sl_ft: 20000,
             Catalog.ic_psi_true_deg: 0.0,
-            Catalog.ic_u_fps: 900.0,
+            Catalog.ic_u_fps: 800.0,
             Catalog.ic_v_fps: 0.0,
             Catalog.ic_w_fps: 0.0,
             Catalog.ic_p_rad_sec: 0.0,
@@ -283,14 +283,14 @@ class MissileSimulator(BaseSimulator):
     MISS = 2
 
     @classmethod
-    def create(cls, parent: AircraftSimulator, target: AircraftSimulator, uid: str, missile_model: str = "AIM-120"):
+    def create(cls, parent: AircraftSimulator, target: AircraftSimulator, uid: str, missile_model: str = "AIM-120C7"):
         assert parent.dt == target.dt, "Integration timestep must be same!"
         missile = MissileSimulator(uid, parent.color, missile_model, parent.dt)
         missile.launch(parent)
         missile.target(target)
         return missile
 
-    def __init__(self, uid="A0101", color="Red", model="AIM-120C", dt=1 / 12):
+    def __init__(self, uid="A0101", color="Red", model="AIM-120C7", dt=1 / 12):
         super().__init__(uid, color, dt)
         self.__status = MissileSimulator.INACTIVE
         self.model = model
@@ -359,6 +359,8 @@ class MissileSimulator(BaseSimulator):
         self._geodetic[:] = parent.get_geodetic()
         self._position[:] = parent.get_position()
         self._velocity[:] = parent.get_velocity()
+        if np.any(np.isnan(self._velocity)):
+            logging.error(f"NaN in velocity for missile {self.uid} from parent {parent.uid}")
         self._posture[:] = parent.get_rpy()
         self._posture[0] = 0
         self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
@@ -399,8 +401,15 @@ class MissileSimulator(BaseSimulator):
                           f"ny={action[0]:.2f}, nz={action[1]:.2f}")
 
     def log(self):
-        if self.is_alive:
-            return super().log()
+        if self.is_alive or self.is_done:
+            lon, lat, alt = self.get_geodetic()
+            roll, pitch, yaw = self.get_rpy() * 180 / np.pi
+            log_msg = f"{self.uid},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
+            log_msg += f"Name={self.model.upper()},Color={self.color},Type=Weapon + Missile"
+            if self.is_alive:
+                log_msg += f",Parent={self.parent_aircraft.uid}"
+            logging.info(f"Missile {self.uid} rendering: {log_msg}")
+            return log_msg
         elif self.is_done and not self.render_explosion:
             self.render_explosion = True
             log_msg = f"-{self.uid}\n"
@@ -408,6 +417,7 @@ class MissileSimulator(BaseSimulator):
             roll, pitch, yaw = self.get_rpy() * 180 / np.pi
             log_msg += f"{self.uid}F,T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
             log_msg += f"Type=Misc+Explosion,Color={self.color},Radius={self._Rc}"
+            logging.info(f"Missile {self.uid} explosion: {log_msg}")
             return log_msg
         return None
 
@@ -458,7 +468,9 @@ class MissileSimulator(BaseSimulator):
         self._geodetic[:] = NEU2LLA(*self._position, self.lon0, self.lat0, self.alt0)
 
         v = np.linalg.norm(self.get_velocity())
+        v = max(v, 1e-6)  # 避免除零
         theta, phi = self.get_rpy()[1:]
+        self._m = max(self._m, 1e-6)  # 确保质量不变为负或零
         T = self._g * self.Isp * self._dm
         D = 0.5 * self._cD * self.S * self.rho * v ** 2
         nx = (T - D) / (self._m * self._g)

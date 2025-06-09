@@ -61,9 +61,9 @@ aircraft_configs: {
     missile: 2
   }
 }
-max_attack_angle: 45
+max_attack_angle: 60
 max_attack_distance: 35000
-min_attack_interval: 60
+min_attack_interval: 30
 
 # (lontitude, latitude, altitude)
 battle_field_center: [120.0, 60.0, 0.0]

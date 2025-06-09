@@ -131,8 +131,11 @@ class MultipleCombatEnv(BaseEnv):
             if delta > 1000:
                 logging.warning(f"Step {self.current_step}, Agent {agent_id} jumped: {last_positions[agent_id]} -> {pos}, delta={delta:.2f}m")
         obs, share_obs, rewards, dones, infos = self.task.step(self)
+        for agent_id, o in obs.items():
+            if np.any(np.isnan(o)):
+                logging.error(f"NaN detected in obs for agent {agent_id}: {o}")
         info["bloods"] = {agent_id: self._jsbsims[agent_id].bloods for agent_id in self._jsbsims.keys()}
-        info["missiles"] = {uid: {"active": sim.is_active, "success": sim.is_success} for uid, sim in self._tempsims.items()}
+        info["missiles"] = {uid: {"active": sim.is_alive, "success": sim.is_success} for uid, sim in self._tempsims.items()}
         agent_ids = list(self._jsbsims.keys())
         return (
             np.stack([obs[agent_id] for agent_id in agent_ids], axis=0),

@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torch.nn as nn
 
@@ -29,7 +31,12 @@ class PPOActor(nn.Module):
             input_size = self.rnn.output_size
         # (3) act module
         self.act = ACTLayer(act_space, input_size, self.act_hidden_size, self.activation_id, self.gain)
-
+        # 添加权重初始化检查
+        for name, param in self.named_parameters():
+            if param.requires_grad:
+                if torch.isnan(param).any() or torch.isinf(param).any():
+                    logging.warning(f"NaN or Inf detected in parameter {name}, reinitializing")
+                    nn.init.orthogonal_(param, gain=self.gain)
         self.to(device)
 
     def forward(self, obs, rnn_states, masks, deterministic=False):

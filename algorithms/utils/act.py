@@ -1,3 +1,5 @@
+import logging
+
 import gymnasium as gym
 import torch
 import torch.nn as nn
@@ -70,6 +72,9 @@ class ACTLayer(nn.Module):
         device = x.device
         if self._mlp_actlayer:
             x = self.mlp(x)
+        if torch.isnan(x).any():
+            logging.warning(f"NaN detected in input x: {x}, replacing with 0")
+            x = torch.nan_to_num(x, nan=0.0)
 
         if self._multidiscrete_action:
             actions = []
