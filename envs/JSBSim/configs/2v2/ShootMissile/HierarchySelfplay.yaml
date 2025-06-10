@@ -69,7 +69,7 @@ min_attack_interval: 30
 battle_field_center: [120.0, 60.0, 0.0]
 
 # reward config
-PostureReward_scale: 15.0
+PostureReward_scale: 5.0
 PostureReward_potential: true
 PostureReward_orientation_version: v2
 PostureReward_range_version: v3

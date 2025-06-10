@@ -1,5 +1,5 @@
 from .reward_function_base import BaseRewardFunction
-
+from ..utils.RadarModel import RadarModel
 
 class EventDrivenReward(BaseRewardFunction):
     """
@@ -22,5 +22,5 @@ class EventDrivenReward(BaseRewardFunction):
             if missile.is_success:
                 reward += 50
             elif missile.is_alive:
-                reward += 5  # 中间过程奖励
+                reward += 10
         return self._process(reward, agent_id)

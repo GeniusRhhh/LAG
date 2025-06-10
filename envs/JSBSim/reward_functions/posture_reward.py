@@ -19,7 +19,7 @@ class PostureReward(BaseRewardFunction):
         # 配置中获取方向奖励和距离奖励的版本
         self.orientation_version = getattr(self.config, f'{self.__class__.__name__}_orientation_version', 'v2')
         self.range_version = getattr(self.config, f'{self.__class__.__name__}_range_version', 'v3')
-        self.target_dist = getattr(self.config, f'{self.__class__.__name__}_target_dist', 3.0)  # 目标距离，单位：km
+        self.target_dist = getattr(self.config, f'{self.__class__.__name__}_target_dist', 55.0)  # 目标距离，单位：km
 
         # 根据版本号选择奖励计算函数
         self.orientation_fn = self.get_orientation_function(self.orientation_version)

@@ -269,12 +269,29 @@ class AircraftSimulator(BaseSimulator):
             logging.error(f"Invalid prop type: {type(prop)}")
             raise ValueError(f"prop type unhandled: {type(prop)}")
 
-    def check_missile_warning(self):
+    def check_missile_warning(self, multi=False):
+        """
+        Check for missile warnings.
+
+        Args:
+            multi (bool): If True, return a list of all threatening missiles; if False, return the first threatening missile.
+
+        Returns:
+            Union[MissileSimulator, List[MissileSimulator], None]: Single missile or list of missiles if threatening, None otherwise.
+        """
+        threatening_missiles = []
         for missile in self.under_missiles:
             if missile.is_alive:
-                logging.debug(f"Missile warning for {self.uid}: distance={missile.target_distance:.1f}m")
-                return missile
-        return None
+                distance = np.linalg.norm(missile.get_position() - self.get_position())
+                # 假设威胁范围为 5000m
+                if distance < 5000:  # 可自定义威胁距离
+                    logging.debug(f"Missile warning for {self.uid}: distance={distance:.1f}m from {missile.uid}")
+                    if not multi:
+                        return missile  # 返回第一个威胁导弹
+                    threatening_missiles.append(missile)
+        if multi and threatening_missiles:
+            return threatening_missiles
+        return None if not threatening_missiles else threatening_missiles[0]  # 兼容旧逻辑
 
 class MissileSimulator(BaseSimulator):
     INACTIVE = -1
@@ -299,16 +316,16 @@ class MissileSimulator(BaseSimulator):
         self.render_explosion = False
         self._g = 9.81
         self._t_max = 120
-        self._t_thrust = 7  # Extended thrust phase
-        self._Isp = 200
+        self._t_thrust = 15  # 调整为 15s
+        self._Isp = 250  # 提高比冲
         self._Length = 3.66
         self._Diameter = 0.18
-        self._cD = 0.3
+        self._cD = 0.35
         self._m0 = 150
         self._dm = 5
-        self._K = 4  # Navigation constant
-        self._nyz_max = 40
-        self._Rc = 10  # Hit radius
+        self._K = 3.5  # 调整导航常数
+        self._nyz_max = 25  # 调整为 25G
+        self._Rc = 20  # 调整为 20m
         self._v_min = 200
         self._t = 0
         self._m = self._m0
@@ -358,7 +375,7 @@ class MissileSimulator(BaseSimulator):
         self.parent_aircraft.launch_missiles.append(self)
         self._geodetic[:] = parent.get_geodetic()
         self._position[:] = parent.get_position()
-        self._velocity[:] = parent.get_velocity()
+        self._velocity[:] = parent.get_velocity()+ np.array([300, 0, 0])  # 增加初始速度
         if np.any(np.isnan(self._velocity)):
             logging.error(f"NaN in velocity for missile {self.uid} from parent {parent.uid}")
         self._posture[:] = parent.get_rpy()
@@ -387,7 +404,7 @@ class MissileSimulator(BaseSimulator):
             self.__status = MissileSimulator.HIT
             self.target_aircraft.shotdown()
             logging.info(f"Missile {self.uid} hit target {self.target_aircraft.uid}, distance={distance:.1f}m")
-        elif (self._t > self._t_max) or (np.linalg.norm(self.get_velocity()) < self._v_min) or \
+        elif (self._t > self._t_max) or (self._t > self._t_thrust and np.linalg.norm(self.get_velocity()) < self._v_min) or \
              np.sum(self._distance_increment) >= self._distance_increment.maxlen or not self.target_aircraft.is_alive:
             self.__status = MissileSimulator.MISS
             reason = "timeout" if self._t > self._t_max else \
@@ -430,6 +447,7 @@ class MissileSimulator(BaseSimulator):
         x_m, y_m, z_m = self.get_position()
         dx_m, dy_m, dz_m = self.get_velocity()
         v_m = np.linalg.norm([dx_m, dy_m, dz_m])
+        if v_m < 1e-6: v_m = 1e-6  # 避免除零
         theta_m = np.arcsin(dz_m / v_m) if v_m > 0 else 0
 
         x_t, y_t, z_t = self.target_aircraft.get_position()
@@ -448,6 +466,7 @@ class MissileSimulator(BaseSimulator):
         r = np.array([x_t - x_m, y_t - y_m, z_t - z_m])
         v_r = np.array([dx_t - dx_m, dy_t - dy_m, dz_t - dz_m])
         R = np.linalg.norm(r)
+        if R < 1e-6: R = 1e-6  # 避免除零
         v_c = -np.dot(r, v_r) / R  # Closing velocity
 
         # Line-of-sight rates
