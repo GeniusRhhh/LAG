@@ -351,6 +351,9 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def get_obs(self, env, agent_id):
         norm_obs = np.zeros(self.obs_length)
         ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
+        if np.any(np.isnan(ego_state)):
+            logging.error(f"NaN detected in ego_state for {agent_id}: {ego_state}")
+            ego_state = np.nan_to_num(ego_state, nan=0.0)
         ego_cur_ned = LLA2NEU(*ego_state[:3], env.center_lon, env.center_lat, env.center_alt)
         ego_feature = np.array([*ego_cur_ned, *(ego_state[6:9])])
         norm_obs[0] = ego_state[2] / 5000
@@ -373,6 +376,9 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         offset = 14
         for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
             state = np.array(sim.get_property_values(self.state_var))
+            if np.any(np.isnan(state)):
+                logging.error(f"NaN detected in state for {sim.uid}: {state}")
+                state = np.nan_to_num(state, nan=0.0)
             cur_ned = LLA2NEU(*state[:3], env.center_lon, env.center_lat, env.center_alt)
             feature = np.array([*cur_ned, *(state[6:9])])
             AO, TA, R, side_flag = get_AO_TA_R(ego_feature, feature, return_side=True)
@@ -383,7 +389,6 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[offset + 4] = R / 10000
             norm_obs[offset + 5] = side_flag
             offset += 6
-        # 处理导弹数据，添加默认值
         missile_sim = env.agents[agent_id].check_missile_warning()
         if missile_sim is not None:
             missile_feature = np.concatenate((missile_sim.get_position(), missile_sim.get_velocity()))
@@ -395,12 +400,15 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[offset + 4] = R / 10000
             norm_obs[offset + 5] = side_flag
         else:
-            norm_obs[offset:offset + 6] = 0.0  # 默认值，避免 nan
+            norm_obs[offset:offset + 6] = 0.0
         offset += 6
         partner = env.agents[agent_id].partners[0] if env.agents[agent_id].partners else None
         norm_obs[offset] = 1 if partner and partner.is_alive else 0
         norm_obs[offset + 1] = self._remaining_missiles.get(agent_id, 0) / 2
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
+        if np.any(np.isnan(norm_obs)):
+            logging.error(f"NaN detected in norm_obs for {agent_id}: {norm_obs}")
+            norm_obs = np.nan_to_num(norm_obs, nan=0.0)
         logging.debug(f"Agent {agent_id} detailed observation: {norm_obs.tolist()}")
         return norm_obs
 
@@ -413,9 +421,9 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         if template_id == 0:
             raw_obs = self.get_obs(env, agent_id)
             input_obs = np.zeros(12)
-            input_obs[0] = self.norm_delta_altitude[np.random.randint(5)]  # 随机选择高度指令
-            input_obs[1] = self.norm_delta_heading[np.random.randint(5)]  # 随机选择航向指令
-            input_obs[2] = self.norm_delta_velocity[np.random.randint(5)]  # 随机选择速度指令
+            input_obs[0] = 0.0
+            input_obs[1] = 0.0
+            input_obs[2] = 0.0
             input_obs[3:12] = raw_obs[:9]
             input_obs = np.expand_dims(input_obs, axis=0)
             _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])
@@ -438,14 +446,23 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 heading_cmd = float(heading_cmd)
             altitude_cmd = tactical_action["altitude_cmd"]
             if state["has_warning"] and current_altitude > 2000:
-                altitude_cmd = max(altitude_cmd, -1000)  # 更强的下降机动
+                altitude_cmd = max(altitude_cmd, -500)  # 更强的下降机动
+            action = [
+                heading_cmd / np.pi,
+                altitude_cmd / 5000,
+                0,
+                np.clip(tactical_action["velocity_cmd"] / 340, 0.8, 2.0)
+            ]
             norm_act = np.zeros(4)
-            norm_act[0] = np.clip(heading_cmd / np.pi, -1, 1)
-            norm_act[1] = np.clip(altitude_cmd / 5000, -0.8, 0.8)
-            norm_act[2] = 0  # 方向舵保持中立
-            norm_act[3] = np.clip(tactical_action["velocity_cmd"] / 340, 0.4, 0.9)
-
-        logging.debug(f"Agent {agent_id} norm_act: {norm_act.tolist()}")
+            norm_act[0] = np.clip(action[0], -1, 1)
+            norm_act[1] = np.clip(action[1], -1, 1)
+            norm_act[2] = np.clip(action[2], -1, 1)
+            norm_act[3] = np.clip(action[3], 0.4, 0.9)
+            # 约束俯仰角速度
+            norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
+            # logging.debug(f"Agent {agent_id} normalize_action: template_id={template_id}, shoot={shoot}, "
+            #              f"raw_action={action}, norm_act={norm_act.tolist()}, "
+            #              f"heading_cmd={heading_cmd}, altitude_cmd={altitude_cmd}, velocity_cmd={tactical_action['velocity_cmd']}")
         return norm_act
 
     def get_state_dict(self, env, agent_id):
@@ -485,7 +502,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                               self.tactical_templates[agent_id].PHASES[5],
             "shoot_probability": shoot_probability
         }
-        logging.debug(f"Agent {agent_id} state_dict: distance={state_dict['enemy_distance']:.1f}m, "
+        logging.debug(f"Agent {agent_id} state_dict:enemy distances={state_dict['enemy_distance']:.1f}m, "
                       f"velocity={state_dict['enemy_velocity']:.1f}m/s, radar_lock={state_dict['radar_lock']}, "
                       f"shoot_prob={state_dict['shoot_probability']:.3f}")
         return state_dict
@@ -516,10 +533,15 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
         self._maneuver_history = []
         self._target_allocation = {}
+        # 确保tactical_templates正确初始化
         self.tactical_templates = {
             agent_id: TacticalTemplate(is_enemy=agent_id.startswith('B'), env=env, agent_id=agent_id)
             for agent_id in env.agents.keys()
         }
+        # 添加初始化日志
+        for agent_id in self.tactical_templates:
+            logging.info(
+                f"Agent {agent_id} tactical template initialized with phase: {self.tactical_templates[agent_id].current_phase}")
         self.rewards = {agent_id: 0.0 for agent_id in env.agents.keys()}
         self.allocation_counter = 0
         for agent_id in env.agents.keys():
@@ -527,27 +549,28 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             env.agents[agent_id].set_leader(is_leader)
         logging.info("HierarchicalMultipleCombatShootTask reset: tactical templates and allocations cleared")
         return super().reset(env)
-
     def get_tactical_state(self, agent_id):
         if agent_id in self.tactical_templates:
-            return {
+            state = {
                 "current_phase": self.tactical_templates[agent_id].current_phase,
                 "maneuver_history": self._maneuver_history[-10:] if self._maneuver_history else []
             }
+            logging.debug(f"Agent {agent_id} tactical state: {state}")
+            return state
+        logging.error(f"Agent {agent_id} not in tactical_templates")
         return {"current_phase": "unknown", "maneuver_history": []}
 
     def step(self, env):
         super().step(env)
         for agent_id in env.agents.keys():
             state = self.get_state_dict(env, agent_id)
+            logging.debug(f"Agent {agent_id} state_dict: {state}")
             prev_phase = self.tactical_templates[agent_id].current_phase
             self.tactical_templates[agent_id].update_phase(state)
             curr_phase = self.tactical_templates[agent_id].current_phase
             if prev_phase != curr_phase:
                 logging.info(f"Agent {agent_id} phase changed: {prev_phase} -> {curr_phase}, "
                              f"distance={state['enemy_distance']:.1f}m, radar_lock={state['radar_lock']}")
-            if self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[4]:
-                self.allocate_targets(env)
 
         for agent_id, agent in env.agents.items():
             target_list = self._target_allocation.get(agent_id, agent.enemies)
@@ -561,14 +584,13 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
             state = self.get_state_dict(env, agent_id)
             shoot_flag = (
-                agent.is_alive and
-                self._shoot_action.get(agent_id, False) and
-                self._remaining_missiles.get(agent_id, 0) > 0 and
-                attack_angle <= self.max_attack_angle and
-                distance <= self.max_attack_distance and
-                shoot_interval >= self.min_attack_interval and
-                # self.tactical_templates[agent_id].current_phase == self.tactical_templates[agent_id].PHASES[6] and
-                state.get("radar_lock", False)
+                    agent.is_alive and
+                    self._shoot_action.get(agent_id, False) and
+                    self._remaining_missiles.get(agent_id, 0) > 0 and
+                    attack_angle <= self.max_attack_angle and
+                    distance <= self.max_attack_distance and
+                    shoot_interval >= self.min_attack_interval and
+                    state.get("radar_lock", False)
             )
             if shoot_flag:
                 new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"  # 例如 A01002
@@ -585,7 +607,6 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                     f"Agent {agent_id} launched missile: target={target_list[target_index].uid}, "
                     f"remaining_missiles={self._remaining_missiles[agent_id]}")
                 self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
-            # 记录战术动作
             if self._last_action.get(agent_id, [0, 0])[0] != 0:
                 template_id = self._last_action[agent_id][0]
                 maneuver_name = self.tactical_templates[agent_id].get_action(template_id, state)["maneuver"]
@@ -604,17 +625,21 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             reward_details = {}
             state_dict = self.get_state_dict(env, agent_id)
             for func in self.reward_functions:
-                if isinstance(func, (RadarLockReward, MissileHitReward)):
-                    reward_info = func.get_reward(self, env, agent_id, state_dict)
-                else:
-                    reward_info = func.get_reward(self, env, agent_id)
-                if isinstance(reward_info, (tuple, list)) and reward_info:
-                    reward_value = reward_info[0]
+                try:
+                    if isinstance(func, (RadarLockReward, MissileHitReward)):
+                        reward_info = func.get_reward(self, env, agent_id, state_dict)
+                    else:
+                        reward_info = func.get_reward(self, env, agent_id)
+                    if isinstance(reward_info, (tuple, list)) and reward_info:
+                        reward_value = reward_info[0]
+                    else:
+                        reward_value = float(reward_info) if reward_info is not None else 0.0
                     reward_details[func.__class__.__name__] = reward_value
-                else:
-                    reward_value = reward_info
-                    reward_details[func.__class__.__name__] = reward_value
-                reward_sum += reward_value
+                    reward_sum += reward_value
+                    logging.debug(f"Agent {agent_id} reward from {func.__class__.__name__}: {reward_value}")
+                except Exception as e:
+                    logging.error(f"Error in reward function {func.__class__.__name__} for {agent_id}: {str(e)}")
+                    reward_details[func.__class__.__name__] = 0.0
             rewards[agent_id] = np.clip([reward_sum], -10, 10)
             self.rewards[agent_id] = rewards[agent_id][0]
             done, info = self.get_termination(env, agent_id, {})

@@ -200,13 +200,15 @@ class AircraftSimulator(BaseSimulator):
             # Constrain actions to prevent crashes
             pitch_rate = self.get_property_value(Catalog.ic_q_rad_sec)
             roll_rate = self.get_property_value(Catalog.ic_p_rad_sec)
-            if abs(pitch_rate) > 0.5:
-                self.set_property_value(Catalog.ic_q_rad_sec, np.clip(pitch_rate, -0.5, 0.5))
-                logging.debug(f"Agent {self.uid} pitch rate constrained: {pitch_rate:.3f} -> {np.clip(pitch_rate, -0.5, 0.5):.3f}")
-            if abs(roll_rate) > 0.7:
-                self.set_property_value(Catalog.ic_p_rad_sec, np.clip(roll_rate, -0.7, 0.7))
-                logging.debug(f"Agent {self.uid} roll rate constrained: {roll_rate:.3f} -> {np.clip(roll_rate, -0.7, 0.7):.3f}")
-            logging.debug(f"Agent {self.uid} state: alt={self._geodetic[2]:.1f}m, "
+            if abs(pitch_rate) > 0.6:  # MODIFIED: 放宽限制
+                self.set_property_value(Catalog.ic_q_rad_sec, np.clip(pitch_rate, -0.6, 0.6))
+                logging.debug(
+                    f"Agent {self.uid} pitch rate constrained: {pitch_rate:.3f} -> {np.clip(pitch_rate, -0.6, 0.6):.3f}")
+            if abs(roll_rate) > 0.8:  # MODIFIED: 放宽限制
+                self.set_property_value(Catalog.ic_p_rad_sec, np.clip(roll_rate, -0.8, 0.8))
+                logging.debug(
+                    f"Agent {self.uid} roll rate constrained: {roll_rate:.3f} -> {np.clip(roll_rate, -0.8, 0.8):.3f}")
+                logging.debug(f"Agent {self.uid} state: alt={self._geodetic[2]:.1f}m, "
                           f"vel={np.linalg.norm(self._velocity):.1f}m/s, "
                           f"pitch_rate={pitch_rate:.3f}rad/s, roll_rate={roll_rate:.3f}rad/s")
             return result
