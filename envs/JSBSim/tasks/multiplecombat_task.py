@@ -466,47 +466,87 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         return norm_act
 
     def get_state_dict(self, env, agent_id):
-        ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
-        enemies = env.agents[agent_id].enemies
-        enemy_distances = [np.linalg.norm(enemy.get_position() - env.agents[agent_id].get_position()) for enemy in
-                           enemies] if enemies else [100000]
-        enemy_velocities = [np.linalg.norm(enemy.get_velocity()) for enemy in enemies] if enemies else [340.0]
-        partners = env.agents[agent_id].partners
-        partner_angle = np.arctan2(partners[0].get_position()[1] - ego_state[1],
-                                   partners[0].get_position()[0] - ego_state[0]) if partners else 0
-        missile_sim = env.agents[agent_id].check_missile_warning()
-        missile_distance = np.linalg.norm(missile_sim.get_position() - ego_state[:3]) if missile_sim else np.inf
-        radar_state = self.tactical_templates[agent_id].get_radar_state({
-            "enemy_distance": min(enemy_distances) if enemy_distances else 100000,
-            "enemy_angle_off": self.get_enemy_angle(env, agent_id),
-            "missile_distance": missile_distance
-        })
-        shoot_probability = 0.1
-        if radar_state["radar_lock"] and min(enemy_distances, default=100000) <= self.max_attack_distance:
-            shoot_probability = 0.5 * (1 - min(enemy_distances, default=100000) / self.max_attack_distance)
-        state_dict = {
-            "current_altitude": ego_state[2],
-            "enemy_distance": min(enemy_distances, default=100000),
-            "enemy_velocity": min(enemy_velocities, default=340.0),
-            "enemy_angle_off": self.get_enemy_angle(env, agent_id),
-            "missile_distance": missile_distance,
-            "radar_lock": radar_state["radar_lock"],
-            "has_warning": missile_distance < 60000 or radar_state["has_warning"],
-            "missile_launched": self._shoot_action.get(agent_id, False),
-            "missile_active": bool(env.agents[agent_id].launch_missiles),
-            "missile_hit": any(missile.is_success for missile in env.agents[agent_id].launch_missiles),
-            "is_leader": env.agents[agent_id].is_leader(),
-            "partner_angle": np.rad2deg(partner_angle),
-            "targets_assigned": bool(self._target_allocation.get(agent_id)),
-            "attack_decided": self.tactical_templates[agent_id].current_phase ==
-                              self.tactical_templates[agent_id].PHASES[5],
-            "shoot_probability": shoot_probability
-        }
-        logging.debug(f"Agent {agent_id} state_dict:enemy distances={state_dict['enemy_distance']:.1f}m, "
-                      f"velocity={state_dict['enemy_velocity']:.1f}m/s, radar_lock={state_dict['radar_lock']}, "
-                      f"shoot_prob={state_dict['shoot_probability']:.3f}")
-        return state_dict
+        try:
+            ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
+            if np.any(np.isnan(ego_state)):
+                logging.warning(f"NaN detected in ego_state for {agent_id}: {ego_state}")
+                ego_state = np.nan_to_num(ego_state, nan=0.0)
 
+            enemies = env.agents[agent_id].enemies
+            enemy_distances = [np.linalg.norm(enemy.get_position() - env.agents[agent_id].get_position()) for enemy in
+                               enemies] if enemies else [100000]
+            enemy_velocities = [np.linalg.norm(enemy.get_velocity()) for enemy in enemies] if enemies else [340.0]
+            partners = env.agents[agent_id].partners
+            partner_angle = np.arctan2(partners[0].get_position()[1] - ego_state[1],
+                                       partners[0].get_position()[0] - ego_state[0]) if partners else 0
+
+            missile_sim = env.agents[agent_id].check_missile_warning()
+            missile_distance = np.linalg.norm(missile_sim.get_position() - ego_state[:3]) if missile_sim else np.inf
+
+            try:
+                radar_state = self.tactical_templates[agent_id].get_radar_state({
+                    "enemy_distance": min(enemy_distances) if enemy_distances else 100000,
+                    "enemy_angle_off": self.get_enemy_angle(env, agent_id),
+                    "missile_distance": missile_distance
+                })
+            except Exception as e:
+                logging.error(f"Error in get_radar_state for {agent_id}: {str(e)}")
+                radar_state = {"radar_lock": False, "has_warning": False}
+
+            shoot_probability = 0.1
+            if radar_state["radar_lock"] and min(enemy_distances, default=100000) <= self.max_attack_distance:
+                shoot_probability = 0.5 * (1 - min(enemy_distances, default=100000) / self.max_attack_distance)
+
+            missile_hit = False
+            try:
+                missile_hit = any(missile.is_success for missile in env.agents[agent_id].launch_missiles)
+            except Exception as e:
+                logging.error(f"Error in missile_hit calculation for {agent_id}: {str(e)}")
+                missile_hit = False
+
+            state_dict = {
+                "current_altitude": ego_state[2],
+                "enemy_distance": min(enemy_distances, default=100000),
+                "enemy_velocity": min(enemy_velocities, default=340.0),
+                "enemy_angle_off": self.get_enemy_angle(env, agent_id),
+                "missile_distance": missile_distance,
+                "radar_lock": bool(radar_state["radar_lock"]),  # 转换为 Python bool
+                "has_warning": missile_distance < 60000 or radar_state["has_warning"],
+                "missile_launched": self._shoot_action.get(agent_id, False),
+                "missile_active": bool(env.agents[agent_id].launch_missiles),
+                "missile_hit": bool(missile_hit),  # 转换为 Python bool
+                "is_leader": env.agents[agent_id].is_leader(),
+                "partner_angle": np.rad2deg(partner_angle),
+                "targets_assigned": bool(self._target_allocation.get(agent_id)),
+                "attack_decided": self.tactical_templates[agent_id].current_phase ==
+                                  self.tactical_templates[agent_id].PHASES[5],
+                "shoot_probability": shoot_probability
+            }
+            logging.debug(f"Agent {agent_id} state_dict: enemy_distance={state_dict['enemy_distance']:.1f}m, "
+                          f"velocity={state_dict['enemy_velocity']:.1f}m/s, radar_lock={state_dict['radar_lock']}, "
+                          f"missile_hit={state_dict['missile_hit']}, shoot_prob={state_dict['shoot_probability']:.3f}")
+            return state_dict
+        except Exception as e:
+            import traceback
+            logging.error(f"Error in get_state_dict for {agent_id}: {str(e)}\n{traceback.format_exc()}")
+            return {
+                "current_altitude": 5000,
+                "enemy_distance": 100000,
+                "enemy_velocity": 340.0,
+                "enemy_angle_off": 0.0,
+                "missile_distance": np.inf,
+                "radar_lock": False,
+                "has_warning": False,
+                "missile_launched": False,
+                "missile_active": False,
+                "missile_hit": False,
+                "is_leader": False,
+                "partner_angle": 0.0,
+                "targets_assigned": False,
+                "attack_decided": False,
+                "shoot_probability": 0.1
+            }
+        
     def get_enemy_angle(self, env, agent_id):
         ego_pos = env.agents[agent_id].get_position()
         ego_vel = env.agents[agent_id].get_velocity()
@@ -540,6 +580,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         }
         # 添加初始化日志
         for agent_id in self.tactical_templates:
+            self.tactical_templates[agent_id].current_phase = "contact_guidance"  # 强制重置
             logging.info(
                 f"Agent {agent_id} tactical template initialized with phase: {self.tactical_templates[agent_id].current_phase}")
         self.rewards = {agent_id: 0.0 for agent_id in env.agents.keys()}
@@ -593,7 +634,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                     state.get("radar_lock", False)
             )
             if shoot_flag:
-                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"  # 例如 A01002
+                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
                 env.add_temp_simulator(
                     MissileSimulator.create(
                         parent=agent,
@@ -619,7 +660,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
         rewards = {}
         dones = {}
-        infos = {}
+        infos = {agent_id: {} for agent_id in env.agents.keys()}  # 初始化 infos
         for agent_id in env.agents.keys():
             reward_sum = 0.0
             reward_details = {}
@@ -628,17 +669,21 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 try:
                     if isinstance(func, (RadarLockReward, MissileHitReward)):
                         reward_info = func.get_reward(self, env, agent_id, state_dict)
+                        reward_value = float(reward_info[0]) if reward_info is not None else 0.0
+                        reward_details[func.__class__.__name__] = reward_value
+                        reward_sum += reward_value
+                        if isinstance(reward_info, tuple) and len(reward_info) > 1:
+                            infos[agent_id][f"{func.__class__.__name__}_info"] = reward_info[1]
                     else:
                         reward_info = func.get_reward(self, env, agent_id)
-                    if isinstance(reward_info, (tuple, list)) and reward_info:
-                        reward_value = reward_info[0]
-                    else:
                         reward_value = float(reward_info) if reward_info is not None else 0.0
-                    reward_details[func.__class__.__name__] = reward_value
-                    reward_sum += reward_value
-                    logging.debug(f"Agent {agent_id} reward from {func.__class__.__name__}: {reward_value}")
+                        reward_details[func.__class__.__name__] = reward_value
+                        reward_sum += reward_value
+                    logging.debug(f"Agent {agent_id} reward from {func.__class__.__name__}: {reward_value:.3f}")
                 except Exception as e:
-                    logging.error(f"Error in reward function {func.__class__.__name__} for {agent_id}: {str(e)}")
+                    import traceback
+                    logging.error(
+                        f"Error in reward function {func.__class__.__name__} for {agent_id}: {str(e)}\n{traceback.format_exc()}")
                     reward_details[func.__class__.__name__] = 0.0
             rewards[agent_id] = np.clip([reward_sum], -10, 10)
             self.rewards[agent_id] = rewards[agent_id][0]
@@ -646,6 +691,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             dones[agent_id] = [done]
             infos[agent_id] = self.get_tactical_state(agent_id)
             infos[agent_id]["reward_details"] = reward_details
+            logging.debug(f"Agent {agent_id} reward_details: {reward_details}")
             if env.current_step % 50 == 0:
                 logging.info(
                     f"Step {env.current_step} - Agent {agent_id}: "

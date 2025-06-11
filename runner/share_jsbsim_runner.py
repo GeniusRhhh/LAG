@@ -77,9 +77,15 @@ class ShareJSBSimRunner(Runner):
                 episode_rewards.append(rewards[0, :self.num_agents // 2])
                 episode_actions.append(actions[0, :self.num_agents // 2])
                 phase_list = []
-                infos_dict = infos[0] if len(infos.shape) == 2 else infos
-                for agent_id in range(self.num_agents // 2):
-                    phase_list.append(infos_dict[agent_id].get("current_phase", "unknown"))
+                reward_comps = {}
+                infos_dict = infos[0] if isinstance(infos, np.ndarray) else infos
+                logging.debug(f"Step {step} infos_dict: {infos_dict}")
+                agent_names = [f"A0{i + 1}00" for i in range(self.num_agents // 2)]
+                for idx, agent_name in enumerate(agent_names):
+                    phase_list.append(infos_dict.get(agent_name, {}).get("current_phase", "unknown"))
+                    reward_comps[agent_name] = infos_dict.get(agent_name, {}).get("reward_details", {})
+                    if not reward_comps[agent_name]:
+                        logging.warning(f"No reward details for {agent_name} at step {step}, episode {episode}")
                 episode_phases.append(phase_list)
                 data = obs, share_obs, actions, rewards, dones, action_log_probs, values, rnn_states_actor, rnn_states_critic
                 self.insert(data)
@@ -101,25 +107,21 @@ class ShareJSBSimRunner(Runner):
                 shoot_ratio = np.mean(shoot_flags)
                 phases_array = np.array(episode_phases)
                 phase_counts = {p: np.sum(phases_array == p) / phases_array.size for p in np.unique(phases_array)}
-                reward_comps = {}
-                for agent_id in range(self.num_agents // 2):
-                    agent_name = f"A0{agent_id + 1}00"
-                    reward_comps[agent_name] = infos_dict[agent_id].get("reward_details", {})
-                for agent_id in range(self.num_agents // 2):
-                    state = obs[0, agent_id]
-                    action = actions[0, agent_id]
-                    phase = infos_dict[agent_id].get("current_phase", "unknown")
-                    reward = float(episode_rewards[step][agent_id].item()) if isinstance(
-                        episode_rewards[step][agent_id], np.ndarray) else float(episode_rewards[step][agent_id])
+                for idx, agent_name in enumerate(agent_names):
+                    state = obs[0, idx]
+                    action = actions[0, idx]
+                    phase = infos_dict.get(agent_name, {}).get("current_phase", "unknown")
+                    reward = float(episode_rewards[step][idx].item()) if isinstance(
+                        episode_rewards[step][idx], np.ndarray) else float(episode_rewards[step][idx])
                     altitude = float(state[0].item()) * 5000
                     velocity = float(state[5].item()) * 340
                     distance_idx = 14 + 4
                     distance = float(state[distance_idx].item()) * 10000 if len(state) > distance_idx else float('inf')
                     action_scalar = action.tolist() if isinstance(action, np.ndarray) and action.size > 1 else float(
                         action.item())
-                    logging.debug(f"Agent {agent_id} state: {state}, reward: {reward}")
+                    logging.debug(f"Agent {agent_name} state: {state}, reward: {reward}")
                     logging.info(
-                        f"Agent {agent_id} - Episode {episode}: Altitude={altitude:.1f}m, Velocity={velocity:.1f}m/s, Distance={distance:.1f}m, Action={action_scalar}, Phase={phase}, Reward={reward:.2f}")
+                        f"Agent {agent_name} - Episode {episode}: Altitude={altitude:.1f}m, Velocity={velocity:.1f}m/s, Distance={distance:.1f}m, Action={action_scalar}, Phase={phase}, Reward={reward:.2f}")
                 logging.info(
                     f"Scenario: {self.all_args.scenario_name} ... FPS: {int(self.total_num_steps / (end - start))}")
                 logging.info(f"Action Distribution (template_id): {template_dist}")
@@ -135,7 +137,6 @@ class ShareJSBSimRunner(Runner):
                     self.use_rule_opponent = False
             if episode % self.eval_interval == 0 and self.use_eval:
                 self.eval(self.total_num_steps)
-
     def warmup(self):
         """预热环境，初始化缓冲区。"""
         obs, share_obs = self.envs.reset()
