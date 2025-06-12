@@ -9,3 +9,4 @@ from .TacticalReward import TacticalReward
 from .TemplateReward import TemplateReward
 from .RadarLockReward import RadarLockReward
 from .MissileHitReward import MissileHitReward
+from .relative_altitude_reward_new import TacticalRewardNew,TemplateRewardNew,AltitudeRewardNew,PostureRewardNew,MissilePostureRewardNew,MissileHitRewardNew,RadarLockRewardNew,EventDrivenRewardNew
