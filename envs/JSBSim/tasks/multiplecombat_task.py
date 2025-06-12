@@ -546,7 +546,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 "attack_decided": False,
                 "shoot_probability": 0.1
             }
-        
+
     def get_enemy_angle(self, env, agent_id):
         ego_pos = env.agents[agent_id].get_position()
         ego_vel = env.agents[agent_id].get_velocity()
