@@ -22,7 +22,9 @@ from ..reward_functions import (
     EventDrivenRewardNew,
     MissilePostureRewardNew,
     RadarLockRewardNew,
-    MissileHitRewardNew
+    MissileHitRewardNew,
+    BasicFlightReward,
+    RewardScaler
 )
 from ..termination_conditions import ExtremeState, LowAltitude, Overload, Timeout, SafeReturn
 from ..utils.utils import get_AO_TA_R, LLA2NEU, get_root_dir
@@ -368,7 +370,8 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         self.norm_delta_heading = np.array([-np.pi / 2, -np.pi / 4, 0, np.pi / 4, np.pi / 2])  # 5个航向选择
         self.norm_delta_velocity = np.array([0.1, 0.05, 0, -0.05, -0.1])  # 5个速度选择
         self._inner_rnn_states = {}
-
+        # 奖励缩放器
+        self.reward_scaler = RewardScaler(scale_factor=0.01)
     def load_action_space(self):
         """定义分层动作空间：第二层高层控制。"""
         self.action_space = spaces.MultiDiscrete([5, 5, 5])  # [altitude_cmd_id, heading_cmd_id, velocity_cmd_id]
@@ -378,27 +381,48 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         raw_obs = self.get_obs(env, agent_id)
         input_obs = np.zeros(12)
 
+        # 确保动作索引在有效范围内
+        action = np.clip(action, 0, [4, 4, 4])  # [5, 5, 5] -> [0-4, 0-4, 0-4]
+
         # 将离散动作索引转换为连续指令
-        input_obs[0] = self.norm_delta_altitude[action[0]]
-        input_obs[1] = self.norm_delta_heading[action[1]]
-        input_obs[2] = self.norm_delta_velocity[action[2]]
+        input_obs[0] = self.norm_delta_altitude[int(action[0])]
+        input_obs[1] = self.norm_delta_heading[int(action[1])]
+        input_obs[2] = self.norm_delta_velocity[int(action[2])]
         input_obs[3:12] = raw_obs[:9]
 
+        # 添加输入验证
+        input_obs = np.nan_to_num(input_obs, nan=0.0, posinf=1.0, neginf=-1.0)
         input_obs = np.expand_dims(input_obs, axis=0)
+
+        # 确保RNN状态正确初始化
+        if agent_id not in self._inner_rnn_states:
+            self._inner_rnn_states[agent_id] = np.zeros((1, 1, 128))
+
         _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])
         action_output = _action.detach().cpu().numpy().squeeze(0)
         self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()
 
-        # 第三层：底层执行控制层
+        # 第三层：底层执行控制层 - 修正映射范围
         norm_act = np.zeros(4)
-        norm_act[0] = action_output[0] / 20 - 1.  # Aileron
-        norm_act[1] = action_output[1] / 20 - 1.  # Elevator
-        norm_act[2] = action_output[2] / 20 - 1.  # Rudder
-        norm_act[3] = action_output[3] / 58 + 0.4  # Throttle
-        norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
+        norm_act[0] = action_output[0] / 20 - 1.  # Aileron: [-1, 1]
+        norm_act[1] = action_output[1] / 20 - 1.  # Elevator: [-1, 1]
+        norm_act[2] = action_output[2] / 20 - 1.  # Rudder: [-1, 1]
+        norm_act[3] = action_output[3] / 58 + 0.4  # Throttle: [0.4, 0.9]
+
+        # 增强安全限制
+        norm_act[1] = np.clip(norm_act[1], -0.3, 0.3)  # 限制俯仰以防止急剧下降
+        norm_act[3] = np.clip(norm_act[3], 0.6, 0.9)  # 保持足够推力
+
+        # 低高度保护
+        current_alt = env.agents[agent_id].get_position()[2]
+        if current_alt < 3000:  # 3km以下
+            norm_act[1] = np.clip(norm_act[1], -0.1, 0.3)  # 限制下俯
+            norm_act[3] = max(norm_act[3], 0.8)  # 增加推力
 
         logging.debug(f"Agent {agent_id} hierarchical action: "
-                      f"high_level={action.tolist()}, norm_act={norm_act.tolist()}")
+                      f"high_level={action.tolist()}, norm_act={norm_act.tolist()}, "
+                      f"altitude={current_alt:.1f}m")
+
         return norm_act
 
     def reset(self, env):
@@ -567,9 +591,17 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
                     logging.error(f"Error calculating reward for {func.__class__.__name__}: {e}")
                     reward_details[func.__class__.__name__] = 0.0
 
-            rewards[agent_id] = np.clip([reward_sum], -10, 10)
-            self.rewards[agent_id] = rewards[agent_id][0]
 
+            # 缩放奖励
+            original_reward = np.clip(reward_sum, -10, 10)
+            scaled_reward = self.reward_scaler.scale(original_reward)
+            rewards[agent_id] = np.array([scaled_reward])
+            self.rewards[agent_id] = scaled_reward
+
+            # 每100步记录缩放日志
+            if env.current_step % 100 == 0:
+                logging.info(f"Agent {agent_id} reward scaling: "
+                             f"original={original_reward:.3f}, scaled={scaled_reward:.3f}")
             # 检查终止条件
             done, info = self.get_termination(env, agent_id, {})
             dones[agent_id] = [done]

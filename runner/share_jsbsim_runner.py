@@ -735,6 +735,3 @@ class ShareJSBSimRunner(Runner):
                 insights["training_recommendations"].append("Improve defensive maneuvering")
 
         return insights
-
-
-
