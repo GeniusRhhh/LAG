@@ -342,13 +342,29 @@ class AircraftSimulator(BaseSimulator):
         if self.is_alive:
             if self.bloods <= 0:
                 self.shotdown()
+
+            # 只在运行前检查最基本的状态
+            current_alt = self.get_property_value(Catalog.position_h_sl_m)
+            if current_alt < 100:  # 低于100米
+                logging.error(f"Agent {self.uid} too low: {current_alt:.1f}m")
+                self.crash()
+                return False
+
+            # 运行仿真
             result = self.jsbsim_exec.run()
             if not result:
                 logging.error("JSBSim simulation failed")
                 raise RuntimeError("JSBSim failed.")
+
             self._update_properties()
 
-            # 增强的飞行包线保护
+            # 运行后检查
+            if self._geodetic[2] < 0:
+                logging.error(f"Agent {self.uid} crashed into ground")
+                self.crash()
+                return False
+
+            # 应用原来的飞行包线保护（如果有的话）
             self._apply_flight_envelope_protection()
 
             # 更新战术状态
@@ -357,6 +373,79 @@ class AircraftSimulator(BaseSimulator):
             return result
         return False
 
+    # def _apply_enhanced_flight_envelope_protection(self):
+    #     """增强的飞行包线保护"""
+    #     current_alt = self.get_position()[2]
+    #     current_vel = np.linalg.norm(self.get_velocity())
+    #
+    #     # 获取当前控制输入
+    #     aileron_cmd = self.get_property_value(Catalog.fcs_aileron_cmd_norm)
+    #     elevator_cmd = self.get_property_value(Catalog.fcs_elevator_cmd_norm)
+    #     rudder_cmd = self.get_property_value(Catalog.fcs_rudder_cmd_norm)
+    #     throttle_cmd = self.get_property_value(Catalog.fcs_throttle_cmd_norm)
+    #
+    #     # 获取当前姿态和角速率
+    #     roll = self.get_property_value(Catalog.attitude_roll_rad)
+    #     pitch = self.get_property_value(Catalog.attitude_pitch_rad)
+    #     roll_rate = self.get_property_value(Catalog.velocities_p_rad_sec)
+    #     pitch_rate = self.get_property_value(Catalog.velocities_q_rad_sec)
+    #
+    #     # 1. 滚转限制
+    #     if abs(roll) > np.radians(70):
+    #         # 减小副翼输入
+    #         aileron_cmd *= 0.3
+    #         self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
+    #         logging.debug(f"Agent {self.uid} roll limited: {np.rad2deg(roll):.1f}deg")
+    #
+    #     # 2. 滚转速率限制
+    #     max_roll_rate = np.radians(90)  # 90度/秒
+    #     if abs(roll_rate) > max_roll_rate:
+    #         # 反向副翼以减小滚转速率
+    #         aileron_cmd = -np.sign(roll_rate) * 0.5
+    #         self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
+    #         logging.debug(f"Agent {self.uid} roll rate limited: {np.rad2deg(roll_rate):.1f}deg/s")
+    #
+    #     # 3. 俯仰限制
+    #     if pitch > np.radians(30):  # 上仰过大
+    #         elevator_cmd = min(elevator_cmd, -0.1)  # 推杆
+    #         self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
+    #     elif pitch < np.radians(-30):  # 下俯过大
+    #         elevator_cmd = max(elevator_cmd, 0.1)  # 拉杆
+    #         self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
+    #
+    #     # 4. 俯仰速率限制
+    #     max_pitch_rate = np.radians(60)  # 60度/秒
+    #     if abs(pitch_rate) > max_pitch_rate:
+    #         elevator_cmd = -np.sign(pitch_rate) * 0.3
+    #         self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
+    #
+    #     # 5. 低高度保护
+    #     if current_alt < 1000:
+    #         # 限制下俯
+    #         if pitch < 0:
+    #             elevator_cmd = max(elevator_cmd, 0.2)
+    #             self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
+    #         # 限制滚转
+    #         if abs(roll) > np.radians(30):
+    #             aileron_cmd = -np.sign(roll) * 0.5
+    #             self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
+    #         # 增加推力
+    #         throttle_cmd = max(throttle_cmd, 0.8)
+    #         self.set_property_value(Catalog.fcs_throttle_cmd_norm, throttle_cmd)
+    #
+    #     # 6. 失速保护
+    #     if current_vel < self.flight_envelope["min_speed"]:
+    #         # 减小迎角
+    #         if pitch > np.radians(10):
+    #             elevator_cmd = -0.3
+    #             self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
+    #         # 改平机翼
+    #         if abs(roll) > np.radians(20):
+    #             aileron_cmd = -np.sign(roll) * 0.5
+    #             self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
+    #         # 最大推力
+    #         self.set_property_value(Catalog.fcs_throttle_cmd_norm, 0.9)
+    #         logging.warning(f"Agent {self.uid} stall protection: speed={current_vel:.1f}m/s")
     def _apply_flight_envelope_protection(self):
         """应用飞行包线保护"""
         current_alt = self.get_position()[2]
@@ -378,12 +467,12 @@ class AircraftSimulator(BaseSimulator):
         pitch_rate = self.get_property_value(Catalog.ic_q_rad_sec)
         roll_rate = self.get_property_value(Catalog.ic_p_rad_sec)
 
-        if abs(pitch_rate) > 0.8:  # 放宽限制以适应战术机动
-            self.set_property_value(Catalog.ic_q_rad_sec, np.clip(pitch_rate, -0.8, 0.8))
+        if abs(pitch_rate) > 1.0:  # 放宽限制以适应战术机动
+            self.set_property_value(Catalog.ic_q_rad_sec, np.clip(pitch_rate, -1.0, 1.0))
             logging.debug(f"Agent {self.uid} pitch rate limited: {pitch_rate:.3f}")
 
-        if abs(roll_rate) > 1.0:  # 放宽限制
-            self.set_property_value(Catalog.ic_p_rad_sec, np.clip(roll_rate, -1.0, 1.0))
+        if abs(roll_rate) > 1.5:  # 放宽限制
+            self.set_property_value(Catalog.ic_p_rad_sec, np.clip(roll_rate, -1.5, 1.5))
             logging.debug(f"Agent {self.uid} roll rate limited: {roll_rate:.3f}")
 
     def _update_tactical_state(self):
@@ -511,16 +600,16 @@ class MissileSimulator(BaseSimulator):
 
         # 增强的导弹参数
         self._g = 9.81
-        self._t_max = 150  # 增加最大飞行时间
-        self._t_thrust = 20  # 增加推力时间
-        self._Isp = 280  # 提高比冲
+        self._t_max = 120  # 增加最大飞行时间
+        self._t_thrust = 15  # 增加推力时间
+        self._Isp = 250  # 提高比冲
         self._Length = 3.66
         self._Diameter = 0.18
-        self._cD = 0.3  # 降低阻力系数
+        self._cD = 0.35  # 降低阻力系数
         self._m0 = 150
         self._dm = 4  # 降低燃料消耗率
-        self._K = 4.0  # 增强导航常数
-        self._nyz_max = 30  # 增加最大过载
+        self._K = 3.5  # 增强导航常数
+        self._nyz_max = 25  # 增加最大过载
         self._Rc = 15  # 减小毁伤半径以提高精度要求
         self._v_min = 180  # 降低最小速度
 
@@ -582,41 +671,69 @@ class MissileSimulator(BaseSimulator):
         return np.inf
 
     def launch(self, parent: AircraftSimulator):
-        self.parent_aircraft = parent
-        self.parent_aircraft.launch_missiles.append(self)
-        self._geodetic[:] = parent.get_geodetic()
-        self._position[:] = parent.get_position()
+        """导弹发射"""
+        try:
+            self.parent_aircraft = parent
+            parent.launch_missiles.append(self)
 
-        # 增强的初始速度
-        parent_velocity = parent.get_velocity()
-        launch_velocity_boost = 350  # 增加发射速度
-        self._velocity[:] = parent_velocity + np.array([launch_velocity_boost, 0, 0])
+            # 继承父飞机状态
+            self._geodetic[:] = parent.get_geodetic()
+            self._position[:] = parent.get_position()
 
-        if np.any(np.isnan(self._velocity)):
-            logging.error(f"NaN in velocity for missile {self.uid} from parent {parent.uid}")
-            self._velocity[:] = np.array([400, 0, 0])  # 默认速度
+            # 继承父飞机姿态
+            parent_rpy = parent.get_rpy()
+            self._posture[0] = 0  # 导弹不需要滚转
+            self._posture[1] = parent_rpy[1]  # 继承俯仰
+            self._posture[2] = parent_rpy[2]  # 继承偏航
 
-        self._posture[:] = parent.get_rpy()
-        self._posture[0] = 0
-        self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
-        self._t = 0
-        self._m = self._m0
-        self._dtheta, self._dphi = 0, 0
-        self.__status = MissileSimulator.LAUNCHED
-        self._distance_pre = np.inf
-        self._distance_increment = deque(maxlen=int(8 / self.dt))
-        self._left_t = int(1 / self.dt)
+            # 计算发射速度
+            parent_velocity = parent.get_velocity()
+            parent_speed = np.linalg.norm(parent_velocity)
 
-        # 初始化制导状态
-        self.guidance_state = {
-            "phase": "boost",
-            "lock_time": 0,
-            "target_acquired": False,
-            "intercept_point": np.zeros(3)
-        }
+            # 确保父飞机速度有效
+            if parent_speed < 50:
+                logging.warning(f"Parent aircraft {parent.uid} speed too low: {parent_speed:.1f}m/s")
+                parent_velocity = np.array([200.0, 0.0, 0.0])  # 默认向前200m/s
 
-        logging.info(
-            f"Enhanced missile {self.uid} launched from {parent.uid} with velocity {np.linalg.norm(self._velocity):.1f}m/s")
+            # 发射速度 = 父飞机速度 + 相对速度
+            launch_boost = 100  # 相对速度100m/s
+            boost_direction = parent_velocity / np.linalg.norm(parent_velocity) if np.linalg.norm(
+                parent_velocity) > 0 else np.array([1, 0, 0])
+
+            self._velocity[:] = parent_velocity + launch_boost * boost_direction
+
+            # 确保速度合理
+            missile_speed = np.linalg.norm(self._velocity)
+            if missile_speed < 200:
+                self._velocity *= 200 / missile_speed
+            elif missile_speed > 800:
+                self._velocity *= 800 / missile_speed
+
+            # 初始化其他参数
+            self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
+            self._t = 0
+            self._m = self._m0
+            self._dtheta, self._dphi = 0, 0
+            self.__status = MissileSimulator.LAUNCHED
+            self._distance_pre = np.inf
+            self._distance_increment = deque(maxlen=int(8 / self.dt))
+            self._left_t = int(1 / self.dt)
+
+            # 初始化制导状态
+            self.guidance_state = {
+                "phase": "boost",
+                "lock_time": 0,
+                "target_acquired": False,
+                "intercept_point": np.zeros(3)
+            }
+
+            logging.info(f"Missile {self.uid} launched from {parent.uid}: "
+                         f"pos={self._position}, vel={np.linalg.norm(self._velocity):.1f}m/s, "
+                         f"heading={np.rad2deg(self._posture[2]):.1f}deg")
+
+        except Exception as e:
+            logging.error(f"Error launching missile {self.uid}: {e}")
+            self.__status = MissileSimulator.MISS
 
     def target(self, target: AircraftSimulator):
         self.target_aircraft = target
@@ -680,22 +797,56 @@ class MissileSimulator(BaseSimulator):
             self.guidance_state["phase"] = "terminal"
 
     def log(self):
-        if self.is_alive or (self.is_done and not self.render_explosion):
-            lon, lat, alt = self.get_geodetic()
-            roll, pitch, yaw = self.get_rpy() * 180 / np.pi
-            log_msg = f"{self.uid},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
-            log_msg += f"Name={self.model.upper()},Color={self.color}"
+        """导弹日志输出"""
+        if self.is_alive:
+            try:
+                lon, lat, alt = self.get_geodetic()
+                roll, pitch, yaw = self.get_rpy() * 180 / np.pi
 
-            if self.is_alive:
-                log_msg += f",Type=Weapon + Missile,Parent={self.parent_aircraft.uid if self.parent_aircraft else 'None'}"
-            elif self.is_done and not self.render_explosion:
-                self.render_explosion = True
+                # 确保值有效
+                if np.any(np.isnan([lon, lat, alt, roll, pitch, yaw])):
+                    logging.warning(f"NaN in missile {self.uid} state")
+                    return None
+
+                # 格式化输出
+                log_msg = f"{self.uid},T={lon:.6f}|{lat:.6f}|{alt:.1f}|{roll:.1f}|{pitch:.1f}|{yaw:.1f},"
+                log_msg += f"Name={self.model.upper()},Color={self.color},"
+                log_msg += f"Type=Weapon + Missile"
+
+                if self.parent_aircraft:
+                    log_msg += f",Parent={self.parent_aircraft.uid}"
+
+                return log_msg
+
+            except Exception as e:
+                logging.error(f"Error in missile log for {self.uid}: {e}")
+                return None
+
+        elif self.is_done and not self.render_explosion:
+            # 渲染爆炸效果
+            self.render_explosion = True
+            try:
+                lon, lat, alt = self.get_geodetic()
+
+                # 移除导弹轨迹
                 explosion_msg = f"-{self.uid}\n"
-                explosion_msg += f"{self.uid}F,T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
-                explosion_msg += f"Type=Misc+Explosion,Color={self.color},Radius={self._Rc}"
+
+                # 添加爆炸效果
+                if self.is_success:
+                    # 命中爆炸
+                    explosion_msg += f"{self.uid}F,T={lon:.6f}|{lat:.6f}|{alt:.1f}|0|0|0,"
+                    explosion_msg += f"Type=Misc+Explosion,Color={self.color},Radius={self._Rc * 2}"
+                else:
+                    # 未命中，小爆炸
+                    explosion_msg += f"{self.uid}F,T={lon:.6f}|{lat:.6f}|{alt:.1f}|0|0|0,"
+                    explosion_msg += f"Type=Misc+Explosion,Color=Gray,Radius={self._Rc}"
+
                 return explosion_msg
 
-            return log_msg
+            except Exception as e:
+                logging.error(f"Error in explosion log for {self.uid}: {e}")
+                return None
+
         return None
 
     def close(self):

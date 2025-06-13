@@ -1,5 +1,7 @@
 import logging
 import time
+import traceback
+
 import numpy as np
 import torch
 from algorithms.utils.buffer import SharedReplayBuffer
@@ -80,7 +82,7 @@ class ShareJSBSimRunner(Runner):
                      f"template_curriculum={self.template_curriculum}")
 
     def run(self):
-        """主训练循环，增强战术模板分析。"""
+        """主训练循环，增强战术模板分析，添加 NaN 检测和异常处理。"""
         self.warmup()
         start = time.time()
         self.total_num_steps = 0
@@ -88,183 +90,249 @@ class ShareJSBSimRunner(Runner):
         win_rates = []
         template_performance_history = []
 
+        # 异常监控
+        nan_count = 0
+        crash_count = 0
+        divergence_count = 0
+        last_valid_checkpoint = None
+
         for episode in range(episodes):
-            episode_rewards = []
-            episode_actions = []
-            episode_phases = []
-            episode_templates = []
-            episode_cooperations = []
+            try:
+                episode_rewards = []
+                episode_actions = []
+                episode_phases = []
+                episode_templates = []
+                episode_cooperations = []
 
-            for step in range(self.buffer_size):
-                values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.collect(step)
-                obs, share_obs, rewards, dones, infos = self.envs.step(actions)
+                # 检查是否需要从检查点恢复
+                if divergence_count > 3 and last_valid_checkpoint is not None:
+                    logging.warning(f"训练发散 {divergence_count} 次，恢复检查点")
+                    self.policy.actor.load_state_dict(last_valid_checkpoint['actor'])
+                    self.policy.critic.load_state_dict(last_valid_checkpoint['critic'])
+                    divergence_count = 0
+                    # 降低学习率
+                    for param_group in self.policy.optimizer.param_groups:
+                        param_group['lr'] *= 0.5
+                        logging.info(f"学习率降低至 {param_group['lr']}")
 
-                # 收集训练数据
-                step_rewards = rewards[0, :self.num_agents // 2]
-                episode_rewards.append(step_rewards)
-                episode_actions.append(actions[0, :self.num_agents // 2])
+                for step in range(self.buffer_size):
+                    values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.collect(step)
 
-                # 处理infos - 这是关键修改
-                # infos的结构取决于环境返回的格式
-                step_phases = []
-                step_templates = []
-                step_cooperations = []
+                    # 检查动作中的 NaN
+                    if np.any(np.isnan(actions)):
+                        logging.error(f"步骤 {step} 动作中检测到 NaN")
+                        nan_count += 1
+                        # 使用安全动作
+                        actions = np.zeros_like(actions)
+                        actions[:, :, 0] = 7  # Simple_F_Pole
+                        actions[:, :, 1] = 0  # 不射击
 
-                # 只收集红方智能体的信息（前 num_agents//2 个）
-                for agent_idx in range(self.num_agents // 2):
-                    # 尝试不同的访问方式
-                    agent_info = None
+                    # 执行环境步骤
+                    obs, share_obs, rewards, dones, infos = self.envs.step(actions)
 
-                    # 方式1: 直接数字索引
-                    if isinstance(infos, dict) and agent_idx in infos:
-                        agent_info = infos[agent_idx]
-                    # 方式2: 如果是列表形式
-                    elif isinstance(infos, list) and len(infos) > 0:
-                        if isinstance(infos[0], dict) and agent_idx in infos[0]:
-                            agent_info = infos[0][agent_idx]
-                    # 方式3: 嵌套结构
-                    elif isinstance(infos, np.ndarray) and len(infos) > 0:
-                        if isinstance(infos[0], dict) and agent_idx in infos[0]:
-                            agent_info = infos[0][agent_idx]
+                    # 检查环境输出中的 NaN
+                    if np.any(np.isnan(obs)):
+                        logging.error(f"步骤 {step} 观测值中检测到 NaN")
+                        nan_count += 1
+                        obs = np.nan_to_num(obs, nan=0.0)
+                        share_obs = np.nan_to_num(share_obs, nan=0.0)
 
-                    if agent_info is None:
-                        agent_info = {}
+                    if np.any(np.isnan(rewards)):
+                        logging.error(f"步骤 {step} 奖励中检测到 NaN")
+                        nan_count += 1
+                        rewards = np.zeros_like(rewards)
 
-                    # 收集阶段信息
-                    phase = agent_info.get("current_phase", "unknown")
-                    step_phases.append(phase)
+                    # 收集训练数据
+                    step_rewards = rewards[0, :self.num_agents // 2]
+                    episode_rewards.append(step_rewards)
+                    episode_actions.append(actions[0, :self.num_agents // 2])
 
-                    # 收集战术模板信息
-                    if hasattr(actions[0], '__len__') and len(actions[0]) > agent_idx:
-                        action = actions[0][agent_idx]
-                        if hasattr(action, '__len__') and len(action) > 0:
-                            template_id = action[0] if isinstance(action[0], (int, np.integer)) else 0
+                    # 处理infos
+                    step_phases = []
+                    step_templates = []
+                    step_cooperations = []
+
+                    for agent_idx in range(self.num_agents // 2):
+                        agent_info = None
+                        if isinstance(infos, dict) and agent_idx in infos:
+                            agent_info = infos[agent_idx]
+                        elif isinstance(infos, list) and len(infos) > 0:
+                            if isinstance(infos[0], dict) and agent_idx in infos[0]:
+                                agent_info = infos[0][agent_idx]
+                        elif isinstance(infos, np.ndarray) and len(infos) > 0:
+                            if isinstance(infos[0], dict) and agent_idx in infos[0]:
+                                agent_info = infos[0][agent_idx]
+
+                        if agent_info is None:
+                            agent_info = {}
+
+                        # 收集阶段信息
+                        phase = agent_info.get("current_phase", "unknown")
+                        step_phases.append(phase)
+
+                        # 收集战术模板信息
+                        if hasattr(actions[0], '__len__') and len(actions[0]) > agent_idx:
+                            action = actions[0][agent_idx]
+                            if hasattr(action, '__len__') and len(action) > 0:
+                                template_id = action[0] if isinstance(action[0], (int, np.integer)) else 0
+                            else:
+                                template_id = 0
                         else:
                             template_id = 0
+                        step_templates.append(template_id)
+
+                        # 收集协同信息
+                        reward_details = agent_info.get("reward_details", {})
+                        cooperation_reward = reward_details.get("TacticalRewardNew", 0) + reward_details.get(
+                            "TacticalReward", 0)
+                        step_cooperations.append(cooperation_reward)
+
+                    episode_phases.append(step_phases)
+                    episode_templates.append(step_templates)
+                    episode_cooperations.append(step_cooperations)
+
+                    data = obs, share_obs, actions, rewards, dones, action_log_probs, values, rnn_states_actor, rnn_states_critic
+                    self.insert(data)
+
+                    # 检查崩溃
+                    if isinstance(infos, dict):
+                        for agent_id, info in infos.items():
+                            if isinstance(info, dict) and info.get("crashed", False):
+                                crash_count += 1
+
+                self.compute()
+                train_infos = self.train()
+                self.total_num_steps = (episode + 1) * self.buffer_size * self.n_rollout_threads
+
+                # 检查训练发散
+                if train_infos.get('value_loss', 0) > 1000 or np.isnan(train_infos.get('value_loss', 0)):
+                    logging.error(f"训练发散！值损失：{train_infos['value_loss']}")
+                    divergence_count += 1
+                else:
+                    divergence_count = 0
+                    # 保存有效检查点
+                    if episode % 10 == 0:
+                        last_valid_checkpoint = {
+                            'actor': self.policy.actor.state_dict(),
+                            'critic': self.policy.critic.state_dict()
+                        }
+
+                # 战术模板性能分析
+                if self.use_tactical_templates:
+                    flat_templates = []
+                    flat_rewards = []
+                    flat_phases = []
+                    flat_cooperations = []
+
+                    for step_idx in range(len(episode_templates)):
+                        for agent_idx in range(self.num_agents // 2):
+                            flat_templates.append(episode_templates[step_idx][agent_idx])
+                            flat_rewards.append(episode_rewards[step_idx][agent_idx])
+                            flat_phases.append(episode_phases[step_idx][agent_idx])
+                            flat_cooperations.append(episode_cooperations[step_idx][agent_idx])
+
+                    template_performance = self._analyze_template_performance(
+                        flat_templates, flat_rewards, flat_phases, flat_cooperations)
+                    template_performance_history.append(template_performance)
+
+                # 收集胜率
+                final_info = {}
+                if isinstance(infos, dict):
+                    final_info = infos
+                elif isinstance(infos, (list, np.ndarray)) and len(infos) > 0:
+                    final_info = infos[0] if isinstance(infos[0], dict) else {}
+
+                if "win" in final_info:
+                    win_rates.append(final_info["win"])
+
+                # 保存模型
+                if episode % self.save_interval == 0 or episode == episodes - 1:
+                    self.save(episode)
+
+                # 定期日志输出
+                if episode % self.log_interval == 0:
+                    end = time.time()
+                    avg_reward = np.mean([r.mean() for r in episode_rewards])
+                    win_rate = np.mean(win_rates[-self.log_interval:]) if win_rates else 0
+
+                    # 分析动作分布
+                    actions_array = np.array(episode_actions)
+                    if actions_array.size > 0 and actions_array.ndim >= 3:
+                        template_ids = actions_array[:, :, 0]
+                        template_dist = {i: np.sum(template_ids == i) / template_ids.size for i in range(15)}
+                        if actions_array.shape[2] > 1:
+                            shoot_flags = actions_array[:, :, 1]
+                            shoot_ratio = np.mean(shoot_flags)
+                        else:
+                            shoot_ratio = 0.0
                     else:
-                        template_id = 0
-                    step_templates.append(template_id)
-
-                    # 收集协同信息
-                    reward_details = agent_info.get("reward_details", {})
-                    cooperation_reward = reward_details.get("TacticalRewardNew", 0) + reward_details.get(
-                        "TacticalReward", 0)
-                    step_cooperations.append(cooperation_reward)
-
-                episode_phases.append(step_phases)
-                episode_templates.append(step_templates)
-                episode_cooperations.append(step_cooperations)
-
-                data = obs, share_obs, actions, rewards, dones, action_log_probs, values, rnn_states_actor, rnn_states_critic
-                self.insert(data)
-
-            self.compute()
-            train_infos = self.train()
-            self.total_num_steps = (episode + 1) * self.buffer_size * self.n_rollout_threads
-
-            # 战术模板性能分析
-            if self.use_tactical_templates:
-                # 将嵌套列表展平用于分析
-                flat_templates = []
-                flat_rewards = []
-                flat_phases = []
-                flat_cooperations = []
-
-                for step_idx in range(len(episode_templates)):
-                    for agent_idx in range(self.num_agents // 2):
-                        flat_templates.append(episode_templates[step_idx][agent_idx])
-                        flat_rewards.append(episode_rewards[step_idx][agent_idx])
-                        flat_phases.append(episode_phases[step_idx][agent_idx])
-                        flat_cooperations.append(episode_cooperations[step_idx][agent_idx])
-
-                template_performance = self._analyze_template_performance(
-                    flat_templates, flat_rewards, flat_phases, flat_cooperations)
-                template_performance_history.append(template_performance)
-
-            # 收集胜率
-            final_info = {}
-            if isinstance(infos, dict):
-                final_info = infos
-            elif isinstance(infos, (list, np.ndarray)) and len(infos) > 0:
-                final_info = infos[0] if isinstance(infos[0], dict) else {}
-
-            if "win" in final_info:
-                win_rates.append(final_info["win"])
-
-            # 保存模型
-            if episode % self.save_interval == 0 or episode == episodes - 1:
-                self.save(episode)
-
-            # 定期日志输出
-            if episode % self.log_interval == 0:
-                end = time.time()
-                avg_reward = np.mean([r.mean() for r in episode_rewards])
-                win_rate = np.mean(win_rates[-self.log_interval:]) if win_rates else 0
-
-                # 分析动作分布
-                actions_array = np.array(episode_actions)
-                if actions_array.size > 0 and actions_array.ndim >= 3:
-                    template_ids = actions_array[:, :, 0]
-                    template_dist = {i: np.sum(template_ids == i) / template_ids.size for i in range(15)}
-
-                    if actions_array.shape[2] > 1:
-                        shoot_flags = actions_array[:, :, 1]
-                        shoot_ratio = np.mean(shoot_flags)
-                    else:
+                        template_dist = {i: 0 for i in range(15)}
                         shoot_ratio = 0.0
-                else:
-                    template_dist = {i: 0 for i in range(15)}
-                    shoot_ratio = 0.0
 
-                # 分析阶段分布
-                if episode_phases:
-                    # 展平phases列表并统计
-                    all_phases = []
-                    for step_phases in episode_phases:
-                        all_phases.extend(step_phases)
+                    # 分析阶段分布
+                    if episode_phases:
+                        all_phases = []
+                        for step_phases in episode_phases:
+                            all_phases.extend(step_phases)
+                        phase_counts = {}
+                        for phase in all_phases:
+                            phase_counts[phase] = phase_counts.get(phase, 0) + 1
+                        total = len(all_phases)
+                        phase_counts = {p: count / total for p, count in phase_counts.items()}
+                    else:
+                        phase_counts = {"unknown": 1.0}
 
-                    phase_counts = {}
-                    for phase in all_phases:
-                        phase_counts[phase] = phase_counts.get(phase, 0) + 1
+                    # 更新战术统计
+                    self._update_template_stats(template_dist, avg_reward, phase_counts)
 
-                    total = len(all_phases)
-                    phase_counts = {p: count / total for p, count in phase_counts.items()}
-                else:
-                    phase_counts = {"unknown": 1.0}
+                    # 输出详细日志
+                    logging.info(f"\n{'=' * 80}")
+                    logging.info(f"Episode {episode}/{episodes} 总结：")
+                    logging.info(f"{'=' * 80}")
+                    logging.info(f"训练速度: {int(self.total_num_steps / (end - start))} FPS")
+                    logging.info(f"平均奖励: {avg_reward:.3f}")
+                    logging.info(f"胜率: {win_rate:.3f}")
+                    logging.info(f"模板分布: {self._format_template_distribution(template_dist)}")
+                    logging.info(f"射击比例: {shoot_ratio:.3f}")
+                    logging.info(f"阶段分布: {phase_counts}")
+                    logging.info(f"异常统计 - NaN: {nan_count}, 崩溃: {crash_count}, 发散: {divergence_count}")
+                    logging.info(
+                        f"训练损失 - 值: {train_infos.get('value_loss', 0):.3f}, 策略: {train_infos.get('policy_loss', 0):.3f}")
+                    logging.info(f"{'=' * 80}\n")
 
-                # 更新战术统计
-                self._update_template_stats(template_dist, avg_reward, phase_counts)
+                    # 战术模板分析日志
+                    if self.use_tactical_templates and episode % self.template_analysis_interval == 0:
+                        self._log_tactical_analysis(template_performance_history[
+                                                    -self.template_analysis_interval:] if template_performance_history else [])
 
-                # 输出详细日志
-                logging.info(
-                    f"Scenario: {self.all_args.scenario_name} ... FPS: {int(self.total_num_steps / (end - start))}")
-                logging.info(f"Episode {episode}: Avg Reward={avg_reward:.3f}, Win Rate={win_rate:.3f}")
-                logging.info(f"Template Distribution: {self._format_template_distribution(template_dist)}")
-                logging.info(f"Shoot Ratio: {shoot_ratio:.3f}")
-                logging.info(f"Phase Distribution: {phase_counts}")
+                    # 更新训练信息
+                    train_infos["average_episode_rewards"] = avg_reward
+                    train_infos["win_rate"] = win_rate
+                    train_infos["template_efficiency"] = self._calculate_template_efficiency()
+                    train_infos["cooperative_score"] = np.mean(
+                        [np.mean(coop) for coop in episode_cooperations]) if episode_cooperations else 0
 
-                # 战术模板分析日志
-                if self.use_tactical_templates and episode % self.template_analysis_interval == 0:
-                    self._log_tactical_analysis(template_performance_history[
-                                                -self.template_analysis_interval:] if template_performance_history else [])
+                    self.log_info(train_infos, self.total_num_steps)
 
-                # 更新训练信息
-                train_infos["average_episode_rewards"] = avg_reward
-                train_infos["win_rate"] = win_rate
-                train_infos["template_efficiency"] = self._calculate_template_efficiency()
-                train_infos["cooperative_score"] = np.mean(
-                    [np.mean(coop) for coop in episode_cooperations]) if episode_cooperations else 0
+                    # 重置异常计数
+                    if nan_count == 0 and crash_count == 0:
+                        logging.info("此区间无异常，训练稳定")
+                    nan_count = 0
+                    crash_count = 0
 
-                self.log_info(train_infos, self.total_num_steps)
+                    # 自适应对手切换
+                    if win_rate > 0.75 and self.use_rule_opponent:
+                        logging.info("胜率较高，切换至自博弈模式")
+                        self.use_rule_opponent = False
 
-                # 自适应对手切换
-                if win_rate > 0.75 and self.use_rule_opponent:
-                    logging.info("High win rate achieved, switching to self-play mode")
-                    self.use_rule_opponent = False
+                # 评估
+                if episode % self.eval_interval == 0 and self.use_eval:
+                    self.eval(self.total_num_steps)
 
-            # 评估
-            if episode % self.eval_interval == 0 and self.use_eval:
-                self.eval(self.total_num_steps)
+            except Exception as e:
+                logging.error(f"Episode {episode} 错误: {e}")
+                logging.error(f"回溯: {traceback.format_exc()}")
+                continue
 
     def _analyze_template_performance(self, templates, rewards, phases, cooperations):
         """分析战术模板性能"""
@@ -423,12 +491,42 @@ class ShareJSBSimRunner(Runner):
     def collect(self, step):
         """收集一步数据。"""
         self.policy.prep_rollout()
+
+        # 检查并修复观测数据
         obs = np.concatenate(self.buffer.obs[step])
         rnn_states_actor = np.concatenate(self.buffer.rnn_states_actor[step])
 
-        if np.isnan(obs).any() or np.isnan(rnn_states_actor).any():
-            logging.error(f"NaN detected in obs or rnn_states at step {step}")
+        # 检查输入数据是否有NaN
+        if np.isnan(obs).any():
+            logging.error(f"NaN detected in obs at step {step}")
+            # 统计NaN的位置
+            nan_indices = np.where(np.isnan(obs))
+            logging.error(f"NaN indices: {nan_indices}")
 
+            # 替换NaN值
+            obs = np.nan_to_num(obs, nan=0.0, posinf=10.0, neginf=-10.0)
+
+            # 如果NaN太多，重置环境
+            nan_ratio = np.sum(np.isnan(obs)) / obs.size
+            if nan_ratio > 0.1:  # 超过10%是NaN
+                logging.warning("Too many NaN values, resetting environment")
+                obs, share_obs = self.envs.reset()
+                if self.use_selfplay:
+                    self.opponent_obs = obs[:, self.num_agents // 2:, ...]
+                    obs = obs[:, :self.num_agents // 2, ...]
+                    share_obs = share_obs[:, :self.num_agents // 2, ...]
+                self.buffer.obs[0] = obs.copy()
+                self.buffer.share_obs[0] = share_obs.copy()
+                self.buffer.step = 0
+                # 重新收集第0步
+                return self.collect(0)
+
+        # 检查RNN状态
+        if np.isnan(rnn_states_actor).any():
+            logging.error(f"NaN detected in rnn_states at step {step}")
+            rnn_states_actor = np.zeros_like(rnn_states_actor)
+
+        # 获取动作
         values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.policy.get_actions(
             np.concatenate(self.buffer.share_obs[step]),
             obs,
@@ -436,12 +534,32 @@ class ShareJSBSimRunner(Runner):
             np.concatenate(self.buffer.rnn_states_critic[step]),
             np.concatenate(self.buffer.masks[step]))
 
-        values = np.array(np.split(_t2n(values), self.n_rollout_threads))
-        actions = np.array(np.split(_t2n(actions), self.n_rollout_threads))
-        action_log_probs = np.array(np.split(_t2n(action_log_probs), self.n_rollout_threads))
-        rnn_states_actor = np.array(np.split(_t2n(rnn_states_actor), self.n_rollout_threads))
-        rnn_states_critic = np.array(np.split(_t2n(rnn_states_critic), self.n_rollout_threads))
+        # 先转换为numpy数组
+        values_np = _t2n(values)
+        actions_np = _t2n(actions)
+        action_log_probs_np = _t2n(action_log_probs)
+        rnn_states_actor_np = _t2n(rnn_states_actor)
+        rnn_states_critic_np = _t2n(rnn_states_critic)
 
+        # 检查输出是否有NaN
+        if np.isnan(values_np).any():
+            logging.error("NaN in values output")
+            values_np = np.zeros_like(values_np)
+        if np.isnan(actions_np).any():
+            logging.error("NaN in actions output")
+            actions_np = np.zeros_like(actions_np)
+        if np.isnan(action_log_probs_np).any():
+            logging.error("NaN in action_log_probs output")
+            action_log_probs_np = np.zeros_like(action_log_probs_np)
+
+        # 转换为numpy数组并分割
+        values = np.array(np.split(values_np, self.n_rollout_threads))
+        actions = np.array(np.split(actions_np, self.n_rollout_threads))
+        action_log_probs = np.array(np.split(action_log_probs_np, self.n_rollout_threads))
+        rnn_states_actor = np.array(np.split(rnn_states_actor_np, self.n_rollout_threads))
+        rnn_states_critic = np.array(np.split(rnn_states_critic_np, self.n_rollout_threads))
+
+        # 处理自博弈对手
         if self.use_selfplay:
             opponent_actions = np.zeros_like(actions)
             if self.use_rule_opponent:
@@ -449,12 +567,24 @@ class ShareJSBSimRunner(Runner):
             else:
                 for policy_idx, policy in enumerate(self.opponent_policy):
                     env_idx = self.opponent_env_split[policy_idx]
+
+                    # 检查对手观测
+                    opponent_obs_batch = np.concatenate(self.opponent_obs[env_idx])
+                    if np.isnan(opponent_obs_batch).any():
+                        logging.warning("NaN in opponent obs, using zeros")
+                        opponent_obs_batch = np.nan_to_num(opponent_obs_batch, nan=0.0)
+
                     opponent_action, opponent_rnn_states = policy.act(
-                        np.concatenate(self.opponent_obs[env_idx]),
+                        opponent_obs_batch,
                         np.concatenate(self.opponent_rnn_states[env_idx]),
                         np.concatenate(self.opponent_masks[env_idx]))
-                    opponent_actions[env_idx] = np.array(np.split(_t2n(opponent_action), len(env_idx)))
-                    self.opponent_rnn_states[env_idx] = np.array(np.split(_t2n(opponent_rnn_states), len(env_idx)))
+
+                    opponent_action_np = _t2n(opponent_action)
+                    opponent_rnn_states_np = _t2n(opponent_rnn_states)
+
+                    opponent_actions[env_idx] = np.array(np.split(opponent_action_np, len(env_idx)))
+                    self.opponent_rnn_states[env_idx] = np.array(np.split(opponent_rnn_states_np, len(env_idx)))
+
             actions = np.concatenate((actions, opponent_actions), axis=1)
 
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic

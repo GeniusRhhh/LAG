@@ -122,37 +122,109 @@ class MultipleCombatTask(SingleCombatTask):
     def get_obs(self, env, agent_id):
         """获取指定智能体的观测。"""
         norm_obs = np.zeros(self.obs_length)
-        ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
-        ego_cur_ned = LLA2NEU(*ego_state[:3], env.center_lon, env.center_lat, env.center_alt)
-        ego_feature = np.array([*ego_cur_ned, *(ego_state[6:9])])
 
-        # 自身状态归一化
-        norm_obs[0] = ego_state[2] / 5000
-        norm_obs[1] = np.sin(ego_state[3])
-        norm_obs[2] = np.cos(ego_state[3])
-        norm_obs[3] = np.sin(ego_state[4])
-        norm_obs[4] = np.cos(ego_state[4])
-        norm_obs[5] = ego_state[9] / 340
-        norm_obs[6] = ego_state[10] / 340
-        norm_obs[7] = ego_state[11] / 340
-        norm_obs[8] = ego_state[12] / 340
+        # 检查智能体是否存在且存活
+        if agent_id not in env.agents:
+            logging.error(f"Agent {agent_id} not found in env.agents")
+            return norm_obs
 
-        # 其他智能体相对状态
-        offset = 9
-        for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
-            state = np.array(sim.get_property_values(self.state_var))
-            cur_ned = LLA2NEU(*state[:3], env.center_lon, env.center_lat, env.center_alt)
-            feature = np.array([*cur_ned, *(state[6:9])])
-            AO, TA, R, side_flag = get_AO_TA_R(ego_feature, feature, return_side=True)
-            norm_obs[offset + 0] = (state[9] - ego_state[9]) / 340
-            norm_obs[offset + 1] = (state[2] - ego_state[2]) / 1000
-            norm_obs[offset + 2] = AO
-            norm_obs[offset + 3] = TA
-            norm_obs[offset + 4] = R / 10000
-            norm_obs[offset + 5] = side_flag
-            offset += 6
+        if not env.agents[agent_id].is_alive:
+            logging.debug(f"Agent {agent_id} is not alive")
+            return norm_obs
 
+        try:
+            # 获取自身状态
+            ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
+
+            # 检查并修复NaN和异常值
+            if np.any(np.isnan(ego_state)):
+                logging.error(f"NaN detected in ego_state for {agent_id}: {ego_state}")
+                # 修复各个状态值
+                if np.isnan(ego_state[2]):  # 高度
+                    ego_state[2] = 5000  # 默认5000米
+                if np.isnan(ego_state[9]):  # 速度u
+                    ego_state[9] = 200  # 默认200m/s
+                if np.isnan(ego_state[10]):  # 速度v
+                    ego_state[10] = 0
+                if np.isnan(ego_state[11]):  # 速度w
+                    ego_state[11] = 0
+                # 修复其他NaN值
+                ego_state = np.nan_to_num(ego_state, nan=0.0, posinf=1000.0, neginf=-1000.0)
+
+            # 物理限制检查
+            if ego_state[2] < 0:  # 高度不能为负
+                logging.error(f"Agent {agent_id} below ground: {ego_state[2]}m")
+                env.agents[agent_id].crash()
+                return np.zeros(self.obs_length)
+
+            # 速度限制检查
+            total_speed = np.sqrt(ego_state[9] ** 2 + ego_state[10] ** 2 + ego_state[11] ** 2)
+            if total_speed > 700:  # 超过700m/s
+                logging.error(f"Agent {agent_id} overspeed: {total_speed}m/s")
+                # 限制速度
+                speed_factor = 500 / total_speed
+                ego_state[9] *= speed_factor
+                ego_state[10] *= speed_factor
+                ego_state[11] *= speed_factor
+
+            # 计算自身位置
+            ego_cur_ned = LLA2NEU(*ego_state[:3], env.center_lon, env.center_lat, env.center_alt)
+            ego_feature = np.array([*ego_cur_ned, *(ego_state[6:9])])
+
+            # 自身状态归一化
+            norm_obs[0] = np.clip(ego_state[2] / 5000, -10, 10)  # 高度
+            norm_obs[1] = np.clip(np.sin(ego_state[3]), -1, 1)  # roll sin
+            norm_obs[2] = np.clip(np.cos(ego_state[3]), -1, 1)  # roll cos
+            norm_obs[3] = np.clip(np.sin(ego_state[4]), -1, 1)  # pitch sin
+            norm_obs[4] = np.clip(np.cos(ego_state[4]), -1, 1)  # pitch cos
+            norm_obs[5] = np.clip(ego_state[9] / 340, -2, 2)  # 速度u
+            norm_obs[6] = np.clip(ego_state[10] / 340, -2, 2)  # 速度v
+            norm_obs[7] = np.clip(ego_state[11] / 340, -2, 2)  # 速度w
+            norm_obs[8] = np.clip(ego_state[12] / 340, -2, 2)  # 总速度
+
+            # 其他智能体相对状态
+            offset = 9
+            for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
+                if not sim.is_alive:
+                    # 如果目标不存活，填充默认值
+                    norm_obs[offset:offset + 6] = [0, 0, 0, 0, 10, 0]
+                    offset += 6
+                    continue
+
+                try:
+                    state = np.array(sim.get_property_values(self.state_var))
+
+                    # 检查目标状态
+                    if np.any(np.isnan(state)):
+                        logging.warning(f"NaN in target state for {sim.uid}")
+                        state = np.nan_to_num(state, nan=0.0)
+
+                    cur_ned = LLA2NEU(*state[:3], env.center_lon, env.center_lat, env.center_alt)
+                    feature = np.array([*cur_ned, *(state[6:9])])
+
+                    AO, TA, R, side_flag = get_AO_TA_R(ego_feature, feature, return_side=True)
+
+                    norm_obs[offset + 0] = np.clip((state[9] - ego_state[9]) / 340, -2, 2)
+                    norm_obs[offset + 1] = np.clip((state[2] - ego_state[2]) / 1000, -10, 10)
+                    norm_obs[offset + 2] = np.clip(AO, -10, 10)
+                    norm_obs[offset + 3] = np.clip(TA, -10, 10)
+                    norm_obs[offset + 4] = np.clip(R / 10000, 0, 10)
+                    norm_obs[offset + 5] = side_flag
+
+                except Exception as e:
+                    logging.error(f"Error processing target {sim.uid}: {e}")
+                    norm_obs[offset:offset + 6] = [0, 0, 0, 0, 10, 0]
+
+                offset += 6
+
+        except Exception as e:
+            logging.error(f"Error in get_obs for {agent_id}: {e}")
+            return np.zeros(self.obs_length)
+
+        # 最终检查和限制
+        norm_obs = np.nan_to_num(norm_obs, nan=0.0, posinf=10.0, neginf=-10.0)
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
+
         return norm_obs
 
     def normalize_action(self, env, agent_id, action):
@@ -371,26 +443,33 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         self.norm_delta_velocity = np.array([0.1, 0.05, 0, -0.05, -0.1])  # 5个速度选择
         self._inner_rnn_states = {}
         # 奖励缩放器
-        self.reward_scaler = RewardScaler(scale_factor=0.01)
+        self.reward_scaler = RewardScaler(scale_factor=0.1)
     def load_action_space(self):
         """定义分层动作空间：第二层高层控制。"""
         self.action_space = spaces.MultiDiscrete([5, 5, 5])  # [altitude_cmd_id, heading_cmd_id, velocity_cmd_id]
 
     def normalize_action(self, env, agent_id, action):
         """归一化分层动作，使用低级策略生成控制命令。"""
+        # 基本检查
+        if agent_id not in env.agents or not env.agents[agent_id].is_alive:
+            return np.array([0.0, 0.0, 0.0, 0.7])
+
         raw_obs = self.get_obs(env, agent_id)
         input_obs = np.zeros(12)
 
         # 确保动作索引在有效范围内
-        action = np.clip(action, 0, [4, 4, 4])  # [5, 5, 5] -> [0-4, 0-4, 0-4]
+        action = np.array(action, dtype=int)
+        action[0] = np.clip(action[0], 0, 4)
+        action[1] = np.clip(action[1], 0, 4)
+        action[2] = np.clip(action[2], 0, 4)
 
         # 将离散动作索引转换为连续指令
-        input_obs[0] = self.norm_delta_altitude[int(action[0])]
-        input_obs[1] = self.norm_delta_heading[int(action[1])]
-        input_obs[2] = self.norm_delta_velocity[int(action[2])]
+        input_obs[0] = self.norm_delta_altitude[action[0]]
+        input_obs[1] = self.norm_delta_heading[action[1]]
+        input_obs[2] = self.norm_delta_velocity[action[2]]
         input_obs[3:12] = raw_obs[:9]
 
-        # 添加输入验证
+        # 检查输入
         input_obs = np.nan_to_num(input_obs, nan=0.0, posinf=1.0, neginf=-1.0)
         input_obs = np.expand_dims(input_obs, axis=0)
 
@@ -398,30 +477,27 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         if agent_id not in self._inner_rnn_states:
             self._inner_rnn_states[agent_id] = np.zeros((1, 1, 128))
 
+        # 调用低级策略
         _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])
         action_output = _action.detach().cpu().numpy().squeeze(0)
         self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()
 
-        # 第三层：底层执行控制层 - 修正映射范围
+        # 恢复原始的动作映射！！！
         norm_act = np.zeros(4)
         norm_act[0] = action_output[0] / 20 - 1.  # Aileron: [-1, 1]
         norm_act[1] = action_output[1] / 20 - 1.  # Elevator: [-1, 1]
         norm_act[2] = action_output[2] / 20 - 1.  # Rudder: [-1, 1]
         norm_act[3] = action_output[3] / 58 + 0.4  # Throttle: [0.4, 0.9]
 
-        # 增强安全限制
-        norm_act[1] = np.clip(norm_act[1], -0.3, 0.3)  # 限制俯仰以防止急剧下降
-        norm_act[3] = np.clip(norm_act[3], 0.6, 0.9)  # 保持足够推力
+        # 只保留最基本的安全限制
+        norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)  # 恢复到原来的±0.5
 
-        # 低高度保护
+        # 只在极端情况下介入
         current_alt = env.agents[agent_id].get_position()[2]
-        if current_alt < 3000:  # 3km以下
-            norm_act[1] = np.clip(norm_act[1], -0.1, 0.3)  # 限制下俯
+        if current_alt < 500:  # 只在极低高度介入
+            norm_act[1] = max(norm_act[1], 0.0)  # 不允许下俯
             norm_act[3] = max(norm_act[3], 0.8)  # 增加推力
-
-        logging.debug(f"Agent {agent_id} hierarchical action: "
-                      f"high_level={action.tolist()}, norm_act={norm_act.tolist()}, "
-                      f"altitude={current_alt:.1f}m")
+            logging.warning(f"Agent {agent_id} emergency altitude: {current_alt:.1f}m")
 
         return norm_act
 
@@ -514,20 +590,22 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
             shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
             state = self.get_state_dict(env, agent_id)
 
+            # 在 HierarchicalMultipleCombatShootTask.step 中
             shoot_flag = (
                     agent.is_alive and
                     self._shoot_action.get(agent_id, False) and
                     self._remaining_missiles.get(agent_id, 0) > 0 and
                     attack_angle <= self.max_attack_angle and
                     distance <= self.max_attack_distance and
+                    distance >= 5000 and  # 添加最小距离限制
                     shoot_interval >= self.min_attack_interval and
-                    state.get("radar_lock", False) and
+                    state.get("radar_lock", False) and  # 必须有雷达锁定
                     self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision"]
             )
 
             if shoot_flag:
                 # 创建导弹
-                new_missile_uid = f"{agent_id}M{self._remaining_missiles[agent_id]}"
+                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
                 env.add_temp_simulator(
                     MissileSimulator.create(
                         parent=agent,
@@ -593,15 +671,16 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
 
 
             # 缩放奖励
-            original_reward = np.clip(reward_sum, -10, 10)
-            scaled_reward = self.reward_scaler.scale(original_reward)
-            rewards[agent_id] = np.array([scaled_reward])
-            self.rewards[agent_id] = scaled_reward
+            # original_reward = np.clip(reward_sum, -10, 10)
+            # scaled_reward = self.reward_scaler.scale(original_reward)
+            # rewards[agent_id] = np.array([scaled_reward])
+            # self.rewards[agent_id] = scaled_reward
+            rewards[agent_id] =  np.clip(reward_sum, -10, 10)
 
             # 每100步记录缩放日志
-            if env.current_step % 100 == 0:
-                logging.info(f"Agent {agent_id} reward scaling: "
-                             f"original={original_reward:.3f}, scaled={scaled_reward:.3f}")
+            # if env.current_step % 100 == 0:
+            #     logging.info(f"Agent {agent_id} reward scaling: "
+            #                  f"original={original_reward:.3f}, scaled={scaled_reward:.3f}")
             # 检查终止条件
             done, info = self.get_termination(env, agent_id, {})
             dones[agent_id] = [done]
