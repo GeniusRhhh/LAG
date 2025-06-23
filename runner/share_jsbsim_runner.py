@@ -78,11 +78,11 @@ class ShareJSBSimRunner(Runner):
         if self.model_dir is not None:
             self.restore()
 
-        logging.info(f"Enhanced ShareJSBSimRunner loaded: tactical_templates={self.use_tactical_templates}, "
-                     f"template_curriculum={self.template_curriculum}")
+        # logging.info(f"Enhanced ShareJSBSimRunner loaded: tactical_templates={self.use_tactical_templates}, "
+        #              f"template_curriculum={self.template_curriculum}")
 
     def run(self):
-        """主训练循环，增强战术模板分析，添加 NaN 检测和异常处理。"""
+        """主训练循环，基于现有代码结构的修复版本"""
         self.warmup()
         start = time.time()
         self.total_num_steps = 0
@@ -142,12 +142,18 @@ class ShareJSBSimRunner(Runner):
                         nan_count += 1
                         rewards = np.zeros_like(rewards)
 
+                    # 奖励异常检测和限制
+                    max_reward = np.max(np.abs(rewards))
+                    if max_reward > 50.0:  # 检测异常大的奖励
+                        logging.warning(f"步骤 {step} 检测到异常奖励: max_abs={max_reward:.3f}")
+                        rewards = np.clip(rewards, -20.0, 20.0)  # 限制极端奖励
+
                     # 收集训练数据
                     step_rewards = rewards[0, :self.num_agents // 2]
                     episode_rewards.append(step_rewards)
                     episode_actions.append(actions[0, :self.num_agents // 2])
 
-                    # 处理infos
+                    # 处理infos - 使用你现有的方式
                     step_phases = []
                     step_templates = []
                     step_cooperations = []
@@ -217,7 +223,7 @@ class ShareJSBSimRunner(Runner):
                             'critic': self.policy.critic.state_dict()
                         }
 
-                # 战术模板性能分析
+                # 战术模板性能分析 - 使用你现有的函数
                 if self.use_tactical_templates:
                     flat_templates = []
                     flat_rewards = []
@@ -255,7 +261,7 @@ class ShareJSBSimRunner(Runner):
                     avg_reward = np.mean([r.mean() for r in episode_rewards])
                     win_rate = np.mean(win_rates[-self.log_interval:]) if win_rates else 0
 
-                    # 分析动作分布
+                    # 分析动作分布 - 使用你现有的方式
                     actions_array = np.array(episode_actions)
                     if actions_array.size > 0 and actions_array.ndim >= 3:
                         template_ids = actions_array[:, :, 0]
@@ -269,7 +275,7 @@ class ShareJSBSimRunner(Runner):
                         template_dist = {i: 0 for i in range(15)}
                         shoot_ratio = 0.0
 
-                    # 分析阶段分布
+                    # 分析阶段分布 - 使用你现有的方式
                     if episode_phases:
                         all_phases = []
                         for step_phases in episode_phases:
@@ -282,7 +288,7 @@ class ShareJSBSimRunner(Runner):
                     else:
                         phase_counts = {"unknown": 1.0}
 
-                    # 更新战术统计
+                    # 更新战术统计 - 使用你现有的函数
                     self._update_template_stats(template_dist, avg_reward, phase_counts)
 
                     # 输出详细日志
@@ -300,7 +306,7 @@ class ShareJSBSimRunner(Runner):
                         f"训练损失 - 值: {train_infos.get('value_loss', 0):.3f}, 策略: {train_infos.get('policy_loss', 0):.3f}")
                     logging.info(f"{'=' * 80}\n")
 
-                    # 战术模板分析日志
+                    # 战术模板分析日志 - 使用你现有的函数
                     if self.use_tactical_templates and episode % self.template_analysis_interval == 0:
                         self._log_tactical_analysis(template_performance_history[
                                                     -self.template_analysis_interval:] if template_performance_history else [])

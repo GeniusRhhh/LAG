@@ -364,7 +364,7 @@ class AircraftSimulator(BaseSimulator):
                 self.crash()
                 return False
 
-            # 应用原来的飞行包线保护（如果有的话）
+            # 飞行包线保护
             self._apply_flight_envelope_protection()
 
             # 更新战术状态
@@ -373,95 +373,22 @@ class AircraftSimulator(BaseSimulator):
             return result
         return False
 
-    # def _apply_enhanced_flight_envelope_protection(self):
-    #     """增强的飞行包线保护"""
-    #     current_alt = self.get_position()[2]
-    #     current_vel = np.linalg.norm(self.get_velocity())
-    #
-    #     # 获取当前控制输入
-    #     aileron_cmd = self.get_property_value(Catalog.fcs_aileron_cmd_norm)
-    #     elevator_cmd = self.get_property_value(Catalog.fcs_elevator_cmd_norm)
-    #     rudder_cmd = self.get_property_value(Catalog.fcs_rudder_cmd_norm)
-    #     throttle_cmd = self.get_property_value(Catalog.fcs_throttle_cmd_norm)
-    #
-    #     # 获取当前姿态和角速率
-    #     roll = self.get_property_value(Catalog.attitude_roll_rad)
-    #     pitch = self.get_property_value(Catalog.attitude_pitch_rad)
-    #     roll_rate = self.get_property_value(Catalog.velocities_p_rad_sec)
-    #     pitch_rate = self.get_property_value(Catalog.velocities_q_rad_sec)
-    #
-    #     # 1. 滚转限制
-    #     if abs(roll) > np.radians(70):
-    #         # 减小副翼输入
-    #         aileron_cmd *= 0.3
-    #         self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
-    #         logging.debug(f"Agent {self.uid} roll limited: {np.rad2deg(roll):.1f}deg")
-    #
-    #     # 2. 滚转速率限制
-    #     max_roll_rate = np.radians(90)  # 90度/秒
-    #     if abs(roll_rate) > max_roll_rate:
-    #         # 反向副翼以减小滚转速率
-    #         aileron_cmd = -np.sign(roll_rate) * 0.5
-    #         self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
-    #         logging.debug(f"Agent {self.uid} roll rate limited: {np.rad2deg(roll_rate):.1f}deg/s")
-    #
-    #     # 3. 俯仰限制
-    #     if pitch > np.radians(30):  # 上仰过大
-    #         elevator_cmd = min(elevator_cmd, -0.1)  # 推杆
-    #         self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
-    #     elif pitch < np.radians(-30):  # 下俯过大
-    #         elevator_cmd = max(elevator_cmd, 0.1)  # 拉杆
-    #         self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
-    #
-    #     # 4. 俯仰速率限制
-    #     max_pitch_rate = np.radians(60)  # 60度/秒
-    #     if abs(pitch_rate) > max_pitch_rate:
-    #         elevator_cmd = -np.sign(pitch_rate) * 0.3
-    #         self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
-    #
-    #     # 5. 低高度保护
-    #     if current_alt < 1000:
-    #         # 限制下俯
-    #         if pitch < 0:
-    #             elevator_cmd = max(elevator_cmd, 0.2)
-    #             self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
-    #         # 限制滚转
-    #         if abs(roll) > np.radians(30):
-    #             aileron_cmd = -np.sign(roll) * 0.5
-    #             self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
-    #         # 增加推力
-    #         throttle_cmd = max(throttle_cmd, 0.8)
-    #         self.set_property_value(Catalog.fcs_throttle_cmd_norm, throttle_cmd)
-    #
-    #     # 6. 失速保护
-    #     if current_vel < self.flight_envelope["min_speed"]:
-    #         # 减小迎角
-    #         if pitch > np.radians(10):
-    #             elevator_cmd = -0.3
-    #             self.set_property_value(Catalog.fcs_elevator_cmd_norm, elevator_cmd)
-    #         # 改平机翼
-    #         if abs(roll) > np.radians(20):
-    #             aileron_cmd = -np.sign(roll) * 0.5
-    #             self.set_property_value(Catalog.fcs_aileron_cmd_norm, aileron_cmd)
-    #         # 最大推力
-    #         self.set_property_value(Catalog.fcs_throttle_cmd_norm, 0.9)
-    #         logging.warning(f"Agent {self.uid} stall protection: speed={current_vel:.1f}m/s")
     def _apply_flight_envelope_protection(self):
         """应用飞行包线保护"""
         current_alt = self.get_position()[2]
         current_vel = np.linalg.norm(self.get_velocity())
 
-        # 高度保护
-        if current_alt > self.flight_envelope["max_altitude"]:
-            logging.warning(f"Agent {self.uid} exceeding max altitude: {current_alt:.1f}m")
-        elif current_alt < 500:  # 最小安全高度
-            logging.warning(f"Agent {self.uid} too low: {current_alt:.1f}m")
-
-        # 速度保护
-        if current_vel > self.flight_envelope["max_speed"]:
-            logging.warning(f"Agent {self.uid} exceeding max speed: {current_vel:.1f}m/s")
-        elif current_vel < self.flight_envelope["min_speed"]:
-            logging.warning(f"Agent {self.uid} below min speed: {current_vel:.1f}m/s")
+        # # 高度保护
+        # if current_alt > self.flight_envelope["max_altitude"]:
+        #     logging.warning(f"Agent {self.uid} exceeding max altitude: {current_alt:.1f}m")
+        # elif current_alt < 500:  # 最小安全高度
+        #     logging.warning(f"Agent {self.uid} too low: {current_alt:.1f}m")
+        #
+        # # 速度保护
+        # if current_vel > self.flight_envelope["max_speed"]:
+        #     logging.warning(f"Agent {self.uid} exceeding max speed: {current_vel:.1f}m/s")
+        # elif current_vel < self.flight_envelope["min_speed"]:
+        #     logging.warning(f"Agent {self.uid} below min speed: {current_vel:.1f}m/s")
 
         # 过载保护
         pitch_rate = self.get_property_value(Catalog.ic_q_rad_sec)
@@ -621,6 +548,9 @@ class MissileSimulator(BaseSimulator):
         self._distance_increment = deque(maxlen=int(8 / self.dt))  # 增加判断窗口
         self._left_t = int(1 / self.dt)
         self._target_pos_history = deque(maxlen=8)  # 增加历史窗口
+        self._t_midcourse = 30  # 中段制导开始时间
+        self._t_terminal = 10  # 末段制导开始时间
+        self._seeker_range = 20000  # 导引头作用距离20km
 
         # 新增：导弹制导状态
         self.guidance_state = {
@@ -859,7 +789,7 @@ class MissileSimulator(BaseSimulator):
         logging.info(f"Missile {self.uid} simulator closed")
 
     def _guidance(self):
-        """增强比例导航制导法 (Enhanced Proportional Navigation)"""
+        """AIM-120C三段制导"""
         if not self.target_aircraft or not self.target_aircraft.is_alive:
             return np.array([0, 0]), np.inf
 
@@ -869,84 +799,108 @@ class MissileSimulator(BaseSimulator):
         v_m = np.linalg.norm([dx_m, dy_m, dz_m])
 
         if v_m < 1e-6:
-            v_m = 1e-6  # 避免除零
+            return np.array([0, 0]), np.inf
 
         # 目标状态
         x_t, y_t, z_t = self.target_aircraft.get_position()
         dx_t, dy_t, dz_t = self.target_aircraft.get_velocity()
 
-        # 目标加速度估计（增强预测）
-        self._target_pos_history.append(np.array([x_t, y_t, z_t]))
-        a_t = np.zeros(3)
+        # 距离计算
+        Rxyz = np.linalg.norm([x_m - x_t, y_m - y_t, z_t - z_m])
 
-        if len(self._target_pos_history) >= 4:
-            # 使用4点差分提高精度
-            positions = list(self._target_pos_history)[-4:]
-            v_t_3 = (positions[3] - positions[2]) / self.dt
-            v_t_2 = (positions[2] - positions[1]) / self.dt
-            v_t_1 = (positions[1] - positions[0]) / self.dt
+        # 三段制导逻辑
+        if self._t < self._t_midcourse:
+            # 初段：惯性制导
+            return self._inertial_guidance(x_t, y_t, z_t, v_m)
+        elif Rxyz > self._seeker_range:
+            # 中段：数据链制导
+            return self._datalink_guidance(x_t, y_t, z_t, dx_t, dy_t, dz_t, v_m)
+        else:
+            # 末段：主动雷达制导
+            return self._active_radar_guidance(x_t, y_t, z_t, dx_t, dy_t, dz_t, v_m)
 
-            a_t_2 = (v_t_3 - v_t_2) / self.dt
-            a_t_1 = (v_t_2 - v_t_1) / self.dt
-            a_t = (a_t_2 + a_t_1) / 2  # 平滑加速度
+    def _inertial_guidance(self, x_t, y_t, z_t, v_m):
+        """惯性制导段"""
+        x_m, y_m, z_m = self.get_position()
+
+        # 预测拦截点
+        relative_pos = np.array([x_t - x_m, y_t - y_m, z_t - z_m])
+        distance = np.linalg.norm(relative_pos)
+
+        if distance < 1e-6:
+            return np.array([0, 0]), distance
+
+        # 简单的前置量计算
+        los_unit = relative_pos / distance
+
+        # 计算需要的机动
+        missile_vel = self.get_velocity()
+        missile_heading = missile_vel / np.linalg.norm(missile_vel)
+
+        # 计算偏差角
+        cos_angle = np.dot(missile_heading, los_unit)
+        cross_product = np.cross(missile_heading, los_unit)
+
+        # 转换为过载指令
+        ny = np.clip(cross_product[1] * self._K, -self._nyz_max, self._nyz_max)
+        nz = np.clip(cross_product[2] * self._K, -self._nyz_max, self._nyz_max)
+
+        return np.array([ny, nz]), distance
+
+    def _datalink_guidance(self, x_t, y_t, z_t, dx_t, dy_t, dz_t, v_m):
+        """数据链制导段（改进的比例导航）"""
+        x_m, y_m, z_m = self.get_position()
+        dx_m, dy_m, dz_m = self.get_velocity()
 
         # 相对位置和速度
-        r = np.array([x_t - x_m, y_t - y_m, z_t - z_m])
-        v_r = np.array([dx_t - dx_m, dy_t - dy_m, dz_t - dz_m])
-        R = np.linalg.norm(r)
+        relative_pos = np.array([x_t - x_m, y_t - y_m, z_t - z_m])
+        relative_vel = np.array([dx_t - dx_m, dy_t - dy_m, dz_t - dz_m])
 
+        R = np.linalg.norm(relative_pos)
         if R < 1e-6:
             return np.array([0, 0]), R
 
-        # 逼近速度
-        v_c = -np.dot(r, v_r) / R
+        # 视线单位向量
+        los_unit = relative_pos / R
 
-        # 视线角速率计算
-        r_unit = r / R
-        h = np.cross(r, v_r)  # 角动量向量
-        omega_los = h / (R * R)  # 视线角速率向量
+        # 视线角速率
+        los_rate = np.cross(relative_pos, relative_vel) / (R * R)
 
-        # 分解到导弹坐标系
-        # 简化处理：假设导弹机体坐标系
-        omega_y = omega_los[1]  # 偏航角速率
-        omega_z = omega_los[2]  # 俯仰角速率
+        # 比例导航律
+        N = self._K
+        accel_cmd = N * np.cross(self.get_velocity(), los_rate)
 
-        # 增强比例导航律
-        N = self.K  # 导航比
+        # 转换为体坐标系
+        ny = np.clip(accel_cmd[1] / self._g, -self._nyz_max, self._nyz_max)
+        nz = np.clip(accel_cmd[2] / self._g, -self._nyz_max, self._nyz_max)
 
-        # 基础PN项
-        ny_pn = N * v_c * omega_y
-        nz_pn = N * v_c * omega_z
+        return np.array([ny, nz]), R
 
-        # 目标加速度补偿项（APN）
-        ny_apn = 0.5 * N * a_t[1]
-        nz_apn = 0.5 * N * a_t[2]
+    def _active_radar_guidance(self, x_t, y_t, z_t, dx_t, dy_t, dz_t, v_m):
+        """主动雷达制导段（增强比例导航）"""
+        # 使用原始的精确比例导航算法
+        x_m, y_m, z_m = self.get_position()
+        dx_m, dy_m, dz_m = self.get_velocity()
 
-        # 重力补偿
-        g_comp = self._g * np.cos(np.arcsin(dz_m / v_m)) if v_m > 0 else self._g
+        theta_m = np.arcsin(np.clip(dz_m / v_m, -1, 1))
 
-        # 总制导指令
-        ny = ny_pn + ny_apn
-        nz = nz_pn + nz_apn + g_comp / self._g
+        Rxy = np.linalg.norm([x_m - x_t, y_m - y_t])
+        Rxyz = np.linalg.norm([x_m - x_t, y_m - y_t, z_t - z_m])
 
-        # 制导阶段调整
-        if self.guidance_state["phase"] == "boost":
-            # 助推段：保持稳定
-            ny *= 0.5
-            nz *= 0.5
-        elif self.guidance_state["phase"] == "terminal":
-            # 末制导段：增强机动
-            ny *= 1.5
-            nz *= 1.5
+        if Rxy < 1e-6 or Rxyz < 1e-6:
+            return np.array([0, 0]), Rxyz
 
-        # 过载限制
-        total_n = np.sqrt(ny ** 2 + nz ** 2)
-        if total_n > self._nyz_max:
-            scale = self._nyz_max / total_n
-            ny *= scale
-            nz *= scale
+        # 视线角速率（原始算法，但增加增益）
+        dbeta = ((dy_t - dy_m) * (x_t - x_m) - (dx_t - dx_m) * (y_t - y_m)) / Rxy ** 2
+        deps = ((dz_t - dz_m) * Rxy ** 2 - (z_t - z_m) * (
+                (x_t - x_m) * (dx_t - dx_m) + (y_t - y_m) * (dy_t - dy_m))) / (Rxyz ** 2 * Rxy)
 
-        return np.clip([ny, nz], -self._nyz_max, self._nyz_max), R
+        # 增强的比例导航律（末段增益更高）
+        K_terminal = self._K * 1.5  # 末段增益提高
+        ny = K_terminal * v_m / self._g * np.cos(theta_m) * dbeta
+        nz = K_terminal * v_m / self._g * deps + np.cos(theta_m)
+
+        return np.clip([ny, nz], -self._nyz_max, self._nyz_max), Rxyz
 
     def _state_trans(self, action):
         """状态转换"""

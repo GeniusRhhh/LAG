@@ -67,8 +67,8 @@ class MultipleCombatTask(SingleCombatTask):
             "rmin": 3000
         })
 
-        logging.info(f"MultipleCombatTask initialized: num_agents={self.num_agents}, "
-                     f"allocation_frequency={self.allocation_frequency}")
+        # logging.info(f"MultipleCombatTask initialized: num_agents={self.num_agents}, "
+        #              f"allocation_frequency={self.allocation_frequency}")
 
     @property
     def num_agents(self) -> int:
@@ -172,18 +172,18 @@ class MultipleCombatTask(SingleCombatTask):
             ego_feature = np.array([*ego_cur_ned, *(ego_state[6:9])])
 
             # 自身状态归一化
-            norm_obs[0] = np.clip(ego_state[2] / 5000, -10, 10)  # 高度
-            norm_obs[1] = np.clip(np.sin(ego_state[3]), -1, 1)  # roll sin
-            norm_obs[2] = np.clip(np.cos(ego_state[3]), -1, 1)  # roll cos
-            norm_obs[3] = np.clip(np.sin(ego_state[4]), -1, 1)  # pitch sin
-            norm_obs[4] = np.clip(np.cos(ego_state[4]), -1, 1)  # pitch cos
-            norm_obs[5] = np.clip(ego_state[9] / 340, -2, 2)  # 速度u
-            norm_obs[6] = np.clip(ego_state[10] / 340, -2, 2)  # 速度v
-            norm_obs[7] = np.clip(ego_state[11] / 340, -2, 2)  # 速度w
-            norm_obs[8] = np.clip(ego_state[12] / 340, -2, 2)  # 总速度
+            norm_obs[0] = ego_state[2] / 5000  # 0. ego altitude   (unit: 5km)
+            norm_obs[1] = np.sin(ego_state[3])  # 1. ego_roll_sin
+            norm_obs[2] = np.cos(ego_state[3])  # 2. ego_roll_cos
+            norm_obs[3] = np.sin(ego_state[4])  # 3. ego_pitch_sin
+            norm_obs[4] = np.cos(ego_state[4])  # 4. ego_pitch_cos
+            norm_obs[5] = ego_state[9] / 340  # 5. ego v_body_x   (unit: mh)
+            norm_obs[6] = ego_state[10] / 340  # 6. ego v_body_y   (unit: mh)
+            norm_obs[7] = ego_state[11] / 340  # 7. ego v_body_z   (unit: mh)
+            norm_obs[8] = ego_state[12] / 340  # 8. ego vc   (unit: mh)(unit: 5G)
 
             # 其他智能体相对状态
-            offset = 9
+            offset = 8
             for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
                 if not sim.is_alive:
                     # 如果目标不存活，填充默认值
@@ -204,12 +204,12 @@ class MultipleCombatTask(SingleCombatTask):
 
                     AO, TA, R, side_flag = get_AO_TA_R(ego_feature, feature, return_side=True)
 
-                    norm_obs[offset + 0] = np.clip((state[9] - ego_state[9]) / 340, -2, 2)
-                    norm_obs[offset + 1] = np.clip((state[2] - ego_state[2]) / 1000, -10, 10)
-                    norm_obs[offset + 2] = np.clip(AO, -10, 10)
-                    norm_obs[offset + 3] = np.clip(TA, -10, 10)
-                    norm_obs[offset + 4] = np.clip(R / 10000, 0, 10)
-                    norm_obs[offset + 5] = side_flag
+                    norm_obs[offset + 1] = (state[9] - ego_state[9]) / 340
+                    norm_obs[offset + 2] = (state[2] - ego_state[2]) / 1000
+                    norm_obs[offset + 3] = AO
+                    norm_obs[offset + 4] = TA
+                    norm_obs[offset + 5] = R / 10000
+                    norm_obs[offset + 6] = side_flag
 
                 except Exception as e:
                     logging.error(f"Error processing target {sim.uid}: {e}")
@@ -234,7 +234,6 @@ class MultipleCombatTask(SingleCombatTask):
         norm_act[1] = action[1] * 2. / (self.action_space.nvec[1] - 1.) - 1.
         norm_act[2] = action[2] * 2. / (self.action_space.nvec[2] - 1.) - 1.
         norm_act[3] = action[3] * 0.5 / (self.action_space.nvec[3] - 1.) + 0.4
-        norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
         return norm_act
 
     def get_reward(self, env, agent_id, info: dict = ...) -> Tuple[float, dict]:
@@ -289,73 +288,6 @@ class MultipleCombatTask(SingleCombatTask):
                         self._target_allocation[wingman_id] = [closest_enemy]
                 logging.info(f"Blue leader {agent_id} allocated target: {closest_enemy.uid}, "
                              f"distance={min_threat:.1f}m")
-
-    def step(self, env):
-        """执行一步仿真。"""
-        self.step_count += 1
-
-        # 获取观测
-        obs = {agent_id: self.get_obs(env, agent_id) for agent_id in env.agents.keys()}
-
-        # 构建共享观测
-        all_obs = np.stack([obs[agent_id] for agent_id in sorted(env.agents.keys())], axis=0)
-        share_obs = np.tile(all_obs.flatten(), (len(env.agents.keys()), 1))
-        share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(sorted(env.agents.keys()))}
-
-        # 计算奖励
-        rewards = {}
-        dones = {}
-        infos = {}
-
-        for agent_id in env.agents.keys():
-            reward_sum = 0.0
-            reward_details = {}
-            state_dict = self.get_state_dict(env, agent_id)
-
-            # 计算各个奖励组件
-            for func in self.reward_functions:
-                try:
-                    # 为RadarLockRewardNew 和 MissileHitRewardNew 传递 state_dict
-                    if isinstance(func, (RadarLockReward, MissileHitReward, RadarLockRewardNew, MissileHitRewardNew)):
-                        reward_info = func.get_reward(self, env, agent_id, state_dict)
-                    else:
-                        reward_info = func.get_reward(self, env, agent_id)
-
-                    if isinstance(reward_info, (tuple, list)) and len(reward_info) > 0:
-                        reward_value = reward_info[0]
-                    else:
-                        reward_value = reward_info if isinstance(reward_info, (int, float)) else 0.0
-
-                    reward_details[func.__class__.__name__] = reward_value
-                    reward_sum += reward_value
-                except Exception as e:
-                    logging.error(f"Error calculating reward for {func.__class__.__name__}: {e}")
-                    reward_details[func.__class__.__name__] = 0.0
-
-            rewards[agent_id] = np.clip([reward_sum], -10, 10)
-
-            # 检查终止条件
-            done, info = self.get_termination(env, agent_id, {})
-            dones[agent_id] = [done]
-
-            # 构建信息字典
-            infos[agent_id] = {
-                "reward_details": reward_details,
-                "current_phase": "contact_guidance",
-                "step_count": self.step_count
-            }
-
-            # 定期日志输出
-            if self.step_count % 50 == 0:
-                state_dict = self.get_basic_state_dict(env, agent_id)
-                logging.info(
-                    f"Step {self.step_count} - Agent {agent_id}: "
-                    f"Reward={reward_sum:.3f}, RewardDetails={reward_details}, "
-                    f"EnemyDistance={state_dict.get('enemy_distance', 0):.1f}m, "
-                    f"Altitude={state_dict.get('current_altitude', 0):.1f}m"
-                )
-
-        return obs, share_obs, rewards, dones, infos
 
     def get_basic_state_dict(self, env, agent_id):
         """获取基本状态字典。"""
@@ -438,15 +370,21 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         self.lowlevel_policy.eval()
 
         # 第二层：高层控制参数（3层架构的第二层）
-        self.norm_delta_altitude = np.array([0.5, 0.25, 0, -0.25, -0.5])  # 5个高度选择
-        self.norm_delta_heading = np.array([-np.pi / 2, -np.pi / 4, 0, np.pi / 4, np.pi / 2])  # 5个航向选择
-        self.norm_delta_velocity = np.array([0.1, 0.05, 0, -0.05, -0.1])  # 5个速度选择
+        # self.norm_delta_altitude = np.array([0.2,0.1, 0, -0.1,-0.2])
+        # self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
+        # self.norm_delta_velocity = np.array([0.1,0.05, 0, -0.05,-0.1])
+        # 替换为：
+        self.norm_delta_altitude = np.array([-1000, -500, -200, 0, 200, 500, 1000]) / 1000.0  # 7个高度选项
+        self.norm_delta_heading = np.array(
+            [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])  # 9个航向选项
+        self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 100.0  # 7个速度选项
+
         self._inner_rnn_states = {}
         # 奖励缩放器
         self.reward_scaler = RewardScaler(scale_factor=0.1)
     def load_action_space(self):
         """定义分层动作空间：第二层高层控制。"""
-        self.action_space = spaces.MultiDiscrete([5, 5, 5])  # [altitude_cmd_id, heading_cmd_id, velocity_cmd_id]
+        self.action_space = spaces.MultiDiscrete([7, 9, 7])  # [altitude_cmd_id, heading_cmd_id, velocity_cmd_id]
 
     def normalize_action(self, env, agent_id, action):
         """归一化分层动作，使用低级策略生成控制命令。"""
@@ -456,12 +394,6 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
 
         raw_obs = self.get_obs(env, agent_id)
         input_obs = np.zeros(12)
-
-        # 确保动作索引在有效范围内
-        action = np.array(action, dtype=int)
-        action[0] = np.clip(action[0], 0, 4)
-        action[1] = np.clip(action[1], 0, 4)
-        action[2] = np.clip(action[2], 0, 4)
 
         # 将离散动作索引转换为连续指令
         input_obs[0] = self.norm_delta_altitude[action[0]]
@@ -489,8 +421,8 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         norm_act[2] = action_output[2] / 20 - 1.  # Rudder: [-1, 1]
         norm_act[3] = action_output[3] / 58 + 0.4  # Throttle: [0.4, 0.9]
 
-        # 只保留最基本的安全限制
-        norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)  # 恢复到原来的±0.5
+        # # 只保留最基本的安全限制
+        # norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)  # 恢复到原来的±0.5
 
         # 只在极端情况下介入
         current_alt = env.agents[agent_id].get_position()[2]
@@ -527,187 +459,7 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         logging.info("HierarchicalMultipleCombatShootTask reset: tactical templates and phases initialized")
         return super().reset(env)
 
-    def get_tactical_state(self, agent_id):
-        """获取战术状态信息。"""
-        if agent_id in self.tactical_templates:
-            state = {
-                "current_phase": self.current_phases.get(agent_id, "contact_guidance"),
-                "maneuver_history": self._maneuver_history[-10:] if self._maneuver_history else [],
-                "last_template": self._last_action.get(agent_id, [0, 0])[0],
-                "template_history": getattr(self.tactical_templates[agent_id], 'template_history', [])[-5:]
-            }
-            return state
-        return {"current_phase": "unknown", "maneuver_history": []}
 
-    def step(self, env):
-        """执行一步仿真，集成战术模板和阶段管理。"""
-        self.step_count += 1
-
-        # 更新所有智能体的作战阶段
-        for agent_id in env.agents.keys():
-            self.update_combat_phase(env, agent_id)
-
-            # 更新战术模板状态
-            if agent_id in self.tactical_templates:
-                state = self.get_state_dict(env, agent_id)
-                self.tactical_templates[agent_id].update_phase(state)
-
-        # 目标分配（在目标分配阶段执行）
-        allocation_agents = [aid for aid in env.agents.keys()
-                             if self.current_phases.get(aid) == "target_allocation"]
-        if allocation_agents:
-            self.allocate_targets(env)
-
-        # 导弹发射逻辑
-        for agent_id, agent in env.agents.items():
-            if not agent.is_alive:
-                continue
-
-            target_list = self._target_allocation.get(agent_id, agent.enemies)
-            if not target_list:
-                continue
-
-            # 计算攻击参数
-            target_distances = [np.linalg.norm(target.get_position() - agent.get_position())
-                                for target in target_list if target.is_alive]
-            if not target_distances:
-                continue
-
-            target_index = np.argmin(target_distances)
-            target = target_list[target_index]
-            distance = target_distances[target_index]
-
-            # 计算攻击角度
-            target_vec = target.get_position() - agent.get_position()
-            heading = agent.get_velocity()
-            if np.linalg.norm(heading) > 0 and np.linalg.norm(target_vec) > 0:
-                attack_angle = np.rad2deg(np.arccos(np.clip(
-                    np.dot(target_vec, heading) / (np.linalg.norm(target_vec) * np.linalg.norm(heading)), -1, 1)))
-            else:
-                attack_angle = 180
-
-            # 发射条件检查
-            shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
-            state = self.get_state_dict(env, agent_id)
-
-            # 在 HierarchicalMultipleCombatShootTask.step 中
-            shoot_flag = (
-                    agent.is_alive and
-                    self._shoot_action.get(agent_id, False) and
-                    self._remaining_missiles.get(agent_id, 0) > 0 and
-                    attack_angle <= self.max_attack_angle and
-                    distance <= self.max_attack_distance and
-                    distance >= 5000 and  # 添加最小距离限制
-                    shoot_interval >= self.min_attack_interval and
-                    state.get("radar_lock", False) and  # 必须有雷达锁定
-                    self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision"]
-            )
-
-            if shoot_flag:
-                # 创建导弹
-                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
-                env.add_temp_simulator(
-                    MissileSimulator.create(
-                        parent=agent,
-                        target=target,
-                        uid=new_missile_uid
-                    )
-                )
-                self._remaining_missiles[agent_id] -= 1
-                self._last_shoot_time[agent_id] = env.current_step
-
-                logging.info(f"Agent {agent_id} launched missile: target={target.uid}, "
-                             f"distance={distance:.1f}m, angle={attack_angle:.1f}deg, "
-                             f"remaining={self._remaining_missiles[agent_id]}")
-
-                # 记录战术动作
-                self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
-
-            # 记录其他战术动作
-            if self._last_action.get(agent_id, [0, 0])[0] != 0:
-                template_id = self._last_action[agent_id][0]
-                if agent_id in self.tactical_templates:
-                    state_dict = self.get_state_dict(env, agent_id)
-                    tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state_dict)
-                    maneuver_name = tactical_action.get("maneuver", f"Template_{template_id}")
-                    self._maneuver_history.append((agent_id, maneuver_name, env.current_step))
-
-        # 获取观测
-        obs = {agent_id: self.get_obs(env, agent_id) for agent_id in env.agents.keys()}
-
-        # 构建共享观测
-        all_obs = np.stack([obs[agent_id] for agent_id in sorted(env.agents.keys())], axis=0)
-        share_obs = np.tile(all_obs.flatten(), (len(env.agents.keys()), 1))
-        share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(sorted(env.agents.keys()))}
-
-        # 计算奖励
-        rewards = {}
-        dones = {}
-        infos = {}
-
-        for agent_id in env.agents.keys():
-            reward_sum = 0.0
-            reward_details = {}
-            state_dict = self.get_state_dict(env, agent_id)
-
-            # 计算各个奖励组件
-            for func in self.reward_functions:
-                try:
-                    if isinstance(func, (RadarLockReward, MissileHitReward,RadarLockRewardNew,MissileHitRewardNew)):
-                        reward_info = func.get_reward(self, env, agent_id, state_dict)
-                    else:
-                        reward_info = func.get_reward(self, env, agent_id)
-
-                    if isinstance(reward_info, (tuple, list)) and len(reward_info) > 0:
-                        reward_value = reward_info[0]
-                    else:
-                        reward_value = reward_info if isinstance(reward_info, (int, float)) else 0.0
-
-                    reward_details[func.__class__.__name__] = reward_value
-                    reward_sum += reward_value
-                except Exception as e:
-                    logging.error(f"Error calculating reward for {func.__class__.__name__}: {e}")
-                    reward_details[func.__class__.__name__] = 0.0
-
-
-            # 缩放奖励
-            # original_reward = np.clip(reward_sum, -10, 10)
-            # scaled_reward = self.reward_scaler.scale(original_reward)
-            # rewards[agent_id] = np.array([scaled_reward])
-            # self.rewards[agent_id] = scaled_reward
-            rewards[agent_id] =  np.clip(reward_sum, -10, 10)
-
-            # 每100步记录缩放日志
-            # if env.current_step % 100 == 0:
-            #     logging.info(f"Agent {agent_id} reward scaling: "
-            #                  f"original={original_reward:.3f}, scaled={scaled_reward:.3f}")
-            # 检查终止条件
-            done, info = self.get_termination(env, agent_id, {})
-            dones[agent_id] = [done]
-
-            # 构建详细信息字典
-            infos[agent_id] = self.get_tactical_state(agent_id)
-            infos[agent_id]["reward_details"] = reward_details
-            infos[agent_id]["current_phase"] = self.current_phases.get(agent_id, "contact_guidance")
-            infos[agent_id]["step_count"] = self.step_count
-
-            # 定期详细日志输出
-            if env.current_step % 50 == 0:
-                logging.info(
-                    f"Step {env.current_step} - Agent {agent_id}: "
-                    f"Reward={reward_sum:.3f}, Phase={self.current_phases.get(agent_id)}, "
-                    f"Action={self._last_action.get(agent_id, [0, 0])}, "
-                    f"EnemyDistance={state_dict['enemy_distance']:.1f}m, "
-                    f"AttackAngle={state_dict['enemy_angle_off']:.1f}deg, "
-                    f"RadarLock={state_dict['radar_lock']}, "
-                    f"MissileLaunched={state_dict['missile_launched']}, "
-                    f"MissileHit={state_dict['missile_hit']}, "
-                    f"RemainingMissiles={self._remaining_missiles.get(agent_id, 0)}, "
-                    f"Altitude={state_dict['current_altitude']:.1f}m, "
-                    f"RewardDetails={reward_details}"
-                )
-
-        return obs, share_obs, rewards, dones, infos
 
 
 class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
@@ -728,7 +480,8 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             TacticalRewardNew(self.config),
             TemplateRewardNew(self.config),
             RadarLockRewardNew(self.config),
-            MissileHitRewardNew(self.config)
+            MissileHitRewardNew(self.config),
+            BasicFlightReward(self.config)
         ]
 
         self.termination_conditions = [
@@ -813,7 +566,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[13] = 0
 
         offset = 14
-        # 其他智能体观测 (14-37)
+        # 其他智能体观测 (14-31)
         for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
             state = np.array(sim.get_property_values(self.state_var))
             cur_ned = LLA2NEU(*state[:3], env.center_lon, env.center_lat, env.center_alt)
@@ -827,7 +580,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[offset + 5] = side_flag
             offset += 6
 
-        # 导弹威胁观测 (38-43)
+        # 导弹威胁观测 (32-37)
         missile_sim = env.agents[agent_id].check_missile_warning()
         if missile_sim is not None:
             missile_feature = np.concatenate((missile_sim.get_position(), missile_sim.get_velocity()))
@@ -842,13 +595,13 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             norm_obs[offset:offset + 6] = 0.0
         offset += 6
 
-        # 队友状态 (44-45)
+        # 队友状态 (38-39)
         partner = env.agents[agent_id].partners[0] if env.agents[agent_id].partners else None
         norm_obs[offset] = 1 if partner and partner.is_alive else 0
         norm_obs[offset + 1] = self._remaining_missiles.get(agent_id, 0) / 2
         offset += 2
 
-        # 作战阶段状态向量 (46-55)
+        # 作战阶段状态向量 (40-49)
         phase_vector = np.zeros(10)
         current_phase_idx = self.combat_phases.index(self.current_phases.get(agent_id, "contact_guidance"))
         phase_vector[current_phase_idx] = 1.0
@@ -859,67 +612,135 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
     def normalize_action(self, env, agent_id, action):
         """三层架构动作处理：第一层战术模板选择。"""
+        if agent_id not in env.agents or not env.agents[agent_id].is_alive:
+            return np.array([0.0, 0.0, 0.0, 0.7])
+
         template_id, shoot = action[0], action[1] > 0
         self._shoot_action[agent_id] = shoot
         self._last_action[agent_id] = action
+
+        # 获取当前状态用于战术决策
         state = self.get_state_dict(env, agent_id)
 
         if template_id == 0:
-            # 情况一：无模板，直接RL控制第二层
-            raw_obs = self.get_obs(env, agent_id)
-            input_obs = np.zeros(12)
-            input_obs[0] = 0.0  # 无特定高度指令
-            input_obs[1] = 0.0  # 无特定航向指令
-            input_obs[2] = 0.0  # 无特定速度指令
-            input_obs[3:12] = raw_obs[:9]
-            input_obs = np.expand_dims(input_obs, axis=0)
+            # 无模板：使用RL直接控制高层指令
+            # 生成默认的保守飞行指令
+            altitude_cmd_id = 1  # 保持高度
+            heading_cmd_id = 2  # 保持航向
+            velocity_cmd_id = 1  # 保持速度
+        else:
+            # 使用战术模板生成高层指令
+            tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state)
+
+            # 将战术动作转换为离散指令索引
+            altitude_cmd_id = self._convert_altitude_to_index(tactical_action.get("altitude_cmd", 0))
+            heading_cmd_id = self._convert_heading_to_index(tactical_action.get("heading_cmd", 0))
+            velocity_cmd_id = self._convert_velocity_to_index(tactical_action.get("velocity_cmd", 600))
+
+        # 第二层：转换为连续高层指令
+        input_obs = np.zeros(12)
+        input_obs[0] = self.norm_delta_altitude[altitude_cmd_id]
+        input_obs[1] = self.norm_delta_heading[heading_cmd_id]
+        input_obs[2] = self.norm_delta_velocity[velocity_cmd_id]
+
+        # 获取基础观测
+        raw_obs = self.get_obs(env, agent_id)
+        input_obs[3:12] = raw_obs[:9]
+
+        # 安全检查和修复
+        input_obs = np.nan_to_num(input_obs, nan=0.0, posinf=1.0, neginf=-1.0)
+        input_obs = np.expand_dims(input_obs, axis=0)
+
+        # 确保RNN状态初始化
+        if agent_id not in self._inner_rnn_states:
+            self._inner_rnn_states[agent_id] = np.zeros((1, 1, 128))
+
+        # 第三层：使用低级策略生成舵面控制
+        try:
             _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])
             action_output = _action.detach().cpu().numpy().squeeze(0)
             self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()
+        except Exception as e:
+            logging.error(f"Lowlevel policy error for {agent_id}: {e}")
+            action_output = np.array([20, 20, 20, 29])  # 安全默认值
 
-            # 第三层：底层执行控制层
-            norm_act = np.zeros(4)
-            norm_act[0] = np.clip(action_output[0] / 20 - 1., -1, 1)
-            norm_act[1] = np.clip(action_output[1] / 20 - 1., -1, 1)
-            norm_act[2] = np.clip(action_output[2] / 20 - 1., -1, 1)
-            norm_act[3] = np.clip(action_output[3] / 58 + 0.4, 0.4, 0.9)
-            norm_act[1] = np.clip(norm_act[1], -0.8, 0.8)
-        else:
-            # 情况二：执行战术模板策略
-            tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state)
+        # 转换为JSBSim控制指令
+        norm_act = np.zeros(4)
+        norm_act[0] = action_output[0] / 20 - 1.  # 副翼 [-1, 1]
+        norm_act[1] = action_output[1] / 20 - 1.  # 升降舵 [-1, 1]
+        norm_act[2] = action_output[2] / 20 - 1.  # 方向舵 [-1, 1]
+        norm_act[3] = action_output[3] / 58 + 0.4  # 油门 [0.4, 0.9]
 
-            # 从战术动作获取高层指令
-            heading_cmd = tactical_action.get("heading_cmd", 0)
-            altitude_cmd = tactical_action.get("altitude_cmd", 0)
-            velocity_cmd = tactical_action.get("velocity_cmd", 600)
-
-            # 转换为第三层控制输入
-            if heading_cmd == "maintain":
-                heading_cmd = 0
-            else:
-                heading_cmd = float(heading_cmd)
-
-            # 威胁响应调整
-            if state["has_warning"] and state.get("current_altitude", 5000) > 2000:
-                altitude_cmd = max(altitude_cmd, -500)
-
-            # 映射到第三层控制参数
-            action_input = [
-                heading_cmd / np.pi,  # 归一化航向
-                altitude_cmd / 5000,  # 归一化高度
-                0,  # 方向舵保持中立
-                np.clip(velocity_cmd / 340, 0.8, 2.0)  # 归一化速度
-            ]
-
-            # 第三层：底层执行控制层
-            norm_act = np.zeros(4)
-            norm_act[0] = np.clip(action_input[0], -1, 1)
-            norm_act[1] = np.clip(action_input[1], -1, 1)
-            norm_act[2] = np.clip(action_input[2], -1, 1)
-            norm_act[3] = np.clip(action_input[3], 0.4, 0.9)
-            norm_act[1] = np.clip(norm_act[1], -0.5, 0.5)
+        # 基础飞行保护
+        current_alt = env.agents[agent_id].get_position()[2]
+        if current_alt < 1000:  # 低空保护
+            norm_act[1] = max(norm_act[1], 0.1)  # 强制拉起
+            norm_act[3] = max(norm_act[3], 0.8)  # 增加推力
+            logging.warning(f"Agent {agent_id} low altitude protection: {current_alt:.1f}m")
 
         return norm_act
+
+    # def _convert_altitude_to_index(self, altitude_cmd):
+    #     """将高度指令转换为索引，支持5级动作空间"""
+    #     if altitude_cmd > 100:
+    #         return 0  # 大上升
+    #     elif altitude_cmd > 50:
+    #         return 1  # 小上升
+    #     elif altitude_cmd < -100:
+    #         return 4  # 大下降
+    #     elif altitude_cmd < -50:
+    #         return 3  # 小下降
+    #     else:
+    #         return 2  # 保持
+    #
+    # def _convert_heading_to_index(self, heading_cmd):
+    #     """将航向指令转换为索引，已支持5级，无需修改"""
+    #     if heading_cmd > 0.2:
+    #         return 4  # 大右转
+    #     elif heading_cmd > 0.05:
+    #         return 3  # 小右转
+    #     elif heading_cmd < -0.2:
+    #         return 0  # 大左转
+    #     elif heading_cmd < -0.05:
+    #         return 1  # 小左转
+    #     else:
+    #         return 2  # 保持航向
+    #
+    # def _convert_velocity_to_index(self, velocity_cmd):
+    #     """将速度指令转换为索引，支持5级动作空间"""
+    #     if velocity_cmd > 700:
+    #         return 0  # 大加速
+    #     elif velocity_cmd > 650:
+    #         return 1  # 小加速
+    #     elif velocity_cmd < 500:
+    #         return 4  # 大减速
+    #     elif velocity_cmd < 550:
+    #         return 3  # 小减速
+    #     else:mission_timeline
+    #         return 2  # 保持速度
+    def _convert_altitude_to_index(self, altitude_cmd):
+        """将高度指令转换为索引"""
+        # 找到最接近的索引
+        altitude_values = np.array([-1000, -500, -200, 0, 200, 500, 1000])
+        distances = np.abs(altitude_values - altitude_cmd)
+        return np.argmin(distances)
+
+    def _convert_heading_to_index(self, heading_cmd):
+        """将航向指令转换为索引"""
+        # 限制在±180度范围内
+        heading_cmd = np.clip(heading_cmd, -np.pi, np.pi)
+        heading_values = np.array(
+            [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])
+        distances = np.abs(heading_values - heading_cmd)
+        return np.argmin(distances)
+
+    def _convert_velocity_to_index(self, velocity_cmd):
+        """将速度指令转换为索引"""
+        # 转换为相对于600的偏移
+        velocity_offset = velocity_cmd - 600
+        velocity_values = np.array([-150, -100, -50, 0, 50, 100, 150])
+        distances = np.abs(velocity_values - velocity_offset)
+        return np.argmin(distances)
 
     def get_state_dict(self, env, agent_id):
         """获取增强状态字典，支持14种战术模板。"""
@@ -1002,8 +823,10 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                                   (np.linalg.norm(relative_vec) * np.linalg.norm(ego_vel)), -1, 1))
         return np.rad2deg(angle)
 
+    # 在 tasks/TacticalTemplate.py 中替换 update_combat_phase 方法
+
     def update_combat_phase(self, env, agent_id):
-        """更新作战阶段。"""
+        """更新作战阶段 - 简化快速转换"""
         state = self.get_state_dict(env, agent_id)
         current_phase = self.current_phases.get(agent_id, "contact_guidance")
 
@@ -1012,43 +835,137 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         has_warning = state["has_warning"]
         missile_launched = state["missile_launched"]
         missile_active = state["missile_active"]
-        missile_hit = state["missile_hit"]
+        current_altitude = state["current_altitude"]
 
-        # 阶段转换逻辑（基于战术距离）
+        # 简化阶段持续时间要求
+        if not hasattr(self, 'phase_timers'):
+            self.phase_timers = {}
+
+        phase_key = f"{agent_id}_phase_start"
+        current_step = getattr(env, 'current_step', 0)
+
+        if phase_key not in self.phase_timers:
+            self.phase_timers[phase_key] = current_step
+
+        phase_duration = current_step - self.phase_timers[phase_key]
+        min_phase_duration = 2  # 大幅减少从10到2
+
         new_phase = current_phase
 
-        if current_phase == "contact_guidance":
-            if distance <= self.tactical_distances["detection_range"]:
-                new_phase = "target_search"
-        elif current_phase == "target_search":
-            if radar_lock:
-                new_phase = "target_identification"
-        elif current_phase == "target_identification":
-            if distance <= self.tactical_distances["engagement_range"]:
-                new_phase = "threat_assessment"
-        elif current_phase == "threat_assessment":
-            if has_warning or distance <= self.tactical_distances["wez_range"]:
-                new_phase = "target_allocation"
-        elif current_phase == "target_allocation":
-            if distance <= self.tactical_distances["launch_range"]:
-                new_phase = "tactical_decision"
-        elif current_phase == "tactical_decision":
-            if missile_launched:
-                new_phase = "missile_launch"
-        elif current_phase == "missile_launch":
-            if missile_active:
-                new_phase = "mid_guidance_defense"
-        elif current_phase == "mid_guidance_defense":
-            if distance <= self.tactical_distances["mar_range"]:
-                new_phase = "terminal_guidance"
-        elif current_phase == "terminal_guidance":
-            if missile_hit or not missile_active:
-                new_phase = "effect_assessment"
+        # 快速阶段转换逻辑
+        if phase_duration >= min_phase_duration:
 
+            # 威胁优先 - 有导弹威胁立即进入防御
+            if has_warning and current_phase not in ["mid_guidance_defense", "terminal_guidance"]:
+                if distance < 20000:
+                    new_phase = "terminal_guidance"
+                else:
+                    new_phase = "mid_guidance_defense"
+
+            # 正常阶段推进
+            elif current_phase == "contact_guidance":
+                if distance <= 80000:  # 从72000放宽到80000
+                    new_phase = "target_search"
+
+            elif current_phase == "target_search":
+                if radar_lock or distance <= 60000:  # 有锁定或足够近
+                    new_phase = "target_identification"
+
+            elif current_phase == "target_identification":
+                if distance <= 45000:  # 进入威胁评估
+                    new_phase = "threat_assessment"
+
+            elif current_phase == "threat_assessment":
+                if distance <= 35000:  # 快速进入分配
+                    new_phase = "target_allocation"
+
+            elif current_phase == "target_allocation":
+                if radar_lock and distance <= 40000:  # 快速进入决策
+                    new_phase = "tactical_decision"
+
+            elif current_phase == "tactical_decision":
+                if missile_launched:
+                    new_phase = "missile_launch"
+                elif has_warning:
+                    new_phase = "mid_guidance_defense"
+
+            elif current_phase == "missile_launch":
+                if missile_active or has_warning:
+                    new_phase = "mid_guidance_defense"
+                elif not missile_active and distance > 30000:
+                    new_phase = "effect_assessment"
+
+            elif current_phase == "mid_guidance_defense":
+                if distance < 15000:
+                    new_phase = "terminal_guidance"
+                elif not has_warning and distance > 40000:
+                    new_phase = "target_identification"  # 返回识别阶段
+
+            elif current_phase == "terminal_guidance":
+                if not has_warning and distance > 25000:
+                    new_phase = "effect_assessment"
+
+            elif current_phase == "effect_assessment":
+                if distance > 50000:
+                    new_phase = "target_search"  # 重新开始
+                elif radar_lock and distance <= 40000:
+                    new_phase = "tactical_decision"
+
+        # 更新阶段
         if new_phase != current_phase:
             self.current_phases[agent_id] = new_phase
-            logging.info(f"Agent {agent_id} phase transition: {current_phase} -> {new_phase}, "
-                         f"distance={distance:.1f}m, radar_lock={radar_lock}")
+            self.phase_timers[phase_key] = current_step
+
+            logging.debug(f"Agent {agent_id} phase: {current_phase} -> {new_phase} "
+                          f"(d={distance:.0f}m, lock={radar_lock}, warn={has_warning})")
+
+        return new_phase
+
+    def _check_phase_conditions(self, phase: str) -> bool:
+        """检查阶段条件，增加稳定性"""
+        if not hasattr(self.env, 'agents') or self.agent_id not in self.env.agents:
+            return False
+
+        agent = self.env.agents[self.agent_id]
+        if not agent.is_alive:
+            return False
+
+        enemies = agent.enemies
+        if not enemies:
+            return False
+
+        enemy_distance = min([np.linalg.norm(enemy.get_position() - agent.get_position())
+                              for enemy in enemies if enemy.is_alive], default=np.inf)
+
+        # 使用更宽松的条件检查，避免频繁切换
+        buffer_factor = 1.1  # 10%缓冲
+
+        if phase == "contact_guidance":
+            return enemy_distance > self.TACTICAL_DISTANCES["detection_range"] * buffer_factor
+        elif phase == "target_search":
+            return (enemy_distance <= self.TACTICAL_DISTANCES["detection_range"] * buffer_factor and
+                    enemy_distance > self.TACTICAL_DISTANCES["engagement_range"] * buffer_factor)
+        elif phase == "target_identification":
+            return (enemy_distance <= self.TACTICAL_DISTANCES["engagement_range"] * buffer_factor and
+                    enemy_distance > self.TACTICAL_DISTANCES["wez_range"] * buffer_factor)
+        elif phase == "threat_assessment":
+            return (enemy_distance <= self.TACTICAL_DISTANCES["wez_range"] * buffer_factor and
+                    enemy_distance > self.TACTICAL_DISTANCES["launch_range"] * buffer_factor)
+        elif phase == "target_allocation":
+            return (enemy_distance <= self.TACTICAL_DISTANCES["launch_range"] * buffer_factor and
+                    enemy_distance > self.TACTICAL_DISTANCES["mar_range"] * 2)
+        elif phase == "tactical_decision":
+            return enemy_distance <= self.TACTICAL_DISTANCES["launch_range"] * buffer_factor
+        elif phase == "missile_launch":
+            return enemy_distance <= self.TACTICAL_DISTANCES["launch_range"] * buffer_factor
+        elif phase == "mid_guidance_defense":
+            return enemy_distance <= self.TACTICAL_DISTANCES["mar_range"] * 2
+        elif phase == "terminal_guidance":
+            return enemy_distance <= self.TACTICAL_DISTANCES["mar_range"] * buffer_factor
+        elif phase == "effect_assessment":
+            return True
+
+        return False
 
     def allocate_targets(self, env):
         """基于战术距离的目标分配。"""
@@ -1093,3 +1010,195 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
         logging.info("HierarchicalMultipleCombatShootTask reset: tactical templates and phases initialized")
         return super().reset(env)
+
+    def get_tactical_state(self, agent_id):
+        """获取战术状态信息。"""
+        if agent_id in self.tactical_templates:
+            state = {
+                "current_phase": self.current_phases.get(agent_id, "contact_guidance"),
+                "maneuver_history": self._maneuver_history[-10:] if self._maneuver_history else [],
+                "last_template": self._last_action.get(agent_id, [0, 0])[0],
+                "template_history": getattr(self.tactical_templates[agent_id], 'template_history', [])[-5:]
+            }
+            return state
+        return {"current_phase": "unknown", "maneuver_history": []}
+
+    # 在 tasks/multiple_combat_task.py 中的 step 方法中替换射击逻辑部分
+
+    def step(self, env):
+        """执行一步仿真，集成战术模板和阶段管理"""
+        self.step_count += 1
+
+        # 更新所有智能体的作战阶段
+        for agent_id in env.agents.keys():
+            self.update_combat_phase(env, agent_id)
+            if agent_id in self.tactical_templates:
+                state = self.get_state_dict(env, agent_id)
+                self.tactical_templates[agent_id].update_phase(state)
+
+        # 目标分配
+        allocation_agents = [aid for aid in env.agents.keys()
+                             if self.current_phases.get(aid) == "target_allocation"]
+        if allocation_agents:
+            self.allocate_targets(env)
+
+        # 修复的导弹发射逻辑
+        for agent_id, agent in env.agents.items():
+            if not agent.is_alive:
+                continue
+
+            target_list = self._target_allocation.get(agent_id, agent.enemies)
+            if not target_list:
+                continue
+
+            # 找到最近的存活目标
+            alive_targets = [t for t in target_list if t.is_alive]
+            if not alive_targets:
+                continue
+
+            target = min(alive_targets,
+                         key=lambda t: np.linalg.norm(t.get_position() - agent.get_position()))
+            distance = np.linalg.norm(target.get_position() - agent.get_position())
+
+            # 计算攻击角度
+            target_vec = target.get_position() - agent.get_position()
+            heading = agent.get_velocity()
+            if np.linalg.norm(heading) > 0 and np.linalg.norm(target_vec) > 0:
+                attack_angle = np.rad2deg(np.arccos(np.clip(
+                    np.dot(target_vec, heading) / (np.linalg.norm(target_vec) * np.linalg.norm(heading)),
+                    -1, 1)))
+            else:
+                attack_angle = 180
+
+            # 射击间隔检查
+            shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
+            state = self.get_state_dict(env, agent_id)
+
+            # **修复的射击条件** - 更严格
+            shoot_flag = (
+                    agent.is_alive and
+                    self._shoot_action.get(agent_id, False) and
+                    self._remaining_missiles.get(agent_id, 0) > 0 and
+                    attack_angle <= 25 and  # 从60度大幅收紧到25度
+                    28000 <= distance <= 38000 and  # 收紧射击窗口到28-38km
+                    shoot_interval >= self.min_attack_interval and
+                    state.get("radar_lock", False) and
+                    self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision"] and
+                    state["enemy_angle_off"] < 25 and  # 从45度收紧到25度
+                    state.get("shoot_probability", 0) > 0.4 and  # 提高概率阈值
+                    # 新增条件：确保良好的射击窗口
+                    np.linalg.norm(agent.get_velocity()) > 150 and  # 最小速度要求
+                    state.get("current_altitude", 0) > 3000 and  # 最小高度要求
+                    # 避免在威胁下射击
+                    not state.get("has_warning", False)
+            )
+
+            if shoot_flag:
+                # 二次检查 - 确保射击质量
+                relative_velocity = np.linalg.norm(target.get_velocity() - agent.get_velocity())
+                if relative_velocity < 100:  # 相对速度过小，不利于制导
+                    logging.debug(f"Agent {agent_id} skip shoot: low relative velocity {relative_velocity:.1f}m/s")
+                    continue
+
+                # 创建导弹
+                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
+                missile = MissileSimulator.create(
+                    parent=agent,
+                    target=target,
+                    uid=new_missile_uid
+                )
+                env.add_temp_simulator(missile)
+
+                self._remaining_missiles[agent_id] -= 1
+                self._last_shoot_time[agent_id] = env.current_step
+
+                logging.info(f"Agent {agent_id} launched missile: target={target.uid}, "
+                             f"distance={distance:.1f}m, angle={attack_angle:.1f}deg, "
+                             f"remaining={self._remaining_missiles[agent_id]}")
+
+                # 记录射击事件
+                self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
+
+        # 继续原有的观测和奖励计算逻辑...
+            # 记录其他战术动作
+            if self._last_action.get(agent_id, [0, 0])[0] != 0:
+                template_id = self._last_action[agent_id][0]
+                if agent_id in self.tactical_templates:
+                    state_dict = self.get_state_dict(env, agent_id)
+                    tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state_dict)
+                    maneuver_name = tactical_action.get("maneuver", f"Template_{template_id}")
+                    self._maneuver_history.append((agent_id, maneuver_name, env.current_step))
+
+        # 获取观测
+        obs = {agent_id: self.get_obs(env, agent_id) for agent_id in env.agents.keys()}
+
+        # 构建共享观测
+        all_obs = np.stack([obs[agent_id] for agent_id in sorted(env.agents.keys())], axis=0)
+        share_obs = np.tile(all_obs.flatten(), (len(env.agents.keys()), 1))
+        share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(sorted(env.agents.keys()))}
+
+        # 计算奖励
+        rewards = {}
+        dones = {}
+        infos = {}
+
+        for agent_id in env.agents.keys():
+            reward_sum = 0.0
+            reward_details = {}
+            state_dict = self.get_state_dict(env, agent_id)
+
+            # 计算各个奖励组件
+            for func in self.reward_functions:
+                try:
+                    if isinstance(func, (RadarLockReward, MissileHitReward,RadarLockRewardNew,MissileHitRewardNew)):
+                        reward_info = func.get_reward(self, env, agent_id, state_dict)
+                    else:
+                        reward_info = func.get_reward(self, env, agent_id)
+
+                    if isinstance(reward_info, (tuple, list)) and len(reward_info) > 0:
+                        reward_value = reward_info[0]
+                    else:
+                        reward_value = reward_info if isinstance(reward_info, (int, float)) else 0.0
+
+                    reward_details[func.__class__.__name__] = reward_value
+                    reward_sum += reward_value
+                except Exception as e:
+                    logging.error(f"Error calculating reward for {func.__class__.__name__}: {e}")
+                    reward_details[func.__class__.__name__] = 0.0
+
+
+            # 缩放奖励
+            original_reward = np.clip(reward_sum, -10, 10)
+            # scaled_reward = self.reward_scaler.scale(original_reward)
+            scaled_reward = np.clip(original_reward, -10, 10)  # 直接使用原始奖励
+            rewards[agent_id] = np.array([scaled_reward])
+            self.rewards[agent_id] = scaled_reward
+            # rewards[agent_id] =  np.clip(reward_sum, -10, 10)
+
+            # 检查终止条件
+            done, info = self.get_termination(env, agent_id, {})
+            dones[agent_id] = [done]
+
+            # 构建详细信息字典
+            infos[agent_id] = self.get_tactical_state(agent_id)
+            infos[agent_id]["reward_details"] = reward_details
+            infos[agent_id]["current_phase"] = self.current_phases.get(agent_id, "contact_guidance")
+            infos[agent_id]["step_count"] = self.step_count
+
+            # 定期详细日志输出
+            if env.current_step % 250 == 0:
+                logging.info(
+                    f"Step {env.current_step} - Agent {agent_id}: "
+                    f"Reward={reward_sum:.3f}, Phase={self.current_phases.get(agent_id)}, "
+                    f"Action={self._last_action.get(agent_id, [0, 0])}, "
+                    f"EnemyDistance={state_dict['enemy_distance']:.1f}m, "
+                    f"AttackAngle={state_dict['enemy_angle_off']:.1f}deg, "
+                    f"RadarLock={state_dict['radar_lock']}, "
+                    f"MissileLaunched={state_dict['missile_launched']}, "
+                    f"MissileHit={state_dict['missile_hit']}, "
+                    f"RemainingMissiles={self._remaining_missiles.get(agent_id, 0)}, "
+                    f"Altitude={state_dict['current_altitude']:.1f}m, "
+                    f"RewardDetails={reward_details}"
+                )
+
+        return obs, share_obs, rewards, dones, infos
