@@ -8,16 +8,19 @@ github网址：https://github.com/GeniusRhhh/LAG/tree/hhhhhhh
 克隆链接：git@github.com:GeniusRhhh/LAG.git
 
 2.创建虚拟环境与安装依赖
+
   conda create -n jsbsim python=3.8
 
   pip install pymap3d jsbsim==1.1.6 geographiclib gym==0.20.0 wandb icecream setproctitle
 
 3.开始训练
+
 cd scripts
 
 bash train_share_selfplay.sh
 
 4.渲染效果（使用tacview）
+
 python render_2v2.py
 
 
