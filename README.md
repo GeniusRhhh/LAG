@@ -1,3 +1,30 @@
+# BVR
+安装说明
+
+1.克隆项目
+
+github网址：https://github.com/GeniusRhhh/LAG/tree/hhhhhhh
+
+克隆链接：git@github.com:GeniusRhhh/LAG.git
+
+2.创建虚拟环境与安装依赖
+
+  conda create -n jsbsim python=3.8
+
+  pip install pymap3d jsbsim==1.1.6 geographiclib gym==0.20.0 wandb icecream setproctitle
+
+3.开始训练
+
+cd scripts
+
+bash train_share_selfplay.sh
+
+4.渲染效果（使用tacview）
+
+python render_2v2.py
+
+
+
 # Light Aircraft Game: A lightweight, scalable, gym-wrapped aircraft competitive environment with baseline reinforcement learning algorithms
 We provide a competitive environment for red and blue aircrafts games, which includes single control setting, 1v1 setting and 2v2 setting. The flight dynamics based on JSBSIM, and missile dynamics based on our implementation of proportional guidance. We also provide ppo and mappo implementation for self-play or vs-baseline training. 
 
@@ -75,14 +102,4 @@ python render*.py
 ```
 This will generate a `*.acmi` file. We can use [**TacView**](https://www.tacview.net/), a universal flight analysis tool, to open the file and watch the render videos.
 
-## Citing
-If you find this repo useful, pleased use the following citation:
-````
-@misc{liu2022light,
-  author = {Qihan Liu and Yuhua Jiang and Xiaoteng Ma},
-  title = {Light Aircraft Game: A lightweight, scalable, gym-wrapped aircraft competitive environment with baseline reinforcement learning algorithms},
-  year = {2022},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/liuqh16/CloseAirCombat}},
-}
+
