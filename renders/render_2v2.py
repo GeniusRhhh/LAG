@@ -26,11 +26,11 @@ def _t2n(x):
 
 num_agents = 4
 render = True
-ego_policy_index =11
-enm_policy_index=10
+ego_policy_index =20
+enm_policy_index=19
 episode_rewards = 0
-ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run151"
-enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run151"
+ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run161"
+enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run161"
 experiment_name = ego_run_dir.split('/')[-4]
 
 env = MultipleCombatEnv("2v2/ShootMissile/HierarchySelfplay")
@@ -44,7 +44,7 @@ enm_policy.eval()
 ego_policy.load_state_dict(torch.load(ego_run_dir + f"/actor_episode_{ego_policy_index}.pt"))
 enm_policy.load_state_dict(torch.load(enm_run_dir + f"/actor_episode_{enm_policy_index}.pt"))
 
-3.
+
 print("Start render")
 obs, _ = env.reset()
 if render:

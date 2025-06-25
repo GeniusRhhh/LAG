@@ -209,7 +209,32 @@ class ShareJSBSimRunner(Runner):
                 self.compute()
                 train_infos = self.train()
                 self.total_num_steps = (episode + 1) * self.buffer_size * self.n_rollout_threads
+                # **修复任务完成度评估**
+                if episode % 10 == 0:
+                    try:
+                        if hasattr(self.envs, 'envs') and len(self.envs.envs) > 0 and hasattr(self.envs.envs[0],
+                                                                                              'task') and hasattr(
+                                self.envs.envs[0].task, 'evaluate_first_task_completion'):
+                            task_score, task_metrics = self.envs.envs[0].task.evaluate_first_task_completion()
+                            logging.info(f"Episode {episode} - Task 1 Completion Score: {task_score:.3f}")
+                            train_infos["task_1_completion"] = task_score
+                            train_infos.update({f"task_1_{k}": v for k, v in task_metrics.items()})
+                        else:
+                            logging.warning("Task evaluation not available; skipping.")
+                    except Exception as e:
+                        logging.error(f"Task evaluation failed: {e}")
 
+                # **修复时间线总结**
+                if episode % 10 == 0:
+                    try:
+                        if hasattr(self.envs, 'envs') and len(self.envs.envs) > 0 and hasattr(self.envs.envs[0],
+                                                                                              'get_timeline_summary'):
+                            timeline_summary = self.envs.envs[0].get_timeline_summary()
+                            logging.info(f"Episode {episode} - Timeline Summary: {timeline_summary}")
+                        else:
+                            logging.warning("Timeline summary not available; skipping.")
+                    except Exception as e:
+                        logging.error(f"Timeline summary failed: {e}")
                 # 检查训练发散
                 if train_infos.get('value_loss', 0) > 1000 or np.isnan(train_infos.get('value_loss', 0)):
                     logging.error(f"训练发散！值损失：{train_infos['value_loss']}")
@@ -290,7 +315,11 @@ class ShareJSBSimRunner(Runner):
 
                     # 更新战术统计 - 使用你现有的函数
                     self._update_template_stats(template_dist, avg_reward, phase_counts)
+                    # **添加阶段转换分析**
+                    self._analyze_phase_transitions(episode)
 
+                    # **添加战术效果分析**
+                    self._analyze_tactical_effectiveness(episode)
                     # 输出详细日志
                     logging.info(f"\n{'=' * 80}")
                     logging.info(f"Episode {episode}/{episodes} 总结：")
@@ -399,6 +428,57 @@ class ShareJSBSimRunner(Runner):
                     0.9 * self.template_stats["phase_distribution"][phase] + 0.1 * count
             )
 
+    def _analyze_phase_transitions(self, episode):
+        try:
+            if hasattr(self.envs, 'envs') and len(self.envs.envs) > 0 and hasattr(self.envs.envs[0],
+                                                                                  'task') and hasattr(
+                    self.envs.envs[0].task, 'timeline_events'):
+                events = self.envs.envs[0].task.timeline_events
+                if events:
+                    recent_events = [e for e in events if e.get('step', 0) > episode * self.buffer_size - 100]
+                    if recent_events:
+                        phase_transitions = {}
+                        for event in recent_events:
+                            transition = event.get('phase_transition', '')
+                            if transition:
+                                phase_transitions[transition] = phase_transitions.get(transition, 0) + 1
+                        logging.info(f"Recent Phase Transitions: {phase_transitions}")
+                        full_sequence_agents = set()
+                        for event in recent_events:
+                            if 'effect_assessment' in event.get('phase_transition', ''):
+                                full_sequence_agents.add(event.get('agent_id'))
+                        if full_sequence_agents:
+                            logging.info(f"Agents completed full sequence: {full_sequence_agents}")
+            else:
+                logging.warning("Timeline events not available; skipping phase transition analysis.")
+        except Exception as e:
+            logging.error(f"Phase transition analysis failed: {e}")
+
+    def _analyze_tactical_effectiveness(self, episode):
+        try:
+            if hasattr(self.envs, 'envs') and len(self.envs.envs) > 0 and hasattr(self.envs.envs[0],
+                                                                                  'task') and hasattr(
+                    self.envs.envs[0].task, 'decision_log'):
+                decisions = self.envs.envs[0].task.decision_log
+                if decisions:
+                    recent_decisions = decisions[-100:] if len(decisions) >= 100 else decisions
+                    phase_template_usage = {}
+                    for decision in recent_decisions:
+                        phase = decision.get('phase', 'unknown')
+                        template = decision.get('template', 'unknown')
+                        if phase not in phase_template_usage:
+                            phase_template_usage[phase] = {}
+                        phase_template_usage[phase][template] = phase_template_usage[phase].get(template, 0) + 1
+                    logging.info("=== Tactical Effectiveness Analysis ===")
+                    for phase, templates in phase_template_usage.items():
+                        total = sum(templates.values())
+                        template_ratios = {t: f"{count / total:.2f}" for t, count in templates.items()}
+                        logging.info(f"{phase}: {template_ratios}")
+                    logging.info("=======================================")
+            else:
+                logging.warning("Decision log not available; skipping tactical effectiveness analysis.")
+        except Exception as e:
+            logging.error(f"Tactical effectiveness analysis failed: {e}")
     def _calculate_template_efficiency(self):
         """计算战术模板整体效率"""
         total_usage = np.sum(self.template_stats["usage_count"])
@@ -657,8 +737,32 @@ class ShareJSBSimRunner(Runner):
 
     @torch.no_grad()
     def eval(self, total_num_steps):
-        """评估当前策略。"""
-        logging.info("Starting enhanced evaluation with tactical analysis...")
+        """评估当前策略，使用平衡的模板选择"""
+        logging.info("Starting enhanced evaluation with balanced template selection...")
+
+        # **修复模板推荐逻辑**
+        original_recommendations = {}
+        try:
+            if hasattr(self.eval_envs, 'envs') and len(self.eval_envs.envs) > 0 and hasattr(self.eval_envs.envs[0],
+                                                                                            'task'):
+                task = self.eval_envs.envs[0].task
+                for agent_id in ['A0100', 'A0200', 'B0100', 'B0200']:
+                    if hasattr(task, 'phase_recommended_templates'):
+                        original_recommendations[agent_id] = getattr(task.phase_recommended_templates, agent_id, [0])
+        except Exception as e:
+            logging.error(f"Failed to save original template recommendations: {e}")
+        # **设置评估时的平衡模板选择**
+        balanced_templates = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        try:
+            if hasattr(self.eval_envs, 'envs') and len(self.eval_envs.envs) > 0 and hasattr(self.eval_envs.envs[0],
+                                                                                            'task'):
+                task = self.eval_envs.envs[0].task
+                if not hasattr(task, 'phase_recommended_templates'):
+                    task.phase_recommended_templates = {}
+                for agent_id in ['A0100', 'A0200', 'B0100', 'B0200']:
+                    task.phase_recommended_templates[agent_id] = balanced_templates
+        except Exception as e:
+            logging.error(f"Failed to set balanced templates: {e}")
         total_episodes, eval_episode_rewards = 0, []
         eval_template_usage = np.zeros(15)
         eval_phase_performance = {}
@@ -689,9 +793,8 @@ class ShareJSBSimRunner(Runner):
                     (self.n_eval_rollout_threads, self.num_agents, *self.buffer.rnn_states_actor.shape[3:]),
                     dtype=np.float32)
                 eval_opponent_obs = eval_obs[:, self.num_agents // 2:, ...]
-                eval_obs = eval_obs[:, :self.num_agents // 2, ...]
-                eval_opponent_masks = np.ones((self.n_eval_rollout_threads, self.num_agents // 2, 1),
-                                              dtype=np.float32)
+                eval_obs = eval_obs[:, :self.num_agents // 2:, ...]
+                eval_opponent_masks = np.ones((self.n_eval_rollout_threads, self.num_agents // 2, 1), dtype=np.float32)
                 eval_opponent_rnn_states = np.zeros(
                     (self.n_eval_rollout_threads, self.num_agents // 2, *self.buffer.rnn_states_actor.shape[3:]),
                     dtype=np.float32)
@@ -755,13 +858,21 @@ class ShareJSBSimRunner(Runner):
                 eval_opponent_obs = eval_obs[:, self.num_agents // 2:, ...]
                 eval_obs = eval_obs[:, :self.num_agents // 2, ...]
 
-        # 评估结果分析
+# **修复模板推荐恢复**
+        try:
+            if original_recommendations and hasattr(self.eval_envs, 'envs') and len(self.eval_envs.envs) > 0 and hasattr(self.eval_envs.envs[0], 'task'):
+                task = self.eval_envs.envs[0].task
+                for agent_id, templates in original_recommendations.items():
+                    if hasattr(task, 'phase_recommended_templates'):
+                        task.phase_recommended_templates[agent_id] = templates
+        except Exception as e:
+            logging.error(f"Failed to restore original template recommendations: {e}")
+
         eval_infos = {}
         if eval_episode_rewards:
             eval_infos['eval_average_episode_rewards'] = np.concatenate(eval_episode_rewards).mean()
         else:
             eval_infos['eval_average_episode_rewards'] = 0.0
-
         # 战术模板评估分析
         if self.use_tactical_templates:
             total_template_usage = np.sum(eval_template_usage)
@@ -774,14 +885,13 @@ class ShareJSBSimRunner(Runner):
                 template_names = [
                     "No_Template", "Crank", "Beam", "Notch", "Skate", "Short_Skate",
                     "Banzai", "Simple_F_Pole", "Advanced_F_Pole", "Pincer",
-                    "Defensive_Split", "High_Low", "Engaging_Trail", "Loose_Deuce", "Defensive_Sequence"
+                    "Defensive_Split", "High_Low", "Engaging_Trail", "Loose_Duce", "Defensive_Sequence"
                 ]
 
                 logging.info("Evaluation Template Usage:")
                 for i, usage in enumerate(eval_template_usage):
                     if usage > 0:
-                        logging.info(
-                            f"  {template_names[i]}: {usage} times ({usage / total_template_usage * 100:.1f}%)")
+                        logging.info(f" {template_names[i]}: {usage} times ({usage / total_template_usage * 100:.1f}%)")
             else:
                 eval_infos['eval_template_diversity'] = 0.0
                 eval_infos['eval_most_used_template'] = 0

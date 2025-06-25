@@ -117,7 +117,27 @@ class AircraftSimulator(BaseSimulator):
         self.enemies: List[AircraftSimulator] = []
         self.launch_missiles: List[MissileSimulator] = []
         self.under_missiles: List[MissileSimulator] = []
-
+        self.sensors = {
+            "radar_range": 120000,  # 雷达探测距离 (m)
+            "radar_lock_range": 80000,  # 雷达锁定距离 (m)
+            "iff_range": 150000,  # 敌我识别距离 (m)
+            "rwr_range": 200000  # 雷达告警距离 (m)
+        }
+        self.weapons = {
+            "missiles": {
+                "aim120": {"count": self.num_missiles, "range": 100000, "speed": 1200},
+            }
+        }
+        # 新增：飞行性能参数
+        self.flight_envelope = {
+            "max_altitude": 18000,  # 最大高度 (m)
+            "service_ceiling": 15000,  # 实用升限 (m)
+            "max_speed": 600,  # 最大速度 (m/s)
+            "min_speed": 150,  # 最小速度 (m/s)
+            "max_g": 9.0,  # 最大过载
+            "max_climb_rate": 250,  # 最大爬升率 (m/s)
+            "max_turn_rate": 25  # 最大转弯率 (deg/s)
+        }
         # 新增：战术控制器
         self.tactical_controller = None
 

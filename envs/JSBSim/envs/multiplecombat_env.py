@@ -313,11 +313,12 @@ class MultipleCombatEnv(BaseEnv):
             indexed_infos
         )
 
+    # 在 MultipleCombatEnv 中加强时间线管理
     def _update_mission_timeline(self):
-        """更新任务时间线，根据距离和导弹状态设置关键时间点。"""
-        current_time = self.current_step * self.time_interval  # 计算当前时间
+        """完善的任务时间线更新"""
+        current_time = self.current_step * self.time_interval
 
-        # 计算红方和蓝方之间的最小距离
+        # 计算双方最小距离
         min_distance = float('inf')
         for red_id in ['A0100', 'A0200']:
             for blue_id in ['B0100', 'B0200']:
@@ -328,30 +329,72 @@ class MultipleCombatEnv(BaseEnv):
                     )
                     min_distance = min(min_distance, dist)
 
-        # 根据距离更新时间线节点
-        if min_distance < self.tactical_distances["detection_range"] and self.mission_timeline["contact_time"] is None:
+        # **详细的时间线节点记录**
+        timeline_updates = []
+
+        # 接触阶段
+        if min_distance <= self.tactical_distances["detection_range"] and self.mission_timeline["contact_time"] is None:
             self.mission_timeline["contact_time"] = current_time
-        if min_distance < self.tactical_distances["engagement_range"] and self.mission_timeline["engagement_time"] is None:
+            timeline_updates.append(f"CONTACT at {current_time:.1f}s, distance={min_distance:.0f}m")
+
+        # 交战阶段
+        if min_distance <= self.tactical_distances["engagement_range"] and self.mission_timeline[
+            "engagement_time"] is None:
             self.mission_timeline["engagement_time"] = current_time
-        if min_distance < self.tactical_distances["launch_range"] and self.mission_timeline["launch_time"] is None:
+            timeline_updates.append(f"ENGAGEMENT at {current_time:.1f}s, distance={min_distance:.0f}m")
+
+        # 发射窗口
+        if min_distance <= self.tactical_distances["launch_range"] and self.mission_timeline["launch_time"] is None:
             self.mission_timeline["launch_time"] = current_time
+            timeline_updates.append(f"LAUNCH_WINDOW at {current_time:.1f}s, distance={min_distance:.0f}m")
 
-        # 检查是否有导弹发射
-        any_missile_launched = False
-        for agent in self._jsbsims.values():
-            if agent.launch_missiles:
-                any_missile_launched = True
-                break
+        # 导弹发射检测
+        any_missile_launched = any(agent.launch_missiles for agent in self._jsbsims.values() if agent.is_alive)
+        if any_missile_launched and "first_missile_launch" not in self.mission_timeline:
+            self.mission_timeline["first_missile_launch"] = current_time
+            timeline_updates.append(f"FIRST_MISSILE_LAUNCH at {current_time:.1f}s")
 
-        if any_missile_launched and self.mission_timeline["impact_time"] is None:
-            self.mission_timeline["impact_time"] = current_time + 60  # 预计导弹命中时间（60秒后）
+        # MAR进入
+        if min_distance <= self.tactical_distances["mar_range"] and "mar_entry" not in self.mission_timeline:
+            self.mission_timeline["mar_entry"] = current_time
+            timeline_updates.append(f"MAR_ENTRY at {current_time:.1f}s, distance={min_distance:.0f}m")
 
-        # 检查任务是否结束（一方全部阵亡）
+        # 任务结束检测
         red_alive = sum(1 for aid in ['A0100', 'A0200'] if self._jsbsims[aid].is_alive)
         blue_alive = sum(1 for aid in ['B0100', 'B0200'] if self._jsbsims[aid].is_alive)
-        if red_alive == 0 or blue_alive == 0:
-            if self.mission_timeline["mission_end"] is None:
-                self.mission_timeline["mission_end"] = current_time
+        if (red_alive == 0 or blue_alive == 0) and self.mission_timeline["mission_end"] is None:
+            self.mission_timeline["mission_end"] = current_time
+            winner = "RED" if blue_alive == 0 else "BLUE"
+            timeline_updates.append(f"MISSION_END at {current_time:.1f}s, WINNER: {winner}")
+
+        # 记录时间线更新
+        for update in timeline_updates:
+            logging.info(f"Timeline Update: {update}")
+
+        # 将时间线信息传递给task
+        if hasattr(self.task, 'mission_timeline'):
+            self.task.mission_timeline = self.mission_timeline.copy()
+
+    def get_timeline_summary(self):
+        """获取时间线总结报告"""
+        summary = {
+            "mission_duration": self.mission_timeline.get("mission_end", self.current_step * self.time_interval),
+            "contact_delay": self.mission_timeline.get("contact_time", 0),
+            "engagement_duration": None,
+            "launch_window_duration": None,
+            "terminal_phase_duration": None
+        }
+
+        # 计算各阶段持续时间
+        if self.mission_timeline.get("contact_time") and self.mission_timeline.get("engagement_time"):
+            summary["engagement_duration"] = self.mission_timeline["engagement_time"] - self.mission_timeline[
+                "contact_time"]
+
+        if self.mission_timeline.get("engagement_time") and self.mission_timeline.get("launch_time"):
+            summary["launch_window_duration"] = self.mission_timeline["launch_time"] - self.mission_timeline[
+                "engagement_time"]
+
+        return summary
 
     def _update_tactical_situation(self):
         """更新战术态势，评估威胁等级和交战几何。"""
