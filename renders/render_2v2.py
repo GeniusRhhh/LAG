@@ -26,11 +26,11 @@ def _t2n(x):
 
 num_agents = 4
 render = True
-ego_policy_index =233
-enm_policy_index=232
+ego_policy_index =11
+enm_policy_index=10
 episode_rewards = 0
-ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run143"
-enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run143"
+ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run151"
+enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run151"
 experiment_name = ego_run_dir.split('/')[-4]
 
 env = MultipleCombatEnv("2v2/ShootMissile/HierarchySelfplay")

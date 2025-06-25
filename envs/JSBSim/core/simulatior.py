@@ -118,32 +118,6 @@ class AircraftSimulator(BaseSimulator):
         self.launch_missiles: List[MissileSimulator] = []
         self.under_missiles: List[MissileSimulator] = []
 
-        # 新增：飞行性能参数
-        self.flight_envelope = {
-            "max_altitude": 18000,  # 最大高度 (m)
-            "service_ceiling": 15000,  # 实用升限 (m)
-            "max_speed": 600,  # 最大速度 (m/s)
-            "min_speed": 150,  # 最小速度 (m/s)
-            "max_g": 9.0,  # 最大过载
-            "max_climb_rate": 250,  # 最大爬升率 (m/s)
-            "max_turn_rate": 25  # 最大转弯率 (deg/s)
-        }
-
-        # 新增：传感器和武器系统
-        self.sensors = {
-            "radar_range": 120000,  # 雷达探测距离 (m)
-            "radar_lock_range": 80000,  # 雷达锁定距离 (m)
-            "iff_range": 150000,  # 敌我识别距离 (m)
-            "rwr_range": 200000  # 雷达告警距离 (m)
-        }
-
-        self.weapons = {
-            "missiles": {
-                "aim120": {"count": self.num_missiles, "range": 100000, "speed": 1200},
-            },
-            "gun": {"rounds": 500, "range": 2000, "rate": 6000}
-        }
-
         # 新增：战术控制器
         self.tactical_controller = None
 
@@ -377,18 +351,6 @@ class AircraftSimulator(BaseSimulator):
         """应用飞行包线保护"""
         current_alt = self.get_position()[2]
         current_vel = np.linalg.norm(self.get_velocity())
-
-        # # 高度保护
-        # if current_alt > self.flight_envelope["max_altitude"]:
-        #     logging.warning(f"Agent {self.uid} exceeding max altitude: {current_alt:.1f}m")
-        # elif current_alt < 500:  # 最小安全高度
-        #     logging.warning(f"Agent {self.uid} too low: {current_alt:.1f}m")
-        #
-        # # 速度保护
-        # if current_vel > self.flight_envelope["max_speed"]:
-        #     logging.warning(f"Agent {self.uid} exceeding max speed: {current_vel:.1f}m/s")
-        # elif current_vel < self.flight_envelope["min_speed"]:
-        #     logging.warning(f"Agent {self.uid} below min speed: {current_vel:.1f}m/s")
 
         # 过载保护
         pitch_rate = self.get_property_value(Catalog.ic_q_rad_sec)

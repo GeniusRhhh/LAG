@@ -7,14 +7,7 @@ from ..tasks import SingleCombatTask
 from ..core.catalog import Catalog as c
 from ..core.simulatior import BaseSimulator, AircraftSimulator, MissileSimulator
 from ..reward_functions import (
-    TemplateReward,
-    TacticalReward,
-    AltitudeReward,
-    PostureReward,
-    EventDrivenReward,
-    MissilePostureReward,
-    RadarLockReward,
-    MissileHitReward,
+
     TemplateRewardNew,
     TacticalRewardNew,
     AltitudeRewardNew,
@@ -39,11 +32,11 @@ class MultipleCombatTask(SingleCombatTask):
         """初始化多智能体任务。"""
         super().__init__(config)
         self.reward_functions = [
-            AltitudeReward(self.config),
-            PostureReward(self.config),
-            EventDrivenReward(self.config),
-            RadarLockReward(self.config),
-            MissileHitReward(self.config)
+            AltitudeRewardNew(self.config),
+            PostureRewardNew(self.config),
+            EventDrivenRewardNew(self.config),
+            RadarLockRewardNew(self.config),
+            MissileHitRewardNew(self.config)
         ]
         self.termination_conditions = [
             SafeReturn(self.config),
@@ -183,7 +176,7 @@ class MultipleCombatTask(SingleCombatTask):
             norm_obs[8] = ego_state[12] / 340  # 8. ego vc   (unit: mh)(unit: 5G)
 
             # 其他智能体相对状态
-            offset = 8
+            offset = 9
             for sim in env.agents[agent_id].partners + env.agents[agent_id].enemies:
                 if not sim.is_alive:
                     # 如果目标不存活，填充默认值
@@ -204,12 +197,12 @@ class MultipleCombatTask(SingleCombatTask):
 
                     AO, TA, R, side_flag = get_AO_TA_R(ego_feature, feature, return_side=True)
 
-                    norm_obs[offset + 1] = (state[9] - ego_state[9]) / 340
-                    norm_obs[offset + 2] = (state[2] - ego_state[2]) / 1000
-                    norm_obs[offset + 3] = AO
-                    norm_obs[offset + 4] = TA
-                    norm_obs[offset + 5] = R / 10000
-                    norm_obs[offset + 6] = side_flag
+                    norm_obs[offset + 0] = (state[9] - ego_state[9]) / 340
+                    norm_obs[offset + 1] = (state[2] - ego_state[2]) / 1000
+                    norm_obs[offset + 2] = AO
+                    norm_obs[offset + 3] = TA
+                    norm_obs[offset + 4] = R / 10000
+                    norm_obs[offset + 5] = side_flag
 
                 except Exception as e:
                     logging.error(f"Error processing target {sim.uid}: {e}")
@@ -370,10 +363,6 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         self.lowlevel_policy.eval()
 
         # 第二层：高层控制参数（3层架构的第二层）
-        # self.norm_delta_altitude = np.array([0.2,0.1, 0, -0.1,-0.2])
-        # self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
-        # self.norm_delta_velocity = np.array([0.1,0.05, 0, -0.05,-0.1])
-        # 替换为：
         self.norm_delta_altitude = np.array([-1000, -500, -200, 0, 200, 500, 1000]) / 1000.0  # 7个高度选项
         self.norm_delta_heading = np.array(
             [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])  # 9个航向选项
@@ -523,7 +512,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def load_observation_space(self):
         """增强观测空间：包含战术模板和作战阶段信息。"""
         # 基础观测 + 战术状态 + 其他智能体 + 导弹威胁 + 队友状态 + 作战阶段
-        self.obs_length = 14 + self.num_agents * 6 + 6 + 2 + 10  # 新增10维作战阶段信息
+        self.obs_length = 14 + (self.num_agents-1) * 6 + 6 + 2 + 10  # 新增10维作战阶段信息
         self.observation_space = spaces.Box(low=-10, high=10., shape=(self.obs_length,))
         self.share_observation_space = spaces.Box(low=-10, high=10., shape=(self.num_agents * self.obs_length,))
 
@@ -680,44 +669,6 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
         return norm_act
 
-    # def _convert_altitude_to_index(self, altitude_cmd):
-    #     """将高度指令转换为索引，支持5级动作空间"""
-    #     if altitude_cmd > 100:
-    #         return 0  # 大上升
-    #     elif altitude_cmd > 50:
-    #         return 1  # 小上升
-    #     elif altitude_cmd < -100:
-    #         return 4  # 大下降
-    #     elif altitude_cmd < -50:
-    #         return 3  # 小下降
-    #     else:
-    #         return 2  # 保持
-    #
-    # def _convert_heading_to_index(self, heading_cmd):
-    #     """将航向指令转换为索引，已支持5级，无需修改"""
-    #     if heading_cmd > 0.2:
-    #         return 4  # 大右转
-    #     elif heading_cmd > 0.05:
-    #         return 3  # 小右转
-    #     elif heading_cmd < -0.2:
-    #         return 0  # 大左转
-    #     elif heading_cmd < -0.05:
-    #         return 1  # 小左转
-    #     else:
-    #         return 2  # 保持航向
-    #
-    # def _convert_velocity_to_index(self, velocity_cmd):
-    #     """将速度指令转换为索引，支持5级动作空间"""
-    #     if velocity_cmd > 700:
-    #         return 0  # 大加速
-    #     elif velocity_cmd > 650:
-    #         return 1  # 小加速
-    #     elif velocity_cmd < 500:
-    #         return 4  # 大减速
-    #     elif velocity_cmd < 550:
-    #         return 3  # 小减速
-    #     else:mission_timeline
-    #         return 2  # 保持速度
     def _convert_altitude_to_index(self, altitude_cmd):
         """将高度指令转换为索引"""
         # 找到最接近的索引
@@ -1085,21 +1036,13 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                     state.get("radar_lock", False) and
                     self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision"] and
                     state["enemy_angle_off"] < 25 and  # 从45度收紧到25度
-                    state.get("shoot_probability", 0) > 0.4 and  # 提高概率阈值
+                    state.get("shoot_probability", 0) > 0.5 and  # 提高概率阈值
                     # 新增条件：确保良好的射击窗口
-                    np.linalg.norm(agent.get_velocity()) > 150 and  # 最小速度要求
-                    state.get("current_altitude", 0) > 3000 and  # 最小高度要求
-                    # 避免在威胁下射击
-                    not state.get("has_warning", False)
+                    np.linalg.norm(agent.get_velocity()) > 200 and  # 最小速度要求
+                    state.get("current_altitude", 0) > 4000   # 最小高度要求
             )
 
             if shoot_flag:
-                # 二次检查 - 确保射击质量
-                relative_velocity = np.linalg.norm(target.get_velocity() - agent.get_velocity())
-                if relative_velocity < 100:  # 相对速度过小，不利于制导
-                    logging.debug(f"Agent {agent_id} skip shoot: low relative velocity {relative_velocity:.1f}m/s")
-                    continue
-
                 # 创建导弹
                 new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
                 missile = MissileSimulator.create(
@@ -1119,7 +1062,6 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 # 记录射击事件
                 self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
 
-        # 继续原有的观测和奖励计算逻辑...
             # 记录其他战术动作
             if self._last_action.get(agent_id, [0, 0])[0] != 0:
                 template_id = self._last_action[agent_id][0]
@@ -1150,7 +1092,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             # 计算各个奖励组件
             for func in self.reward_functions:
                 try:
-                    if isinstance(func, (RadarLockReward, MissileHitReward,RadarLockRewardNew,MissileHitRewardNew)):
+                    if isinstance(func, (RadarLockRewardNew,MissileHitRewardNew)):
                         reward_info = func.get_reward(self, env, agent_id, state_dict)
                     else:
                         reward_info = func.get_reward(self, env, agent_id)
@@ -1168,9 +1110,9 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
 
             # 缩放奖励
-            original_reward = np.clip(reward_sum, -10, 10)
+            original_reward = np.clip(reward_sum, -10.0, 10.0)
             # scaled_reward = self.reward_scaler.scale(original_reward)
-            scaled_reward = np.clip(original_reward, -10, 10)  # 直接使用原始奖励
+            scaled_reward = np.clip(original_reward, -10.0, 10.0)  # 直接使用原始奖励
             rewards[agent_id] = np.array([scaled_reward])
             self.rewards[agent_id] = scaled_reward
             # rewards[agent_id] =  np.clip(reward_sum, -10, 10)

@@ -11,7 +11,7 @@ CUDA_VISIBLE_DEVICES=0 python train/train_jsbsim.py \
     --env-name ${env} --algorithm-name ${algo} --scenario-name ${scenario} --experiment-name ${exp} \
     --seed ${seed} --n-training-threads 1 --n-rollout-threads 6 --cuda --log-interval 1 --save-interval 1 \
     --num-mini-batch 5 --buffer-size 3000 --num-env-steps 1e8 \
-    --lr 2e-4 --gamma 0.99 --ppo-epoch 4 --clip-params 0.1 --max-grad-norm 2.0 --entropy-coef 0.05 \
+    --lr 1e-4 --gamma 0.99 --ppo-epoch 4 --clip-params 0.1 --max-grad-norm 2.0 --entropy-coef 0.02 \
     --hidden-size "128 128" --act-hidden-size "128 128" --recurrent-hidden-size 128 --recurrent-hidden-layers 1 --data-chunk-length 8 \
     --use-selfplay --selfplay-algorithm "fsp" --n-choose-opponents 1 \
     --use-eval --n-eval-rollout-threads 1 --eval-interval 1 --eval-episodes 1 \

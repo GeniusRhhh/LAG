@@ -324,8 +324,7 @@ class MultipleCombatEnv(BaseEnv):
                 if (red_id in self._jsbsims and blue_id in self._jsbsims and
                         self._jsbsims[red_id].is_alive and self._jsbsims[blue_id].is_alive):
                     dist = np.linalg.norm(
-                        self._jsbsims[red_id].get_position() -
-                        self._jsbsims[blue_id].get_position()
+                        self._jsbsims[red_id].get_position() - self._jsbsims[blue_id].get_position()
                     )
                     min_distance = min(min_distance, dist)
 
