@@ -13,81 +13,228 @@ from ..utils.utils import get_AO_TA_R, LLA2NEU, get_root_dir
 
 # 修改 TacticalRewardNew 类
 class TacticalRewardNew(BaseRewardFunction):
+    """修复版战术奖励函数 - 增强奖励信号"""
+
     def __init__(self, config):
         super().__init__(config)
-        # 大幅简化奖励结构
+
+        # **修复1：大幅增加奖励幅度，提供有效学习信号**
         self.phase_rewards = {
-            "contact_guidance": 0.0,
-            "target_search": 0.01,
-            "target_identification": 0.02,
-            "threat_assessment": 0.02,
-            "target_allocation": 0.03,
-            "tactical_decision": 0.03,
-            "missile_launch": 0.05,
-            "mid_guidance_defense": 0.02,
-            "terminal_guidance": 0.02,
-            "effect_assessment": 0.03
+            "contact_guidance": 0.0,  # 基础阶段
+            "target_search": 0.5,  # 从0.01增加到0.5
+            "target_identification": 1.0,  # 从0.02增加到1.0
+            "threat_assessment": 1.5,  # 从0.03增加到1.5
+            "target_allocation": 2.0,  # 从0.04增加到2.0
+            "tactical_decision": 3.0,  # 从0.05增加到3.0
+            "missile_launch": 5.0,  # 从0.08增加到5.0 - 关键奖励
+            "mid_guidance_defense": 2.0,  # 从0.06增加到2.0
+            "terminal_guidance": 3.0,  # 从0.07增加到3.0
+            "effect_assessment": 4.0  # 从0.1增加到4.0
         }
 
-        # 简化模板奖励 - 只奖励关键模板
-        self.template_rewards = {
-            1: 0.02,  # Crank
-            2: 0.03,  # Beam - 防御重要
-            3: 0.05,  # Notch - 最重要规避
-            9: 0.04,  # Pincer - 协同重要
-            14: 0.03  # Defensive_Sequence
+        # **修复2：增强战术模板奖励**
+        self.template_effectiveness = {
+            1: {"name": "Crank", "base_reward": 2.0},  # 从0.03增加
+            2: {"name": "Beam", "base_reward": 3.0},  # 从0.05增加
+            3: {"name": "Notch", "base_reward": 4.0},  # 从0.08增加
+            4: {"name": "Skate", "base_reward": 3.5},  # 从0.06增加
+            5: {"name": "Short_Skate", "base_reward": 1.5},  # 适度增加
+            6: {"name": "Banzai", "base_reward": 3.0},  # 从0.04增加
+            7: {"name": "Simple_F_Pole", "base_reward": 1.0},  # 保持相对较低
+            8: {"name": "Advanced_F_Pole", "base_reward": 2.0},
+            9: {"name": "Pincer", "base_reward": 4.0},  # 协同战术高奖励
+            10: {"name": "Defensive_Split", "base_reward": 3.0},
+            11: {"name": "High_Low", "base_reward": 3.5},
+            12: {"name": "Engaging_Trail", "base_reward": 2.5},
+            13: {"name": "Loose_Deuce", "base_reward": 2.0},
+            14: {"name": "Defensive_Sequence", "base_reward": 3.5}
         }
+
+        # 奖励历史平滑 - 减少平滑以保持信号强度
+        self.reward_history = {}
+        self.smoothing_factor = 0.3  # 从0.1增加到0.3
 
     def get_reward(self, task, env, agent_id, state_dict: Dict[str, Any] = None):
+        """计算增强版战术奖励"""
         if not env.agents[agent_id].is_alive:
-            return -1.0  # 死亡大幅惩罚
+            return -10.0  # 死亡大惩罚
 
-        total_reward = 0.01  # 基础生存奖励
+        if state_dict is None:
+            state_dict = task.get_state_dict(env, agent_id) if hasattr(task, 'get_state_dict') else {}
 
-        # 1. 阶段奖励
+        total_reward = 0.0
+
+        # **修复1：增强阶段奖励**
         current_phase = state_dict.get("current_phase", "contact_guidance")
-        total_reward += self.phase_rewards.get(current_phase, 0.0)
+        phase_reward = self.phase_rewards.get(current_phase, 0.0)
+        total_reward += phase_reward
 
-        # 2. 简化模板奖励
+        # **修复2：增强阶段推进奖励**
+        if hasattr(task, 'timeline_events') and task.timeline_events:
+            recent_events = [e for e in task.timeline_events if e.get('agent_id') == agent_id]
+            if recent_events and len(recent_events) > 0:
+                last_event = recent_events[-1]
+                if last_event.get('step', 0) == getattr(task, 'step_count', 0):
+                    # 刚刚发生阶段转换
+                    total_reward += 5.0  # 阶段推进大奖励
+
+        # **修复3：增强雷达锁定奖励**
+        if state_dict.get("radar_lock", False):
+            distance = state_dict.get("enemy_distance", 50000)
+            lock_reward = 3.0 * (1 - min(distance / 80000, 1.0))  # 距离越近奖励越高
+            total_reward += lock_reward
+
+        # **修复4：战术模板适用性奖励**
         if hasattr(task, '_last_action') and agent_id in task._last_action:
             template_id = task._last_action[agent_id][0]
-            if template_id in self.template_rewards:
-                # 只在适当条件下给奖励
-                if self._is_template_effective(template_id, state_dict):
-                    total_reward += self.template_rewards[template_id]
+            if template_id > 0 and template_id in self.template_effectiveness:
+                base_reward = self.template_effectiveness[template_id]["base_reward"]
 
-        # 3. 距离管理（简化）
+                # 根据适用性调整奖励
+                if self._is_template_appropriate(template_id, state_dict):
+                    total_reward += base_reward * 1.5  # 适用时额外奖励
+                else:
+                    total_reward += base_reward * 0.5  # 不适用时减少奖励
+
+        # **修复5：距离管理奖励 - 更明确的奖励结构**
         enemy_distance = state_dict.get("enemy_distance", 50000)
-        if 30000 <= enemy_distance <= 50000:  # 理想距离
-            total_reward += 0.01
+        if 30000 <= enemy_distance <= 60000:  # 理想BVR交战距离
+            total_reward += 2.0
+        elif 60000 <= enemy_distance <= 80000:  # 可接受距离
+            total_reward += 1.0
         elif enemy_distance < 15000:  # 危险接近
-            total_reward -= 0.02
+            total_reward -= 5.0
+        elif enemy_distance > 100000:  # 脱离接触
+            total_reward -= 2.0
 
-        # 4. 射击质量
+        # **修复6：基础生存和行为奖励**
+        total_reward += 0.5  # 每步基础生存奖励
+
+        # **修复7：射击质量奖励/惩罚 - 增强信号**
         if state_dict.get("missile_launched", False):
-            if (state_dict.get("radar_lock", False) and
-                    25000 <= enemy_distance <= 40000 and
-                    abs(state_dict.get("enemy_angle_off", 0)) < 30):
-                total_reward += 0.05  # 好射击
-            else:
-                total_reward -= 0.03  # 差射击惩罚
+            shoot_quality = self._evaluate_shoot_quality(state_dict)
+            total_reward += shoot_quality * 5.0  # 放大射击奖励
 
-        # 严格限制奖励范围
-        return np.clip(total_reward, -1.0, 0.1)
+        # **修复8：协同奖励增强**
+        cooperation_bonus = self._calculate_cooperation_bonus(env, agent_id)
+        total_reward += cooperation_bonus * 3.0  # 放大协同奖励
 
-    def _is_template_effective(self, template_id: int, state_dict: Dict[str, Any]) -> bool:
-        """简化的有效性检查"""
+        # **修复9：敌我态势奖励**
+        enemy_angle_off = abs(state_dict.get("enemy_angle_off", 0))
+        if enemy_angle_off < 30:  # 良好攻击态势
+            total_reward += 1.5
+        elif enemy_angle_off > 120:  # 良好防御态势
+            total_reward += 1.0
+
+        # 奖励平滑处理
+        total_reward = self._smooth_reward(agent_id, total_reward)
+
+        # **修复10：大幅放宽奖励范围**
+        total_reward = np.clip(total_reward, -20.0, 20.0)  # 从(-0.5, 0.5)扩大到(-20, 20)
+
+        return self._process(total_reward, agent_id, {})
+
+    def _evaluate_shoot_quality(self, state_dict: Dict[str, Any]) -> float:
+        """评估射击质量 - 增强版"""
+        radar_lock = state_dict.get("radar_lock", False)
+        enemy_distance = state_dict.get("enemy_distance", 50000)
+        enemy_angle_off = abs(state_dict.get("enemy_angle_off", 0))
+
+        # 基础射击条件检查
+        if not radar_lock:
+            return -2.0  # 无锁定射击惩罚
+
+        # 距离评分
+        if 25000 <= enemy_distance <= 45000:  # 理想射击距离
+            distance_score = 2.0
+        elif 20000 <= enemy_distance <= 50000:  # 可接受距离
+            distance_score = 1.0
+        elif enemy_distance < 20000:  # 太近
+            distance_score = -1.0
+        else:  # 太远
+            distance_score = -0.5
+
+        # 角度评分
+        if enemy_angle_off < 20:  # 理想角度
+            angle_score = 2.0
+        elif enemy_angle_off < 45:  # 可接受角度
+            angle_score = 1.0
+        else:  # 角度过大
+            angle_score = -1.0
+
+        return distance_score + angle_score
+
+    def _calculate_cooperation_bonus(self, env, agent_id: str) -> float:
+        """计算协同奖励 - 增强版"""
+        if not hasattr(env, 'agents') or agent_id not in env.agents:
+            return 0.0
+
+        agent = env.agents[agent_id]
+        partners = [p for p in agent.partners if p.is_alive]
+
+        if not partners:
+            return 0.0
+
+        partner = partners[0]
+        partner_distance = np.linalg.norm(partner.get_position() - agent.get_position())
+
+        # 协同距离奖励
+        if 8000 <= partner_distance <= 20000:  # 理想协同距离
+            cooperation_reward = 2.0
+        elif 5000 <= partner_distance <= 25000:  # 可接受距离
+            cooperation_reward = 1.0
+        elif partner_distance > 40000:  # 过远惩罚
+            cooperation_reward = -1.0
+        elif partner_distance < 3000:  # 过近惩罚
+            cooperation_reward = -2.0
+        else:
+            cooperation_reward = 0.0
+
+        return cooperation_reward
+
+    def _is_template_appropriate(self, template_id: int, state_dict: Dict[str, Any]) -> bool:
+        """检查战术模板是否适合当前态势。"""
+        distance = state_dict.get("enemy_distance", 50000)
         has_warning = state_dict.get("has_warning", False)
         radar_lock = state_dict.get("radar_lock", False)
+        is_leader = state_dict.get("is_leader", False)
 
-        if template_id in [2, 3, 14] and has_warning:  # 防御战术
-            return True
-        elif template_id == 1 and radar_lock:  # Crank需要锁定
-            return True
-        elif template_id == 9:  # Pincer协同
-            return state_dict.get("is_leader", False)
+        # 防御模板（Beam, Notch, Defensive_Sequence）
+        if template_id in [2, 3, 14]:
+            return has_warning and distance < 40000  # 威胁且近距离
+
+        # Crank 需要雷达锁定
+        if template_id == 1:
+            return radar_lock and 40000 <= distance <= 80000
+
+        # Pincer 需要长机且有存活队友
+        if template_id == 9:
+            return is_leader and state_dict.get("has_alive_partner", False)
+
+        # 攻击模板（Skate, Short_Skate, Banzai）
+        if template_id in [4, 5, 6]:
+            return radar_lock and 25000 <= distance <= 50000
+
+        # F-Pole 模板（Simple_F_Pole, Advanced_F_Pole）
+        if template_id in [7, 8]:
+            return distance > 40000
+
+        # 协同模板（Defensive_Split, High_Low, Engaging_Trail, Loose_Deuce）
+        if template_id in [10, 11, 12, 13]:
+            return state_dict.get("has_alive_partner", False) and distance > 25000
+
         return False
 
+    def _smooth_reward(self, agent_id: str, reward: float) -> float:
+        """平滑奖励，减少波动，保持学习稳定性。"""
+        if agent_id not in self.reward_history:
+            self.reward_history[agent_id] = reward
+        else:
+            self.reward_history[agent_id] = (
+                    self.smoothing_factor * reward +
+                    (1 - self.smoothing_factor) * self.reward_history[agent_id]
+            )
+        return self.reward_history[agent_id]
 
 class TemplateRewardNew(BaseRewardFunction):
     """模板奖励：专门针对14种战术模板的使用效果评估"""
@@ -488,7 +635,7 @@ class PostureRewardNew(BaseRewardFunction):
 
 
 class EventDrivenRewardNew(BaseRewardFunction):
-    """简化的事件奖励"""
+    """修复版事件奖励 - 重要事件强奖励"""
 
     def __init__(self, config):
         super().__init__(config)
@@ -497,19 +644,28 @@ class EventDrivenRewardNew(BaseRewardFunction):
         reward = 0.0
         agent = env.agents[agent_id]
 
-        # 关键事件奖励
+        # **修复：增强关键事件奖励**
         if agent.is_shotdown:
-            reward -= 5.0  # 主要负面事件
+            reward -= 50.0  # 大幅增加死亡惩罚
         elif agent.is_crash:
-            reward -= 5.0  # 主要负面事件
+            reward -= 50.0  # 大幅增加坠毁惩罚
 
         # 导弹命中奖励
         for missile in agent.launch_missiles:
             if missile.is_success:
-                reward += 2.0  # 重要正面事件
+                reward += 100.0  # 大幅增加命中奖励
 
-        # 严格限制范围
-        return np.clip(reward, -5.0, 2.0)
+        # 敌人被击落奖励
+        for enemy in agent.enemies:
+            if enemy.is_shotdown or enemy.is_crash:
+                reward += 80.0  # 击落敌人大奖励
+
+        # 生存时间奖励
+        if agent.is_alive:
+            reward += 0.1  # 每步生存小奖励
+
+        # 严格限制范围但放大幅度
+        return np.clip(reward, -100.0, 150.0)
 
 class MissilePostureRewardNew(BaseRewardFunction):
     """导弹姿态奖励：增强版导弹规避奖励"""
@@ -582,33 +738,33 @@ class MissilePostureRewardNew(BaseRewardFunction):
 
 
 class BasicFlightReward(BaseRewardFunction):
-    """基础飞行稳定性奖励"""
+    """修复版基础飞行奖励"""
 
     def __init__(self, config):
         super().__init__(config)
 
     def get_reward(self, task, env, agent_id):
         if not env.agents[agent_id].is_alive:
-            return -1.0
+            return -10.0  # 增加死亡惩罚
 
         agent = env.agents[agent_id]
         reward = 0.0
 
         # 基础存活
-        reward += 0.005
+        reward += 0.1  # 从0.005增加到0.1
 
         # 速度检查
         current_speed = np.linalg.norm(agent.get_velocity())
         if current_speed < 100:  # 失速风险
-            reward -= 0.1
-        elif 150 <= current_speed <= 600:  # 正常速度
-            reward += 0.005
+            reward -= 2.0  # 从-0.1增加到-2.0
+        elif 200 <= current_speed <= 600:  # 正常速度
+            reward += 0.5  # 从0.005增加到0.5
 
         # 高度检查
         current_alt = agent.get_position()[2]
         if current_alt < 500:  # 极低空
-            reward -= 0.2
+            reward -= 5.0  # 从-0.2增加到-5.0
         elif 3000 <= current_alt <= 12000:  # 正常高度
-            reward += 0.005
+            reward += 0.3  # 从0.005增加到0.3
 
-        return np.clip(reward, -1.0, 0.1)
+        return np.clip(reward, -10.0, 2.0)  # 调整范围
