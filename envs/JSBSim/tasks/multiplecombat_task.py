@@ -809,7 +809,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         self.decision_log.append(decision_info)
 
         # 每50步分析一次决策模式
-        if len(self.decision_log) % 50 == 0:
+        if len(self.decision_log) % 500 == 0:
             self._analyze_recent_decisions()
 
     def _analyze_recent_decisions(self):
@@ -1303,14 +1303,20 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                     agent.is_alive and
                     self._shoot_action.get(agent_id, False) and
                     self._remaining_missiles.get(agent_id, 0) > 0 and
-                    attack_angle <= 45 and  # 45度
-                    25000 <= distance <= 47000 and  # 窗口到25-47km
-                    shoot_interval >= self.min_attack_interval and
-                    state.get("radar_lock", False) and
-                    self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision"] and
-                    state["enemy_angle_off"] < 60 and  # 60度
-                    state.get("shoot_probability", 0) > 0.4  # 概率阈值
+                    attack_angle <= 120 and  # 65度
+                    25000 <= distance <= 60000 and  # 窗口到25-55km
+                    shoot_interval >= self.min_attack_interval-20 and
+                    (state.get("radar_lock", False) or distance < 60000) and
+                    self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision", "target_allocation"] and
+                    abs(state["enemy_angle_off"]) < 150  # 90度
             )
+            if (not shoot_flag and
+                    agent.is_alive and
+                    self._remaining_missiles.get(agent_id, 0) > 0 and
+                    20000 <= distance <= 60000 and
+                    shoot_interval >= 50):  # 50步没射击就强制
+                shoot_flag = True
+                logging.info(f"Agent {agent_id} FORCED missile launch at distance={distance:.0f}m")
 
             if shoot_flag:
                 # 创建导弹

@@ -4,12 +4,6 @@ from typing import Dict, Tuple, Any
 from .reward_function_base import BaseRewardFunction
 from ..utils.utils import get_AO_TA_R, LLA2NEU, get_root_dir
 
-import numpy as np
-import logging
-from typing import Dict, Tuple, Any
-from .reward_function_base import BaseRewardFunction
-from ..utils.utils import get_AO_TA_R, LLA2NEU, get_root_dir
-
 
 # 修改 TacticalRewardNew 类
 class TacticalRewardNew(BaseRewardFunction):
@@ -20,34 +14,34 @@ class TacticalRewardNew(BaseRewardFunction):
 
         # **修复1：大幅增加奖励幅度，提供有效学习信号**
         self.phase_rewards = {
-            "contact_guidance": 0.0,  # 基础阶段
-            "target_search": 0.5,  # 从0.01增加到0.5
-            "target_identification": 1.0,  # 从0.02增加到1.0
-            "threat_assessment": 1.5,  # 从0.03增加到1.5
-            "target_allocation": 2.0,  # 从0.04增加到2.0
-            "tactical_decision": 3.0,  # 从0.05增加到3.0
-            "missile_launch": 5.0,  # 从0.08增加到5.0 - 关键奖励
-            "mid_guidance_defense": 2.0,  # 从0.06增加到2.0
-            "terminal_guidance": 3.0,  # 从0.07增加到3.0
-            "effect_assessment": 4.0  # 从0.1增加到4.0
+            "contact_guidance": 0.0,
+            "target_search": 0.1,  # 从0.5降低到0.1
+            "target_identification": 0.2,  # 从1.0降低到0.2
+            "threat_assessment": 0.3,  # 从1.5降低到0.3
+            "target_allocation": 0.4,  # 从2.0降低到0.4
+            "tactical_decision": 0.5,  # 从3.0降低到0.5
+            "missile_launch": 1.0,  # 从5.0降低到1.0
+            "mid_guidance_defense": 0.4,
+            "terminal_guidance": 0.6,
+            "effect_assessment": 0.8
         }
 
         # **修复2：增强战术模板奖励**
         self.template_effectiveness = {
-            1: {"name": "Crank", "base_reward": 2.0},  # 从0.03增加
-            2: {"name": "Beam", "base_reward": 3.0},  # 从0.05增加
-            3: {"name": "Notch", "base_reward": 4.0},  # 从0.08增加
-            4: {"name": "Skate", "base_reward": 3.5},  # 从0.06增加
-            5: {"name": "Short_Skate", "base_reward": 1.5},  # 适度增加
-            6: {"name": "Banzai", "base_reward": 3.0},  # 从0.04增加
-            7: {"name": "Simple_F_Pole", "base_reward": 1.0},  # 保持相对较低
-            8: {"name": "Advanced_F_Pole", "base_reward": 2.0},
-            9: {"name": "Pincer", "base_reward": 4.0},  # 协同战术高奖励
-            10: {"name": "Defensive_Split", "base_reward": 3.0},
-            11: {"name": "High_Low", "base_reward": 3.5},
-            12: {"name": "Engaging_Trail", "base_reward": 2.5},
-            13: {"name": "Loose_Deuce", "base_reward": 2.0},
-            14: {"name": "Defensive_Sequence", "base_reward": 3.5}
+            1: {"name": "Crank", "base_reward": 0.2},  # 从0.03增加
+            2: {"name": "Beam", "base_reward": 0.3},  # 从0.05增加
+            3: {"name": "Notch", "base_reward": 0.4},  # 从0.08增加
+            4: {"name": "Skate", "base_reward": 0.35},  # 从0.06增加
+            5: {"name": "Short_Skate", "base_reward":0.15},  # 适度增加
+            6: {"name": "Banzai", "base_reward": 0.3},  # 从0.04增加
+            7: {"name": "Simple_F_Pole", "base_reward": 0.1},  # 保持相对较低
+            8: {"name": "Advanced_F_Pole", "base_reward": 0.2},
+            9: {"name": "Pincer", "base_reward": 0.4},  # 协同战术高奖励
+            10: {"name": "Defensive_Split", "base_reward": 0.3},
+            11: {"name": "High_Low", "base_reward": 0.35},
+            12: {"name": "Engaging_Trail", "base_reward": 0.25},
+            13: {"name": "Loose_Deuce", "base_reward": 0.2},
+            14: {"name": "Defensive_Sequence", "base_reward": 0.35}
         }
 
         # 奖励历史平滑 - 减少平滑以保持信号强度
@@ -57,7 +51,7 @@ class TacticalRewardNew(BaseRewardFunction):
     def get_reward(self, task, env, agent_id, state_dict: Dict[str, Any] = None):
         """计算增强版战术奖励"""
         if not env.agents[agent_id].is_alive:
-            return -10.0  # 死亡大惩罚
+            return -5.0  # 死亡大惩罚
 
         if state_dict is None:
             state_dict = task.get_state_dict(env, agent_id) if hasattr(task, 'get_state_dict') else {}
@@ -76,7 +70,7 @@ class TacticalRewardNew(BaseRewardFunction):
                 last_event = recent_events[-1]
                 if last_event.get('step', 0) == getattr(task, 'step_count', 0):
                     # 刚刚发生阶段转换
-                    total_reward += 5.0  # 阶段推进大奖励
+                    total_reward += 0.2  # 阶段推进大奖励
 
         # **修复3：增强雷达锁定奖励**
         if state_dict.get("radar_lock", False):
@@ -99,38 +93,38 @@ class TacticalRewardNew(BaseRewardFunction):
         # **修复5：距离管理奖励 - 更明确的奖励结构**
         enemy_distance = state_dict.get("enemy_distance", 50000)
         if 30000 <= enemy_distance <= 60000:  # 理想BVR交战距离
-            total_reward += 2.0
+            total_reward += 0.2
         elif 60000 <= enemy_distance <= 80000:  # 可接受距离
-            total_reward += 1.0
+            total_reward += 0.1
         elif enemy_distance < 15000:  # 危险接近
-            total_reward -= 5.0
+            total_reward -= 0.5
         elif enemy_distance > 100000:  # 脱离接触
-            total_reward -= 2.0
+            total_reward -= 0.2
 
         # **修复6：基础生存和行为奖励**
-        total_reward += 0.5  # 每步基础生存奖励
+        total_reward += 0.05  # 每步基础生存奖励
 
         # **修复7：射击质量奖励/惩罚 - 增强信号**
         if state_dict.get("missile_launched", False):
             shoot_quality = self._evaluate_shoot_quality(state_dict)
-            total_reward += shoot_quality * 5.0  # 放大射击奖励
+            total_reward += shoot_quality * 2  # 放大射击奖励
 
         # **修复8：协同奖励增强**
         cooperation_bonus = self._calculate_cooperation_bonus(env, agent_id)
-        total_reward += cooperation_bonus * 3.0  # 放大协同奖励
+        total_reward += cooperation_bonus * 1.5  # 放大协同奖励
 
         # **修复9：敌我态势奖励**
         enemy_angle_off = abs(state_dict.get("enemy_angle_off", 0))
         if enemy_angle_off < 30:  # 良好攻击态势
-            total_reward += 1.5
+            total_reward += 0.15
         elif enemy_angle_off > 120:  # 良好防御态势
-            total_reward += 1.0
+            total_reward += 0.1
 
         # 奖励平滑处理
         total_reward = self._smooth_reward(agent_id, total_reward)
 
         # **修复10：大幅放宽奖励范围**
-        total_reward = np.clip(total_reward, -20.0, 20.0)  # 从(-0.5, 0.5)扩大到(-20, 20)
+        total_reward = np.clip(total_reward, -5, 5)  # 从(-0.5, 0.5)扩大到(-20, 20)
 
         return self._process(total_reward, agent_id, {})
 

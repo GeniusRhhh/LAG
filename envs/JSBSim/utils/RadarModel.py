@@ -79,7 +79,7 @@ class RadarModel:
         basic_conditions = (
                 enemy_distance <= 100000 and  # 100km内可探测
                 enemy_distance >= 3000 and  # 最小距离
-                abs(enemy_angle_off) < np.radians(90) and  # 放宽到90度
+                abs(enemy_angle_off) < np.radians(120) and  # 放宽到90度
                 current_altitude > 1000  # 基本高度要求
         )
 
@@ -87,7 +87,7 @@ class RadarModel:
         try:
             doppler_shift = self.calculate_doppler_shift(env, agent_id)
             # 大幅放宽多普勒阈值
-            doppler_detectable = abs(doppler_shift) > 10.0  # 从5.0放宽到10.0
+            doppler_detectable = abs(doppler_shift) > 5  # 从5.0放宽到10.0
         except:
             doppler_detectable = True  # 如果计算失败，默认可检测
 
@@ -97,15 +97,15 @@ class RadarModel:
             ground_clutter_effect = self.calculate_ground_clutter_effect(current_altitude, enemy_distance)
             ecm_effect = self.calculate_ecm_effect(env, agent_id)
             effective_snr = snr - ground_clutter_effect - ecm_effect
-            snr_acceptable = effective_snr > 5.0  # 从8.0降低到5.0
+            snr_acceptable = effective_snr > 3.0  # 从8.0降低到3.0
         except:
             snr_acceptable = True  # 如果计算失败，默认可接受
 
         # 雷达锁定条件
         radar_lock = (
                 basic_conditions and
-                (snr_acceptable or enemy_distance < 50000) and  # 近距离时忽略SNR
-                (doppler_detectable or enemy_distance < 30000)  # 近距离时忽略多普勒
+                (snr_acceptable or enemy_distance < 55000) and  # 近距离时忽略SNR
+                (doppler_detectable or enemy_distance < 45000)  # 近距离时忽略多普勒
         )
 
         # 导弹威胁警告
@@ -115,9 +115,9 @@ class RadarModel:
         if radar_lock:
             self.lock_time += 1
         else:
-            self.lock_time = max(0, self.lock_time - 2)  # 衰减
+            self.lock_time = max(0, self.lock_time - 1)  # 衰减
 
-        lock_stable = self.lock_time >= 5  # 稳定锁定需要5步
+        lock_stable = self.lock_time >= 3  # 稳定锁定需要5步
 
         radar_state = {
             "radar_lock": radar_lock and lock_stable,
