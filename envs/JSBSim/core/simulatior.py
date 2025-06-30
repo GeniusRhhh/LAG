@@ -484,22 +484,24 @@ class AircraftSimulator(BaseSimulator):
             return threatening_missiles
         return None if not threatening_missiles else threatening_missiles[0]
 
-class MissileSimulator(BaseSimulator):
-    """增强版导弹模拟器 - 更准确的AIM-120C7建模"""
 
-    # 类常量定义
+class MissileSimulator(BaseSimulator):
+    """修复版AIM-120C7 - 回归比例导引法本质"""
+
     INACTIVE = -1
     LAUNCHED = 0
     HIT = 1
     MISS = 2
 
     @classmethod
-    def create(cls, parent: 'AircraftSimulator', target: 'AircraftSimulator', uid: str, missile_model: str = "AIM-120C7"):
-        """创建导弹实例并初始化"""
+    def create(cls, parent: 'AircraftSimulator', target: 'AircraftSimulator', uid: str,
+               missile_model: str = "AIM-120C7"):
+        """创建导弹实例 - 确保目标正确设置"""
         assert parent.dt == target.dt, "Integration timestep must be same!"
         missile = cls(uid, parent.color, missile_model, parent.dt)
-        missile.launch(parent)
+        # 关键修复：先设置目标再发射
         missile.target(target)
+        missile.launch(parent)
         return missile
 
     def __init__(self, uid="A0101", color="Red", model="AIM-120C7", dt=1 / 12):
@@ -510,60 +512,44 @@ class MissileSimulator(BaseSimulator):
         self.target_aircraft = None
         self.render_explosion = False
 
-        # 物理参数
+        # AIM-120C7参数 - 基于真实数据
         self._g = 9.81
-        self._t_max = 120  # 最大飞行时间
-        self._t_thrust = 15  # 推力时间
-        self._Isp = 250  # 比冲
+        self._t_max = 100
+        self._t_thrust = 8
+        self._Isp = 250
         self._Length = 3.66
         self._Diameter = 0.18
-        self._cD = 0.35  # 阻力系数
-        self._m0 = 150  # 初始质量
-        self._dm = 3.0  # 燃料消耗率
-        self._nyz_max = 30  # 最大过载
-        self._Rc = 10  # 毁伤半径
-        self._v_min = 180  # 最小速度
+        self._cD = 0.35
+        self._m0 = 152
+        self._dm = 5.0
+        self._nyz_max = 25  # 降低过载，提高稳定性
+        self._Rc = 15
+        self._v_min = 120
 
-        # 制导参数
-        self.guidance_params = {
-            "boost": {"K": 2.0, "max_accel": 15},
-            "midcourse": {"K": 4.0, "max_accel": 25},
-            "terminal": {"K": 6.0, "max_accel": 30}
-        }
+        # **核心修复：统一使用比例导引法**
+        self._K_midcourse = 3.0  # 中段制导增益
+        self._K_terminal = 4.0  # 终段制导增益
+        self._seeker_range = 20000  # 主动雷达搜索距离
 
         # 初始化状态
         self._t = 0
         self._m = self._m0
         self._dtheta, self._dphi = 0, 0
         self._distance_pre = np.inf
-        self._distance_increment = deque(maxlen=int(12 / self.dt))
-        self._left_t = int(1 / self.dt)
-        self._target_pos_history = deque(maxlen=12)
-        self._distance_traveled = 0  # 新增：累积飞行距离
+        self._distance_increment = deque(maxlen=int(12 / self.dt))  # 12秒发散检查
 
         # 制导状态
-        self.guidance_state = {
-            "phase": "inactive",
-            "lock_time": 0,
-            "target_acquired": False,
-            "intercept_point": np.zeros(3),
-            "seeker_fov": np.radians(20),
-            "seeker_range": 15000,
-            "last_guidance_update": 0,
-            "target_lost_time": 0,
-            "inertial_nav_active": True
-        }
+        self.current_phase = "inactive"
+        self.seeker_active = False
+        self.guidance_history = []
 
-        # 预测参数
-        self.prediction_params = {
-            "prediction_time": 5.0,
-            "update_frequency": 0.1,
-            "noise_factor": 0.02
-        }
+        # **目标状态跟踪（模拟数据链）**
+        self.target_last_pos = np.zeros(3)
+        self.target_last_vel = np.zeros(3)
+        self.target_update_time = 0
 
-        logging.info(f"Enhanced MissileSimulator {uid}: thrust_time={self._t_thrust}s, "
-                     f"max_range={self._t_max * 400:.0f}m, max_g={self._nyz_max}, "
-                     f"seeker_range={self.guidance_state['seeker_range']}m")
+        logging.info(
+            f"AIM-120C7 {uid}: unified proportional navigation, K_mid={self._K_midcourse}, K_term={self._K_terminal}")
 
     @property
     def is_alive(self):
@@ -579,81 +565,54 @@ class MissileSimulator(BaseSimulator):
 
     @property
     def S(self):
-        """迎风面积"""
-        S0 = np.pi * (self._Diameter / 2) ** 2
-        S0 += np.linalg.norm([np.sin(self._dtheta), np.sin(self._dphi)]) * self._Diameter * self._Length
-        return S0
+        return np.pi * (self._Diameter / 2) ** 2
 
     @property
     def rho(self):
-        """空气密度"""
-        return 1.225 * np.exp(-self._geodetic[2] / 9300)  # 假设_geodetic[2]是高度
+        altitude = max(self._geodetic[2], 0)
+        return 1.225 * np.exp(-altitude / 9300)
 
     def launch(self, parent: 'AircraftSimulator'):
-        """导弹发射 - 设置初始条件"""
-        try:
-            self.parent_aircraft = parent
-            parent.launch_missiles.append(self)
+        """导弹发射 - 确保目标信息正确"""
+        if not self.target_aircraft:
+            logging.error(f"❌ Missile {self.uid}: No target set before launch!")
+            return
 
-            self._geodetic[:] = parent.get_geodetic()  # 确保顺序与NEU2LLA一致
-            self._position[:] = parent.get_position()
+        self.parent_aircraft = parent
+        parent.launch_missiles.append(self)
 
-            parent_rpy = parent.get_rpy()
-            parent_velocity = parent.get_velocity()
-            parent_speed = np.linalg.norm(parent_velocity)
+        # 继承父机状态
+        self._geodetic[:] = parent.get_geodetic()
+        self._position[:] = parent.get_position()
+        self._velocity[:] = parent.get_velocity()
+        self._posture[:] = parent.get_rpy()
+        self._posture[0] = 0
+        self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
 
-            if parent_speed < 100:
-                logging.warning(f"Parent aircraft {parent.uid} speed too low: {parent_speed:.1f}m/s")
-                parent_velocity = np.array([250.0, 0.0, 0.0])
-                parent_speed = 250.0
+        # 初始化导弹状态
+        self._t = 0
+        self._m = self._m0
+        self._dtheta, self._dphi = 0, 0
+        self.__status = MissileSimulator.LAUNCHED
+        self._distance_pre = np.inf
+        self._distance_increment.clear()
 
-            ejection_speed = 20
-            launch_direction = parent_velocity / parent_speed
-            self._velocity[:] = parent_velocity + ejection_speed * launch_direction
+        # 设置初始制导阶段
+        self.current_phase = "midcourse"
 
-            self._posture[0] = 0
-            self._posture[1] = parent_rpy[1]
-            self._posture[2] = parent_rpy[2]
+        # 初始化目标跟踪
+        self.target_last_pos = self.target_aircraft.get_position()
+        self.target_last_vel = self.target_aircraft.get_velocity()
+        self.target_update_time = 0
 
-            self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
-            self._t = 0
-            self._m = self._m0
-            self._dtheta, self._dphi = 0, 0
-            self.__status = MissileSimulator.LAUNCHED
-            self._distance_pre = np.inf
-            self._distance_increment = deque(maxlen=int(12 / self.dt))
-            self._left_t = int(1 / self.dt)
-            self._distance_traveled = 0
-
-            self.guidance_state = {
-                "phase": "boost",
-                "lock_time": 0,
-                "target_acquired": False,
-                "intercept_point": self.target_aircraft.get_position() if self.target_aircraft else np.zeros(3),
-                "seeker_fov": np.radians(20),
-                "seeker_range": 15000,
-                "last_guidance_update": 0,
-                "target_lost_time": 0,
-                "inertial_nav_active": True
-            }
-
-            if self.target_aircraft and self.target_aircraft.is_alive:
-                self._update_intercept_point()
-
-            logging.info(f"🚀 Missile {self.uid} launched: "
-                         f"pos={self._position}, vel={np.linalg.norm(self._velocity):.1f}m/s, "
-                         f"heading={np.rad2deg(self._posture[2]):.1f}deg, "
-                         f"target={self.target_aircraft.uid if self.target_aircraft else 'None'}")
-
-        except Exception as e:
-            logging.error(f"Error launching missile {self.uid}: {e}")
-            self.__status = MissileSimulator.MISS
+        logging.info(f"🚀 AIM-120C7 {self.uid} launched: target={self.target_aircraft.uid}, "
+                     f"initial_distance={self.target_distance:.0f}m, phase={self.current_phase}")
 
     def target(self, target: 'AircraftSimulator'):
         """设置目标"""
         self.target_aircraft = target
-        self.target_aircraft.under_missiles.append(self)
-        logging.info(f"Missile {self.uid} targeting {target.uid}")
+        target.under_missiles.append(self)
+        logging.debug(f"Missile {self.uid} targeting {target.uid}")
 
     def run(self):
         """运行导弹模拟"""
@@ -662,293 +621,241 @@ class MissileSimulator(BaseSimulator):
 
         self._t += self.dt
         self._update_guidance_phase()
+        self._update_target_info()  # 模拟数据链更新
 
-        if self._t % (0.1 / self.dt) == 0:
-            self._update_intercept_point()
+        action, distance = self._unified_proportional_navigation()
 
-        action, distance = self._enhanced_guidance()
+        # 记录距离变化
         self._distance_increment.append(distance > self._distance_pre)
         self._distance_pre = distance
 
+        # 命中判定
         if distance < self._Rc and self.target_aircraft and self.target_aircraft.is_alive:
+            # 确保真正的拦截
             relative_vel = self.get_velocity() - self.target_aircraft.get_velocity()
             relative_pos = self.target_aircraft.get_position() - self.get_position()
-            if np.dot(relative_vel, relative_pos) > 0 or distance < self._Rc * 0.5:
+
+            if np.dot(relative_vel, relative_pos) > 0 or distance < self._Rc * 0.7:
                 self.__status = MissileSimulator.HIT
                 self.target_aircraft.shotdown()
-                self.guidance_state["phase"] = "hit"
-                logging.info(f"🎯 Missile {self.uid} HIT target {self.target_aircraft.uid}, "
-                             f"distance={distance:.1f}m, time={self._t:.1f}s")
+                logging.info(f"🎯 AIM-120C7 {self.uid} HIT target {self.target_aircraft.uid}! "
+                             f"distance={distance:.1f}m, time={self._t:.1f}s, phase={self.current_phase}")
                 return
 
+        # 失效条件
         miss_conditions = [
-            self._t > self._t_max,
-            (self._t > self._t_thrust and np.linalg.norm(self.get_velocity()) < self._v_min),
-            np.sum(self._distance_increment) >= self._distance_increment.maxlen * 0.8,
-            not self.target_aircraft or not self.target_aircraft.is_alive,
-            distance > 200000,
-            self.get_position()[2] < 0
+            self._t > self._t_max,  # 超时
+            (self._t > self._t_thrust and np.linalg.norm(self.get_velocity()) < self._v_min),  # 速度过低
+            (len(self._distance_increment) >= self._distance_increment.maxlen and
+             np.sum(self._distance_increment) >= len(self._distance_increment) * 0.9),  # 持续发散
+            not self.target_aircraft or not self.target_aircraft.is_alive,  # 目标死亡
+            self.get_position()[2] < -20,  # 撞地
+            distance > 200000  # 距离过远
         ]
 
         if any(miss_conditions):
             self.__status = MissileSimulator.MISS
-            reasons = ["timeout", "low_velocity", "diverging", "target_dead", "out_of_range", "ground_impact"]
+            reasons = ["timeout", "low_velocity", "diverging", "target_dead", "ground_impact", "out_of_range"]
             reason = reasons[miss_conditions.index(True)]
-            self.guidance_state["phase"] = "miss"
-            logging.info(f"💥 Missile {self.uid} missed: reason={reason}, "
-                         f"distance={distance:.1f}m, time={self._t:.1f}s, "
-                         f"velocity={np.linalg.norm(self.get_velocity()):.1f}m/s")
+
+            logging.info(f"💥 AIM-120C7 {self.uid} missed: {reason}, "
+                         f"dist={distance:.0f}m, t={self._t:.1f}s, "
+                         f"v={np.linalg.norm(self.get_velocity()):.1f}m/s, "
+                         f"alt={self.get_position()[2]:.1f}m, phase={self.current_phase}")
             return
 
-        self._enhanced_state_trans(action)
+        # 状态转移
+        self._state_trans(action)
 
-        if self._t % (5 / self.dt) == 0:
-            logging.debug(f"🚀 Missile {self.uid}: phase={self.guidance_state['phase']}, "
-                          f"distance={distance:.1f}m, velocity={np.linalg.norm(self._velocity):.1f}m/s, "
-                          f"time={self._t:.1f}s, accel={np.linalg.norm(action):.2f}G")
+        # 定期日志
+        if int(self._t * 5) % 25 == 0:  # 每5秒
+            self._log_status(distance)
 
     def _update_guidance_phase(self):
         """更新制导阶段"""
-        if self._t <= self._t_thrust:
-            self.guidance_state["phase"] = "boost"
-        elif self._t <= self._t_max * 0.7:
-            self.guidance_state["phase"] = "midcourse"
-        else:
-            self.guidance_state["phase"] = "terminal"
-
-    def _update_intercept_point(self):
-        """计算拦截点"""
         if not self.target_aircraft or not self.target_aircraft.is_alive:
             return
 
-        try:
-            target_pos = self.target_aircraft.get_position()
-            target_vel = self.target_aircraft.get_velocity()
-            missile_pos = self.get_position()
+        distance = np.linalg.norm(self.target_aircraft.get_position() - self.get_position())
 
-            relative_pos = target_pos - missile_pos
-            distance = np.linalg.norm(relative_pos)
+        # 简化的二阶段切换
+        if distance <= self._seeker_range and self._t > 10:  # 确保稳定飞行后再切换
+            if self.current_phase != "terminal":
+                logging.info(f"AIM-120C7 {self.uid}: midcourse -> terminal at t={self._t:.1f}s, dist={distance:.0f}m")
+                self.seeker_active = True
+            self.current_phase = "terminal"
+        else:
+            self.current_phase = "midcourse"
 
-            if distance < 1e-6:
-                return
+    def _update_target_info(self):
+        """模拟数据链更新目标信息"""
+        if not self.target_aircraft or not self.target_aircraft.is_alive:
+            return
 
-            missile_speed = np.linalg.norm(self.get_velocity())
-            if missile_speed < 100:
-                missile_speed = 400
+        # 每2秒更新一次（模拟数据链）
+        if self._t - self.target_update_time >= 2.0:
+            self.target_last_pos = self.target_aircraft.get_position()
+            self.target_last_vel = self.target_aircraft.get_velocity()
+            self.target_update_time = self._t
 
-            intercept_time = distance / (missile_speed + 50)
-            predicted_target_pos = target_pos + target_vel * intercept_time
-            self.guidance_state["intercept_point"] = predicted_target_pos
-
-        except Exception as e:
-            logging.error(f"Error updating intercept point: {e}")
-
-    def _enhanced_guidance(self):
-        """增强制导算法"""
+    def _unified_proportional_navigation(self):
+        """统一的比例导引法 - 核心制导算法"""
         if not self.target_aircraft or not self.target_aircraft.is_alive:
             return np.array([0, 0]), np.inf
 
-        current_params = self.guidance_params[self.guidance_state["phase"]]
-        K = current_params["K"]
-        max_accel = current_params["max_accel"]
+        # **关键修复：统一使用比例导引法，就像AIM-9L一样**
 
+        # 获取目标信息
+        if self.current_phase == "terminal" and self.seeker_active:
+            # 终段：直接追踪目标（类似AIM-9L）
+            target_pos = self.target_aircraft.get_position()
+            target_vel = self.target_aircraft.get_velocity()
+            K = self._K_terminal
+        else:
+            # 中段：使用数据链信息（避免追踪机动目标的延迟）
+            target_pos = self.target_last_pos
+            target_vel = self.target_last_vel
+            K = self._K_midcourse
+
+        # **使用与AIM-9L相同的比例导引法公式**
         missile_pos = self.get_position()
         missile_vel = self.get_velocity()
-        v_m = np.linalg.norm(missile_vel)
 
-        if v_m < 1e-6:
-            v_m = 1e-6
-
-        target_pos = self.target_aircraft.get_position()
-        target_vel = self.target_aircraft.get_velocity()
-
-        self._target_pos_history.append(target_pos.copy())
-        a_t = np.zeros(3)
-
-        if len(self._target_pos_history) >= 3:
-            positions = list(self._target_pos_history)[-3:]
-            v_t_2 = (positions[2] - positions[1]) / self.dt
-            v_t_1 = (positions[1] - positions[0]) / self.dt
-            a_t = (v_t_2 - v_t_1) / self.dt
-
-        if self.guidance_state["phase"] == "terminal":
-            aim_point = target_pos
-        else:
-            aim_point = self.guidance_state.get("intercept_point", target_pos)
-
-        r = aim_point - missile_pos
+        # 相对位置和速度
+        r = target_pos - missile_pos
         v_r = target_vel - missile_vel
-        R = np.linalg.norm(r)
+        distance = np.linalg.norm(r)
 
-        if R < 1e-6:
-            return np.array([0, 0]), R
+        if distance < 1e-6:
+            return np.array([0, 0]), distance
 
-        r_unit = r / R
-        h = np.cross(r, v_r)
-        omega_los = h / (R * R)
+        v_m = np.linalg.norm(missile_vel)
+        if v_m < 1e-6:
+            return np.array([0, 1]), distance
 
-        omega_y = omega_los[1]
-        omega_z = omega_los[2]
+        # **经典比例导引法公式（与AIM-9L完全一致）**
+        # 计算视线角速率
+        Rxy = np.sqrt(r[0] ** 2 + r[1] ** 2)  # X-Y平面距离
+        Rxyz = distance  # 3D距离
 
-        v_c = -np.dot(r, v_r) / R
-
-        ny_pn = K * v_c * omega_y
-        nz_pn = K * v_c * omega_z
-
-        ny_apn = 0.5 * K * a_t[1]
-        nz_apn = 0.5 * K * a_t[2]
-
-        missile_pitch = self.get_rpy()[1]
-        g_comp = self._g * np.cos(missile_pitch) if abs(missile_pitch) < np.pi / 2 else self._g
-
-        if self.guidance_state["phase"] == "boost":
-            ny = ny_pn * 0.3
-            nz = nz_pn * 0.3 + g_comp / self._g
-        elif self.guidance_state["phase"] == "midcourse":
-            ny = ny_pn + ny_apn * 0.7
-            nz = nz_pn + nz_apn * 0.7 + g_comp / self._g
+        if Rxy < 1e-6:
+            dbeta = 0
         else:
-            ny = (ny_pn + ny_apn) * 1.3
-            nz = (nz_pn + nz_apn) * 1.3 + g_comp / self._g
+            # 视线角速率β（偏航方向）
+            dbeta = (v_r[1] * r[0] - v_r[0] * r[1]) / (Rxy * Rxy)
 
-        total_n = np.sqrt(ny ** 2 + nz ** 2)
-        if total_n > max_accel:
-            scale = max_accel / total_n
+        # 视线角速率ε（俯仰方向）
+        if Rxyz < 1e-6:
+            deps = 0
+        else:
+            deps = (v_r[2] * Rxy * Rxy - r[2] * (r[0] * v_r[0] + r[1] * v_r[1])) / (Rxyz * Rxyz * Rxy)
+
+        # 当前导弹姿态
+        theta_m = self.get_rpy()[1]  # 俯仰角
+
+        # **比例导引指令（与AIM-9L完全相同的公式）**
+        ny = K * v_m / self._g * np.cos(theta_m) * dbeta
+        nz = K * v_m / self._g * deps + np.cos(theta_m)  # 重力补偿
+
+        # 限制过载
+        total_g = np.sqrt(ny ** 2 + (nz - np.cos(theta_m)) ** 2)
+        if total_g > self._nyz_max:
+            scale = self._nyz_max / total_g
             ny *= scale
-            nz *= scale
+            nz = np.cos(theta_m) + (nz - np.cos(theta_m)) * scale
 
-        if self.guidance_state["phase"] == "terminal":
-            los_angle = np.arccos(np.clip(np.dot(r_unit, missile_vel / v_m), -1, 1))
-            if los_angle > self.guidance_state["seeker_fov"]:
-                ny *= 0.3
-                nz *= 0.3
-                self.guidance_state["target_lost_time"] += self.dt
+        # 高度保护
+        current_alt = missile_pos[2]
+        if current_alt < 1000:
+            nz = max(nz, np.cos(theta_m) + 2.0)  # 强制爬升
 
-        return np.clip([ny, nz], -max_accel, max_accel), R
+        # 记录制导历史用于调试
+        self.guidance_history.append({
+            "time": self._t,
+            "phase": self.current_phase,
+            "distance": distance,
+            "dbeta": dbeta,
+            "deps": deps,
+            "ny": ny,
+            "nz": nz,
+            "v_m": v_m
+        })
 
-    def _enhanced_state_trans(self, action):
-        """状态转换"""
-        velocity_step = self.get_velocity()
-        self._position[:] += self.dt * velocity_step
+        return np.array([ny, nz]), distance
+
+    def _state_trans(self, action):
+        """状态转移 - 基于AIM-9L的成功实现"""
+        # 更新位置
+        self._position[:] += self.dt * self.get_velocity()
         self._geodetic[:] = NEU2LLA(*self._position, self.lon0, self.lat0, self.alt0)
-        self._distance_traveled += np.linalg.norm(self.dt * velocity_step)  # 更新飞行距离
 
-        if self._t < self._t_thrust:
-            self._m = max(self._m - self.dt * self._dm, self._m0 * 0.2)
-        else:
-            self._m = max(self._m, self._m0 * 0.2)
+        # 当前状态
+        v = np.linalg.norm(self.get_velocity())
+        v = max(v, 1e-6)
+        theta, phi = self.get_rpy()[1:]
 
+        # 推力计算
         if self._t < self._t_thrust:
-            altitude_factor = max(0.3, 1 - self._position[2] / 20000)
-            T = self._g * self._Isp * self._dm * altitude_factor
+            T = self._g * self._Isp * self._dm
         else:
             T = 0
 
-        v = np.linalg.norm(velocity_step)
-        v = max(v, 1e-6)
+        # 阻力计算
+        D = 0.5 * self._cD * self.S * self.rho * v ** 2
 
-        mach = v / 340
-        if mach < 0.8:
-            cd_factor = 1.0
-        elif mach < 1.2:
-            cd_factor = 1.5
-        else:
-            cd_factor = 1.2
-
-        D = 0.5 * self._cD * cd_factor * self.S * self.rho * v ** 2
-
-        theta, phi = self.get_rpy()[1:]
-        nx = (T - D) / (self._m * self._g)
-
+        # 过载指令
         ny, nz = action
 
+        # **使用与AIM-9L相同的状态转移方程**
+        nx = (T - D) / (self._m * self._g)
+
+        # 速度变化
         dv = self._g * (nx - np.sin(theta))
-        v_new = v + self.dt * dv
-        v_new = max(v_new, 50)
 
-        dynamic_pressure = 0.5 * self.rho * v_new ** 2
-        if dynamic_pressure > 1e-6:
-            control_effectiveness = min(1.0, dynamic_pressure / 10000)
-        else:
-            control_effectiveness = 0.1
+        # 姿态变化率（与AIM-9L完全一致）
+        cos_theta = max(np.cos(theta), 0.1)
+        self._dphi = self._g / v * (ny / cos_theta)
+        self._dtheta = self._g / v * (nz - np.cos(theta))
 
-        self._dphi = self._g / v_new * (ny * control_effectiveness / max(np.cos(theta), 0.1))
-        self._dtheta = self._g / v_new * (nz * control_effectiveness - np.cos(theta))
+        # 更新状态
+        v += self.dt * dv
+        v = max(v, 80)  # 保持最小速度
+        phi += self.dt * self._dphi
+        theta += self.dt * self._dtheta
 
-        phi_new = phi + self.dt * self._dphi
-        theta_new = theta + self.dt * self._dtheta
-
-        max_angle_rate = np.radians(60)
-        self._dphi = np.clip(self._dphi, -max_angle_rate, max_angle_rate)
-        self._dtheta = np.clip(self._dtheta, -max_angle_rate, max_angle_rate)
-
+        # 更新速度向量
         self._velocity[:] = np.array([
-            v_new * np.cos(theta_new) * np.cos(phi_new),
-            v_new * np.cos(theta_new) * np.sin(phi_new),
-            v_new * np.sin(theta_new)
+            v * np.cos(theta) * np.cos(phi),
+            v * np.cos(theta) * np.sin(phi),
+            v * np.sin(theta)
         ])
 
-        self._posture[:] = np.array([0, theta_new, phi_new])
+        # 更新姿态
+        self._posture[:] = np.array([0, theta, phi])
 
-        if self._position[2] < 0:
-            self._position[2] = 0
-            self._velocity[2] = max(0, self._velocity[2])
+        # 更新质量
+        if self._t < self._t_thrust:
+            self._m = self._m - self.dt * self._dm
 
-    def log(self):
-        """导弹日志输出"""
-        if self.is_alive:
-            try:
-                lon, lat, alt = self.get_geodetic()
-                roll, pitch, yaw = self.get_rpy() * 180 / np.pi
+    def _log_status(self, distance):
+        """状态日志"""
+        v = np.linalg.norm(self.get_velocity())
+        alt = self.get_position()[2]
 
-                if np.any(np.isnan([lon, lat, alt, roll, pitch, yaw])):
-                    logging.warning(f"NaN in missile {self.uid} state")
-                    return None
+        # 从制导历史中获取最新的制导信息
+        if self.guidance_history:
+            last_guidance = self.guidance_history[-1]
+            dbeta = last_guidance["dbeta"]
+            deps = last_guidance["deps"]
+            ny = last_guidance["ny"]
+            nz = last_guidance["nz"]
 
-                log_msg = f"{self.uid},T={lon:.6f}|{lat:.6f}|{alt:.1f}|{roll:.1f}|{pitch:.1f}|{yaw:.1f},"
-                log_msg += f"Name={self.model.upper()},Color={self.color},"
-                log_msg += "Type=Weapon+Missile"
-
-                if self.parent_aircraft:
-                    log_msg += f",Parent={self.parent_aircraft.uid}"
-
-                return log_msg
-
-            except Exception as e:
-                logging.error(f"Error in missile log for {self.uid}: {e}")
-                return None
-
-        elif self.is_done and not self.render_explosion:
-            self.render_explosion = True
-            try:
-                lon, lat, alt = self.get_geodetic()
-
-                explosion_msg = f"-{self.uid}\n"
-
-                if self.is_success:
-                    explosion_msg += f"{self.uid}F,T={lon:.6f}|{lat:.6f}|{alt:.1f}|0|0|0,"
-                    explosion_msg += f"Type=Misc+Explosion,Color={self.color},Radius={self._Rc * 2}"
-                else:
-                    explosion_msg += f"{self.uid}F,T={lon:.6f}|{lat:.6f}|{alt:.1f}|0|0|0,"
-                    explosion_msg += f"Type=Misc+Explosion,Color=Gray,Radius={self._Rc}"
-
-                return explosion_msg
-
-            except Exception as e:
-                logging.error(f"Error in explosion log for {self.uid}: {e}")
-                return None
-
-        return None
-
-    def close(self):
-        """清理导弹与飞机之间的引用"""
-        if self.target_aircraft and self in self.target_aircraft.under_missiles:
-            self.target_aircraft.under_missiles.remove(self)
-        if self.parent_aircraft and self in self.parent_aircraft.launch_missiles:
-            self.parent_aircraft.launch_missiles.remove(self)
-        self.target_aircraft = None
-        self.parent_aircraft = None
-        logging.info(f"Missile {self.uid} simulator closed")
+            logging.info(f"📊 AIM-120C7 {self.uid}: t={self._t:.1f}s, {self.current_phase}, "
+                         f"dist={distance:.0f}m, v={v:.0f}m/s, alt={alt:.0f}m, "
+                         f"LOS_rates=[{dbeta:.4f}, {deps:.4f}], commands=[{ny:.2f}, {nz:.2f}]g")
+        else:
+            logging.info(f"📊 AIM-120C7 {self.uid}: t={self._t:.1f}s, {self.current_phase}, "
+                         f"dist={distance:.0f}m, v={v:.0f}m/s, alt={alt:.0f}m")
 
     @property
     def target_distance(self) -> float:
@@ -956,24 +863,37 @@ class MissileSimulator(BaseSimulator):
             return np.linalg.norm(self.target_aircraft.get_position() - self.get_position())
         return np.inf
 
-    def get_missile_info(self) -> Dict[str, Any]:
-        """获取导弹状态和性能统计"""
+    def log(self):
+        """渲染日志"""
+        if self.is_alive:
+            return super().log()
+        elif self.is_done and not self.render_explosion:
+            self.render_explosion = True
+            lon, lat, alt = self.get_geodetic()
+            log_msg = f"-{self.uid}\n"
+            log_msg += f"{self.uid}F,T={lon:.6f}|{lat:.6f}|{alt:.1f}|0|0|0,"
+            if self.is_success:
+                log_msg += f"Type=Misc+Explosion,Color={self.color},Radius={self._Rc * 2}"
+            else:
+                log_msg += f"Type=Misc+Explosion,Color=Gray,Radius={self._Rc}"
+            return log_msg
+        return None
+
+    def close(self):
+        """清理资源"""
+        if self.target_aircraft and self in self.target_aircraft.under_missiles:
+            self.target_aircraft.under_missiles.remove(self)
+        if self.parent_aircraft and self in self.parent_aircraft.launch_missiles:
+            self.parent_aircraft.launch_missiles.remove(self)
+        self.target_aircraft = None
+        self.parent_aircraft = None
+
+    def get_guidance_analysis(self):
+        """获取制导分析数据"""
         return {
-            "uid": self.uid,
-            "status": self.__status,
-            "guidance_phase": self.guidance_state["phase"],
-            "time_of_flight": self._t,
-            "remaining_time": max(0, self._t_max - self._t),
-            "velocity": np.linalg.norm(self.get_velocity()),
-            "altitude": self.get_position()[2],
-            "target_distance": self.target_distance,
-            "fuel_remaining": max(0, 1 - self._t / self._t_thrust) if self._t < self._t_thrust else 0,
-            "mass": self._m,
-            "is_thrusting": self._t < self._t_thrust,
-            "target_uid": self.target_aircraft.uid if self.target_aircraft else None,
-            "parent_uid": self.parent_aircraft.uid if self.parent_aircraft else None,
-            "distance_traveled": self._distance_traveled,  # 使用累积距离
-            "current_speed": np.linalg.norm(self.get_velocity()),
-            "max_g_achieved": self._nyz_max,
-            "mass_remaining": self._m / self._m0
+            "total_flight_time": self._t,
+            "guidance_history": self.guidance_history[-50:],  # 最近50个数据点
+            "final_phase": self.current_phase,
+            "seeker_activated": self.seeker_active,
+            "target_updates": int(self.target_update_time / 2.0)
         }

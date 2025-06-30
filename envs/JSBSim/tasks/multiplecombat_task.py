@@ -1310,14 +1310,16 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                     self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision", "target_allocation"] and
                     abs(state["enemy_angle_off"]) < 150  # 90度
             )
+            #强制发射
             if (not shoot_flag and
                     agent.is_alive and
                     self._remaining_missiles.get(agent_id, 0) > 0 and
-                    20000 <= distance <= 60000 and
-                    shoot_interval >= 50):  # 50步没射击就强制
+                    25000 <= distance <= 55000 and  # 缩小强制发射距离范围
+                    shoot_interval >= 15 and  # 增加强制发射间隔
+                    attack_angle <= 150):  # 增加角度限制
                 shoot_flag = True
-                logging.info(f"Agent {agent_id} FORCED missile launch at distance={distance:.0f}m")
-
+                logging.info(
+                    f"Agent {agent_id} FORCED missile launch at distance={distance:.0f}m, angle={attack_angle:.1f}deg")
             if shoot_flag:
                 # 创建导弹
                 new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
