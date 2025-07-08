@@ -362,7 +362,7 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
             torch.load(get_root_dir() + '/model/baseline_model.pt', map_location=torch.device('cpu')))
         self.lowlevel_policy.eval()
 
-        # 第二层：高层控制参数（3层架构的第二层）
+        # 第二层：高层控制参数
         self.norm_delta_altitude = np.array([-1000, -500, -200, 0, 200, 500, 1000]) / 1000.0  # 7个高度选项
         self.norm_delta_heading = np.array(
             [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])  # 9个航向选项
@@ -403,7 +403,7 @@ class HierarchicalMultipleCombatTask(MultipleCombatTask):
         action_output = _action.detach().cpu().numpy().squeeze(0)
         self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()
 
-        # 恢复原始的动作映射！！！
+        # 恢复原始的动作映射
         norm_act = np.zeros(4)
         norm_act[0] = action_output[0] / 20 - 1.  # Aileron: [-1, 1]
         norm_act[1] = action_output[1] / 20 - 1.  # Elevator: [-1, 1]
@@ -513,14 +513,14 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         logging.info(f"HierarchicalMultipleCombatShootTask initialized with 14 tactical templates and 10 combat phases")
 
     def load_observation_space(self):
-        """增强观测空间：包含战术模板和作战阶段信息。"""
+        """观测空间：包含战术模板和作战阶段信息。"""
         # 基础观测 + 战术状态 + 其他智能体 + 导弹威胁 + 队友状态 + 作战阶段
-        self.obs_length = 14 + (self.num_agents-1) * 6 + 6 + 2 + 10  # 新增10维作战阶段信息
+        self.obs_length = 14 + (self.num_agents-1) * 6 + 6 + 2 + 10  # 10维作战阶段信息
         self.observation_space = spaces.Box(low=-10, high=10., shape=(self.obs_length,))
         self.share_observation_space = spaces.Box(low=-10, high=10., shape=(self.num_agents * self.obs_length,))
 
     def load_action_space(self):
-        """定义三层架构动作空间：第一层战术模板选择 + 射击决策。"""
+        """三层架构动作空间：第一层战术模板选择 + 射击决策。"""
         # 第一层：战术模板选择层（策略决策层）
         # 15个模板选择（0-14，其中0为无模板直接RL控制）+ 射击决策（0/1）
         self.action_space = spaces.MultiDiscrete([15, 2])
@@ -603,7 +603,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         return norm_obs
 
     def normalize_action(self, env, agent_id, action):
-        """修复版战术模板选择 - 基于实际BVR战术原则"""
+        """战术模板选择 - 基于实际BVR战术原则"""
         if agent_id not in env.agents or not env.agents[agent_id].is_alive:
             return np.array([0.0, 0.0, 0.0, 0.7])
 
@@ -611,33 +611,33 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         self._shoot_action[agent_id] = shoot
         self._last_action[agent_id] = action
 
-        # **修复1：基于距离和阶段的智能模板选择**
+        # 基于距离和阶段的智能模板选择
         state = self.get_state_dict(env, agent_id)
         current_phase = self.current_phases.get(agent_id, "contact_guidance")
         distance = state["enemy_distance"]
         has_warning = state.get("has_warning", False)
         radar_lock = state.get("radar_lock", False)
 
-        # **修复2：如果选择了无模板（0），进行智能推荐**
+        # 如果选择了无模板（0），进行智能推荐
         if template_id == 0:
             template_id = self._recommend_template_by_situation(state, current_phase, distance, has_warning, radar_lock)
             logging.debug(f"Agent {agent_id} auto-selected template {template_id} for situation")
 
-        # **修复3：验证模板适用性，不适用时选择替代方案**
+        # 验证模板适用性，不适用时选择替代方案
         if not self._is_template_valid_for_situation(template_id, state, current_phase):
             original_template = template_id
             template_id = self._get_fallback_template(state, current_phase)
             logging.debug(f"Agent {agent_id} template {original_template} invalid, using fallback {template_id}")
 
-        # **修复4：记录决策信息用于分析**
+        # 记录决策信息用于分析
         self._log_template_decision(agent_id, template_id, current_phase, state)
 
         # 使用选定的战术模板生成高层指令
         if template_id == 0:
             # 直接RL控制
-            altitude_cmd_id = 3
-            heading_cmd_id = 4
-            velocity_cmd_id = 3
+            altitude_cmd_id = np.random.choice(len(self.norm_delta_altitude))  # 随机选择高度变化
+            heading_cmd_id = np.random.choice(len(self.norm_delta_heading))  # 随机选择航向变化
+            velocity_cmd_id = np.random.choice(len(self.norm_delta_velocity))  # 随机选择速度变化
         else:
             # 使用战术模板
             tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state)
@@ -689,7 +689,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
     def _recommend_template_by_situation(self, state, phase, distance, has_warning, radar_lock):
         """基于战术情况智能推荐模板"""
 
-        # **威胁响应优先级最高**
+        # 威胁响应优先级最高
         if has_warning:
             missile_distance = state.get("missile_distance", np.inf)
             if missile_distance < 20000:
@@ -699,7 +699,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             else:
                 return 1  # Crank - 远距离威胁用斜向机动
 
-        # **基于距离的战术选择**
+        # 基于距离的战术选择
         if distance > 80000:  # 远程BVR
             if phase in ["contact_guidance", "target_search"]:
                 return 7  # Simple_F_Pole - 保持锁定
@@ -735,24 +735,24 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         has_warning = state.get("has_warning", False)
         radar_lock = state.get("radar_lock", False)
 
-        # **防御模板只在有威胁时使用**
+        # 防御模板只在有威胁时使用
         defensive_templates = [2, 3, 14]
         if template_id in defensive_templates and not has_warning:
             return False
 
-        # **攻击模板需要合适的距离和锁定条件**
+        # 攻击模板需要合适的距离和锁定条件
         attack_templates = [4, 5, 6]
         if template_id in attack_templates:
             if distance > 60000 or not radar_lock:
                 return False
 
-        # **协同模板需要队友存活**
+        # 协同模板需要队友存活
         cooperative_templates = [9, 10, 11, 12, 13]
         if template_id in cooperative_templates:
             if not state.get("is_leader", False) and not self._has_alive_partner(state):
                 return False
 
-        # **F-Pole模板适合中远距离**
+        # F-Pole模板适合中远距离
         fpole_templates = [7, 8]
         if template_id in fpole_templates and distance < 30000:
             return False
@@ -950,7 +950,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         return np.rad2deg(angle)
 
     def update_combat_phase(self, env, agent_id):
-        """优化阶段转换条件"""
+        """阶段转换条件"""
         if agent_id not in env.agents or not env.agents[agent_id].is_alive:
             return
 
@@ -962,7 +962,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
         new_phase = current_phase
         phase_duration = self._get_phase_duration(agent_id)
 
-        # 前面的阶段保持不变
+        # 阶段转换
         if current_phase == "contact_guidance":
             if distance <= self.tactical_distances["detection_range"]:
                 new_phase = "target_search"
@@ -999,7 +999,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
                 logging.info(f"Agent {agent_id}: Target allocation ({', '.join(reason)})")
 
-        # **进一步放宽后续阶段**
+        # 后续阶段
         elif current_phase == "target_allocation":
             # 多重触发条件
             can_proceed = (
@@ -1068,7 +1068,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             self._record_timeline_event(agent_id, current_phase, new_phase, distance, current_time)
             self._update_phase_recommended_templates(agent_id, new_phase, state)
 
-    # **添加阶段持续时间跟踪**
+    # 阶段持续时间跟踪
     def _get_phase_duration(self, agent_id):
         """获取当前阶段持续时间"""
         if not hasattr(self, 'phase_start_times'):
@@ -1082,7 +1082,7 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
         return getattr(self, 'step_count', 0) - self.phase_start_times[phase_key]
 
-    # **在阶段变化时重置计时器**
+    # 在阶段变化时重置计时器
     def _record_timeline_event(self, agent_id, old_phase, new_phase, distance, time):
         """记录时间线事件并重置阶段计时器"""
         if not hasattr(self, 'timeline_events'):
@@ -1146,52 +1146,6 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
         logging.debug(
             f"Agent {agent_id} phase {phase}: recommended templates {self.phase_recommended_templates[agent_id]}")
-
-    def _check_phase_conditions(self, phase: str) -> bool:
-        """检查阶段条件，增加稳定性"""
-        if not hasattr(self.env, 'agents') or self.agent_id not in self.env.agents:
-            return False
-
-        agent = self.env.agents[self.agent_id]
-        if not agent.is_alive:
-            return False
-
-        enemies = agent.enemies
-        if not enemies:
-            return False
-
-        enemy_distance = min([np.linalg.norm(enemy.get_position() - agent.get_position())
-                              for enemy in enemies if enemy.is_alive], default=np.inf)
-
-        # 使用更宽松的条件检查，避免频繁切换
-        buffer_factor = 1.1  # 10%缓冲
-
-        if phase == "contact_guidance":
-            return enemy_distance > self.TACTICAL_DISTANCES["detection_range"] * buffer_factor
-        elif phase == "target_search":
-            return (enemy_distance <= self.TACTICAL_DISTANCES["detection_range"] * buffer_factor and
-                    enemy_distance > self.TACTICAL_DISTANCES["engagement_range"] * buffer_factor)
-        elif phase == "target_identification":
-            return (enemy_distance <= self.TACTICAL_DISTANCES["engagement_range"] * buffer_factor and
-                    enemy_distance > self.TACTICAL_DISTANCES["wez_range"] * buffer_factor)
-        elif phase == "threat_assessment":
-            return (enemy_distance <= self.TACTICAL_DISTANCES["wez_range"] * buffer_factor and
-                    enemy_distance > self.TACTICAL_DISTANCES["launch_range"] * buffer_factor)
-        elif phase == "target_allocation":
-            return (enemy_distance <= self.TACTICAL_DISTANCES["launch_range"] * buffer_factor and
-                    enemy_distance > self.TACTICAL_DISTANCES["mar_range"] * 2)
-        elif phase == "tactical_decision":
-            return enemy_distance <= self.TACTICAL_DISTANCES["launch_range"] * buffer_factor
-        elif phase == "missile_launch":
-            return enemy_distance <= self.TACTICAL_DISTANCES["launch_range"] * buffer_factor
-        elif phase == "mid_guidance_defense":
-            return enemy_distance <= self.TACTICAL_DISTANCES["mar_range"] * 2
-        elif phase == "terminal_guidance":
-            return enemy_distance <= self.TACTICAL_DISTANCES["mar_range"] * buffer_factor
-        elif phase == "effect_assessment":
-            return True
-
-        return False
 
     def allocate_targets(self, env):
         """基于战术距离的目标分配。"""
@@ -1298,17 +1252,17 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
             shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
             state = self.get_state_dict(env, agent_id)
 
-            # **修复的射击条件** - 更严格
+            # 射击条件
             shoot_flag = (
                     agent.is_alive and
                     self._shoot_action.get(agent_id, False) and
                     self._remaining_missiles.get(agent_id, 0) > 0 and
                     attack_angle <= 120 and  # 65度
-                    25000 <= distance <= 60000 and  # 窗口到25-55km
+                    25000 <= distance <= 60000 and  # 窗口25-60km
                     shoot_interval >= self.min_attack_interval-20 and
                     (state.get("radar_lock", False) or distance < 60000) and
                     self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision", "target_allocation"] and
-                    abs(state["enemy_angle_off"]) < 150  # 90度
+                    abs(state["enemy_angle_off"]) < 150  # 150度
             )
             #强制发射
             if (not shoot_flag and
@@ -1422,109 +1376,3 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                 )
 
         return obs, share_obs, rewards, dones, infos
-
-    # # 在 HierarchicalMultipleCombatShootTask 中添加
-    # def evaluate_first_task_completion(self):
-    #     """评估第一个任务的完成度"""
-    #     metrics = {
-    #         "timeline_progression": self._evaluate_timeline_progression(),
-    #         "distance_based_transitions": self._evaluate_distance_transitions(),
-    #         "template_diversity": self._evaluate_template_diversity(),
-    #         "phase_coverage": self._evaluate_phase_coverage(),
-    #         "tactical_appropriateness": self._evaluate_tactical_appropriateness()
-    #     }
-    #
-    #     overall_score = sum(metrics.values()) / len(metrics)
-    #
-    #     logging.info("=== First Task Completion Evaluation ===")
-    #     for metric, score in metrics.items():
-    #         logging.info(f"{metric}: {score:.3f}")
-    #     logging.info(f"Overall Score: {overall_score:.3f}")
-    #     logging.info("========================================")
-    #
-    #     return overall_score, metrics
-    #
-    # def _evaluate_timeline_progression(self):
-    #     """评估时间线推进情况"""
-    #     if not hasattr(self, 'timeline_events'):
-    #         return 0.0
-    #
-    #     # 检查是否经历了完整的阶段序列
-    #     expected_phases = ["contact_guidance", "target_search", "target_identification",
-    #                        "threat_assessment", "target_allocation", "tactical_decision"]
-    #
-    #     phase_transitions = [event["phase_transition"] for event in self.timeline_events]
-    #     experienced_phases = set()
-    #
-    #     for transition in phase_transitions:
-    #         if " -> " in transition:
-    #             _, new_phase = transition.split(" -> ")
-    #             experienced_phases.add(new_phase)
-    #
-    #     coverage = len(experienced_phases.intersection(expected_phases)) / len(expected_phases)
-    #     return coverage
-    #
-    # def _evaluate_distance_transitions(self):
-    #     """评估基于距离的转换效果"""
-    #     if not hasattr(self, 'timeline_events'):
-    #         return 0.0
-    #
-    #     # 检查距离触发的转换是否合理
-    #     distance_triggered_transitions = 0
-    #     total_transitions = len(self.timeline_events)
-    #
-    #     for event in self.timeline_events:
-    #         distance = event.get("distance", 0)
-    #         transition = event.get("phase_transition", "")
-    #
-    #         # 检查转换是否在合理的距离范围内
-    #         if "target_search" in transition and distance <= self.tactical_distances["detection_range"]:
-    #             distance_triggered_transitions += 1
-    #         elif "engagement" in transition and distance <= self.tactical_distances["engagement_range"]:
-    #             distance_triggered_transitions += 1
-    #         elif "launch" in transition and distance <= self.tactical_distances["launch_range"]:
-    #             distance_triggered_transitions += 1
-    #
-    #     return distance_triggered_transitions / max(total_transitions, 1)
-    #
-    # def _evaluate_template_diversity(self):
-    #     """评估战术模板使用多样性"""
-    #     if not hasattr(self, 'decision_log'):
-    #         return 0.0
-    #
-    #     templates_used = set(decision["template"] for decision in self.decision_log)
-    #     diversity_score = len(templates_used) / 14  # 14种模板的多样性
-    #
-    #     return min(diversity_score, 1.0)
-    #
-    # def _evaluate_phase_coverage(self):
-    #     """评估阶段覆盖度"""
-    #     phases_experienced = set(self.current_phases.values())
-    #     total_phases = len(self.PHASES)
-    #
-    #     return len(phases_experienced) / total_phases
-    #
-    # def _evaluate_tactical_appropriateness(self):
-    #     """评估战术选择的合理性"""
-    #     if not hasattr(self, 'decision_log'):
-    #         return 0.0
-    #
-    #     appropriate_decisions = 0
-    #     total_decisions = len(self.decision_log)
-    #
-    #     for decision in self.decision_log:
-    #         template = decision["template"]
-    #         phase = decision["phase"]
-    #         has_warning = decision["has_warning"]
-    #
-    #         # 检查决策是否合理
-    #         if has_warning and template in ["Beam", "Notch", "Defensive_Sequence"]:
-    #             appropriate_decisions += 1
-    #         elif phase == "tactical_decision" and template in ["Skate", "Short_Skate", "Banzai"]:
-    #             appropriate_decisions += 1
-    #         elif phase in ["target_allocation", "threat_assessment"] and template in ["Pincer", "High_Low"]:
-    #             appropriate_decisions += 1
-    #         elif template == "Simple_F_Pole":  # 通用安全选择
-    #             appropriate_decisions += 0.5
-    #
-    #     return appropriate_decisions / max(total_decisions, 1)

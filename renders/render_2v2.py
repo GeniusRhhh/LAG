@@ -32,12 +32,12 @@ def _t2n(x):
 # 参数设置
 num_agents = 4
 render = True
-ego_policy_index = 33
-enm_policy_index = 1
+ego_policy_index = 50
+enm_policy_index =49
 episode_rewards = 0
 
-ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run173"
-enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run173"
+ego_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run181"
+enm_run_dir = "../scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v1/run181"
 
 # 提取run编号
 run_number = ego_run_dir.split('/')[-1]  # 获取 "run173"

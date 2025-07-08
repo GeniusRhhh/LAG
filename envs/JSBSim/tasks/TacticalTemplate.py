@@ -33,28 +33,28 @@ class EnhancedTacticalTemplate:
 
     # 10个作战阶段
     PHASES = [
-        "contact_guidance",  # 接敌引导
-        "target_search",  # 目标搜索
-        "target_identification",  # 目标识别
-        "threat_assessment",  # 威胁判断
-        "target_allocation",  # 目标分配
-        "tactical_decision",  # 战术决策
-        "missile_launch",  # 发射导弹
-        "mid_guidance_defense",  # 中距弹制导/发射后防御
-        "terminal_guidance",  # 中距弹末制导
-        "effect_assessment"  # 导弹效果评估
+        "contact_guidance",  # 接敌引导：远距离搜索接近
+        "target_search",  # 目标搜索：雷达主动搜索
+        "target_identification",  # 目标识别：敌我识别
+        "threat_assessment",  # 威胁判断：评估威胁等级
+        "target_allocation",  # 目标分配：协同分配目标
+        "tactical_decision",  # 战术决策：选择攻击战术
+        "missile_launch",  # 发射导弹：执行攻击
+        "mid_guidance_defense",  # 中制导防御：导弹中段制导
+        "terminal_guidance",  # 末制导：导弹末段攻击
+        "effect_assessment"  # 效果评估：评估攻击结果
     ]
 
     # 战术距离定义
     TACTICAL_DISTANCES = {
-            "detection_range": 80000,  # 80km探测距离（66km应该能探测）
-            "engagement_range": 60000,  # 60km交战距离（66km暂时不交战，需要机动接近）
-            "launch_range": 40000,  # 40km发射距离
-            "mar_range": 20000,  # 15km最小规避距离
-            "wez_range": 45000,  # 35km武器交战区
-            "rmax": 60000,  # 60km导弹最大射程
-            "rmin": 3000  # 3km导弹最小射程
-        }
+        "detection_range": 80000,   # 80km：现代雷达有效探测距离
+        "engagement_range": 60000,  # 60km：进入交战意图明确区域
+        "launch_range": 40000,      # 40km：AIM-120有效射程
+        "mar_range": 20000,         # 20km：最小规避距离(Minimum Abort Range)
+        "wez_range": 32000,         # 32km：武器交战区(Weapon Engagement Zone)
+        "rmax": 60000,              # 60km：导弹理论最大射程
+        "rmin": 5000                # 5km：导弹最小武装距离
+    }
 
     def __init__(self, is_enemy: bool = False, env=None, agent_id: str = None):
         if env is None or agent_id is None:
@@ -525,24 +525,20 @@ class EnhancedTacticalTemplate:
         return base_action
 
     # 钳形夹击
-    # 在 EnhancedTacticalTemplate._pincer_logic 中修改
     def _pincer_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:
         is_leader = state.get("is_leader", False)
         enemy_distance = state.get("enemy_distance", 50000)
         radar_lock = state.get("radar_lock", False)
-
         # 计算理想夹角(45度)
         if is_leader:
             target_angle = np.radians(22.5)  # 减小夹角
         else:
             target_angle = np.radians(-22.5)
-
         heading_correction = target_angle
-
         return {
             "heading_cmd": np.clip(heading_correction, -np.radians(30), np.radians(30)),
             "coordinate_attack": True,
-            "shoot": radar_lock and 40000 <= enemy_distance <= 80000  # 加强射击条件
+            "shoot": radar_lock and 40000 <= enemy_distance <= 80000
         }
 
     def _defensive_split_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:

@@ -31,8 +31,8 @@ class MultipleCombatEnv(BaseEnv):
 
         # 定义战术控制距离（单位：米），用于空战中的探测、交战和导弹发射等决策
         self.tactical_distances = {
-            "detection_range": 80000,  # 80km探测距离（66km应该能探测）
-            "engagement_range": 60000,  # 60km交战距离（66km暂时不交战，需要机动接近）
+            "detection_range": 80000,  # 80km探测距离
+            "engagement_range": 60000,  # 60km交战距离
             "launch_range": 40000,  # 40km发射距离
             "mar_range": 20000,  # 20km最小规避距离
             "wez_range": 32000,  # 32km武器交战区
@@ -303,7 +303,10 @@ class MultipleCombatEnv(BaseEnv):
             "mission_timeline": self.mission_timeline.copy(),
             "tactical_situation": self.tactical_situation.copy()
         })
-
+        # 添加调试日志
+        logging.debug(f"After task.step, agents: {list(self._jsbsims.keys())}")
+        for agent_id, agent in self._jsbsims.items():
+            logging.debug(f"Agent {agent_id} type: {type(agent)}, is_alive: {agent.is_alive}")
         # 返回标准化的观测、共享观测、奖励、终止标志和信息
         return (
             np.stack([obs[agent_id] for agent_id in agent_ids], axis=0),
@@ -313,7 +316,7 @@ class MultipleCombatEnv(BaseEnv):
             indexed_infos
         )
 
-    # 在 MultipleCombatEnv 中加强时间线管理
+    # 加强时间线管理
     def _update_mission_timeline(self):
         """完善的任务时间线更新"""
         current_time = self.current_step * self.time_interval
@@ -329,7 +332,7 @@ class MultipleCombatEnv(BaseEnv):
                     )
                     min_distance = min(min_distance, dist)
 
-        # **详细的时间线节点记录**
+        # 详细的时间线节点记录
         timeline_updates = []
 
         # 接触阶段

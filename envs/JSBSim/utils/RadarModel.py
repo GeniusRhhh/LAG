@@ -79,7 +79,7 @@ class RadarModel:
         basic_conditions = (
                 enemy_distance <= 100000 and  # 100km内可探测
                 enemy_distance >= 3000 and  # 最小距离
-                abs(enemy_angle_off) < np.radians(120) and  # 放宽到90度
+                abs(enemy_angle_off) < np.radians(120) and  # 放宽到120度
                 current_altitude > 1000  # 基本高度要求
         )
 
@@ -150,25 +150,18 @@ class RadarModel:
 
         # 基础雷达方程：SNR = P_t * G^2 * λ^2 * σ / ((4π)^3 * R^4 * k * T * B * F)
         base_snr = 45.0  # 基础SNR (dB)
-
         # 距离衰减 (R^4 law)
         distance_attenuation = -40 * np.log10(distance / 10000)
-
         # 角度衰减（天线方向图）
         angle_attenuation = -12 * (angle_off / (self.h_beamwidth / 2)) ** 2
-
         # 速度影响（多普勒增强）
         velocity_enhancement = 3 * np.log10(max(velocity / 340, 0.1))
-
         # 高度影响（大气折射）
         altitude_factor = -2 * np.log10(max(altitude / 10000, 0.1))
-
         # 雷达模式影响
         mode_factor = 10 * np.log10(self.radar_modes[self.current_mode]["power"])
-
         total_snr = (base_snr + distance_attenuation + angle_attenuation +
                      velocity_enhancement + altitude_factor + mode_factor)
-
         return total_snr
 
     def calculate_doppler_shift(self, env, agent_id: str) -> float:
@@ -212,9 +205,7 @@ class RadarModel:
         altitude_factor = (self.ground_clutter["altitude_threshold"] - altitude) / self.ground_clutter[
             "altitude_threshold"]
         distance_factor = max(0, 1 - enemy_distance / 50000)  # 50km内有杂波影响
-
         clutter_effect = abs(clutter_power) * altitude_factor * distance_factor * self.ground_clutter["terrain_factor"]
-
         return clutter_effect
 
     def calculate_ecm_effect(self, env, agent_id: str) -> float:
