@@ -318,13 +318,18 @@ class MultipleCombatEnv(BaseEnv):
 
     # 加强时间线管理
     def _update_mission_timeline(self):
-        """完善的任务时间线更新"""
+        """更新任务时间线，动态基于当前存在的智能体"""
         current_time = self.current_step * self.time_interval
-
-        # 计算双方最小距离
         min_distance = float('inf')
-        for red_id in ['A0100', 'A0200']:
-            for blue_id in ['B0100', 'B0200']:
+
+        # 动态获取红蓝方智能体
+        red_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('A')]
+        blue_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('B')]
+        logging.debug(f"Updating timeline with agents: red={red_agents}, blue={blue_agents}")
+
+        # 计算红蓝方之间的最小距离
+        for red_id in red_agents:
+            for blue_id in blue_agents:
                 if (red_id in self._jsbsims and blue_id in self._jsbsims and
                         self._jsbsims[red_id].is_alive and self._jsbsims[blue_id].is_alive):
                     dist = np.linalg.norm(
@@ -332,49 +337,38 @@ class MultipleCombatEnv(BaseEnv):
                     )
                     min_distance = min(min_distance, dist)
 
-        # 详细的时间线节点记录
+        # 更新时间线逻辑保持不变
         timeline_updates = []
-
-        # 接触阶段
         if min_distance <= self.tactical_distances["detection_range"] and self.mission_timeline["contact_time"] is None:
             self.mission_timeline["contact_time"] = current_time
             timeline_updates.append(f"CONTACT at {current_time:.1f}s, distance={min_distance:.0f}m")
-
-        # 交战阶段
         if min_distance <= self.tactical_distances["engagement_range"] and self.mission_timeline[
             "engagement_time"] is None:
             self.mission_timeline["engagement_time"] = current_time
             timeline_updates.append(f"ENGAGEMENT at {current_time:.1f}s, distance={min_distance:.0f}m")
-
-        # 发射窗口
         if min_distance <= self.tactical_distances["launch_range"] and self.mission_timeline["launch_time"] is None:
             self.mission_timeline["launch_time"] = current_time
             timeline_updates.append(f"LAUNCH_WINDOW at {current_time:.1f}s, distance={min_distance:.0f}m")
 
-        # 导弹发射检测
         any_missile_launched = any(agent.launch_missiles for agent in self._jsbsims.values() if agent.is_alive)
         if any_missile_launched and "first_missile_launch" not in self.mission_timeline:
             self.mission_timeline["first_missile_launch"] = current_time
             timeline_updates.append(f"FIRST_MISSILE_LAUNCH at {current_time:.1f}s")
 
-        # MAR进入
         if min_distance <= self.tactical_distances["mar_range"] and "mar_entry" not in self.mission_timeline:
             self.mission_timeline["mar_entry"] = current_time
             timeline_updates.append(f"MAR_ENTRY at {current_time:.1f}s, distance={min_distance:.0f}m")
 
-        # 任务结束检测
-        red_alive = sum(1 for aid in ['A0100', 'A0200'] if self._jsbsims[aid].is_alive)
-        blue_alive = sum(1 for aid in ['B0100', 'B0200'] if self._jsbsims[aid].is_alive)
+        red_alive = sum(1 for aid in red_agents if self._jsbsims[aid].is_alive)
+        blue_alive = sum(1 for aid in blue_agents if self._jsbsims[aid].is_alive)
         if (red_alive == 0 or blue_alive == 0) and self.mission_timeline["mission_end"] is None:
             self.mission_timeline["mission_end"] = current_time
             winner = "RED" if blue_alive == 0 else "BLUE"
             timeline_updates.append(f"MISSION_END at {current_time:.1f}s, WINNER: {winner}")
 
-        # 记录时间线更新
         for update in timeline_updates:
             logging.info(f"Timeline Update: {update}")
 
-        # 将时间线信息传递给task
         if hasattr(self.task, 'mission_timeline'):
             self.task.mission_timeline = self.mission_timeline.copy()
 
@@ -400,21 +394,26 @@ class MultipleCombatEnv(BaseEnv):
         return summary
 
     def _update_tactical_situation(self):
-        """更新战术态势，评估威胁等级和交战几何。"""
+        """更新战术态势，动态基于当前存在的智能体"""
         min_distance = float('inf')
         missile_threats = 0
 
-        # 计算威胁等级和最小距离
+        # 动态获取红蓝方智能体
+        red_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('A')]
+        blue_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('B')]
+        logging.debug(f"Updating situation with agents: red={red_agents}, blue={blue_agents}")
+
+        # 计算威胁和最小距离
         for agent_id, agent in self._jsbsims.items():
             if agent.is_alive:
                 if agent.check_missile_warning():
-                    missile_threats += 1  # 统计导弹威胁
+                    missile_threats += 1
                 for enemy in agent.enemies:
                     if enemy.is_alive:
                         dist = np.linalg.norm(agent.get_position() - enemy.get_position())
                         min_distance = min(min_distance, dist)
 
-        # 根据距离和导弹威胁更新威胁等级
+        # 更新威胁等级
         if missile_threats > 0 or min_distance < self.tactical_distances["mar_range"]:
             self.tactical_situation["threat_level"] = "CRITICAL"
         elif min_distance < self.tactical_distances["wez_range"]:
@@ -424,9 +423,9 @@ class MultipleCombatEnv(BaseEnv):
         else:
             self.tactical_situation["threat_level"] = "LOW"
 
-        # 根据存活飞机数量评估交战几何
-        red_alive = sum(1 for aid in ['A0100', 'A0200'] if self._jsbsims[aid].is_alive)
-        blue_alive = sum(1 for aid in ['B0100', 'B0200'] if self._jsbsims[aid].is_alive)
+        # 更新交战几何
+        red_alive = sum(1 for aid in red_agents if self._jsbsims[aid].is_alive)
+        blue_alive = sum(1 for aid in blue_agents if self._jsbsims[aid].is_alive)
         if red_alive > blue_alive:
             self.tactical_situation["engagement_geometry"] = "OFFENSIVE"
         elif red_alive < blue_alive:
