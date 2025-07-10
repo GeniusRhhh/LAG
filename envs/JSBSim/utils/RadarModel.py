@@ -51,73 +51,81 @@ class RadarModel:
         #              f"beamwidth={h_beamwidth}°×{v_beamwidth}°, SNR_threshold={self.snr_threshold}dB")
 
     def get_radar_state(self, state: Dict[str, Any], env, agent_id: str) -> Dict[str, Any]:
-        """获取雷达状态。
+        """获取雷达状态 - 修复版本"""
 
-        Args:
-            state: 状态字典。
-            env: 环境实例。
-            agent_id: 智能体标识符。
-
-        Returns:
-            Dict: 雷达状态 (radar_lock, has_warning, snr, doppler_shift等).
-        """
+        # 基础安全检查
         if not hasattr(env, 'agents') or agent_id not in env.agents:
+            logging.warning(f"Agent {agent_id} not found in env or env.agents missing")
             return self._default_radar_state()
 
         agent = env.agents[agent_id]
         if not agent.is_alive:
+            logging.debug(f"Agent {agent_id} is not alive")
             return self._default_radar_state()
 
-        # 获取基础参数
+        # 获取基础参数，确保默认值
+        if state is None:
+            logging.warning(f"State dictionary is None for {agent_id}")
+            state = {}
+
         enemy_distance = state.get("enemy_distance", np.inf)
-        enemy_angle_off = np.deg2rad(state.get("enemy_angle_off", 0))
+        enemy_angle_off_deg = state.get("enemy_angle_off", 0)
+        enemy_angle_off = np.deg2rad(enemy_angle_off_deg)
         missile_distance = state.get("missile_distance", np.inf)
         enemy_velocity = state.get("enemy_velocity", 340.0)
         current_altitude = state.get("current_altitude", 5000)
+        missiles_incoming = state.get("missiles_incoming", [])
+
+        # 确保 missiles_incoming 是可迭代的
+        if not isinstance(missiles_incoming, (list, tuple)):
+            logging.warning(f"missiles_incoming is not iterable for {agent_id}: {type(missiles_incoming)}")
+            missiles_incoming = []
 
         # 雷达锁定判断
         basic_conditions = (
-                enemy_distance <= 100000 and  # 100km内可探测
-                enemy_distance >= 3000 and  # 最小距离
-                abs(enemy_angle_off) < np.radians(120) and  # 放宽到120度
-                current_altitude > 1000  # 基本高度要求
+                enemy_distance <= 100000 and
+                enemy_distance >= 3000 and
+                abs(enemy_angle_off) < np.radians(120) and
+                current_altitude > 1000
         )
 
-        # 多普勒判断,计算径向速度分量
+        # 安全调用其他方法
         try:
             doppler_shift = self.calculate_doppler_shift(env, agent_id)
-            # 大幅放宽多普勒阈值
-            doppler_detectable = abs(doppler_shift) > 5  # 从5.0放宽到10.0
-        except:
-            doppler_detectable = True  # 如果计算失败，默认可检测
+            doppler_detectable = abs(doppler_shift) > 5
+        except Exception as e:
+            logging.error(f"Doppler shift calculation error for {agent_id}: {e}")
+            doppler_shift = 0.0
+            doppler_detectable = True
 
-        # SNR计算
         try:
             snr = self.calculate_snr(enemy_distance, enemy_angle_off, enemy_velocity, current_altitude)
             ground_clutter_effect = self.calculate_ground_clutter_effect(current_altitude, enemy_distance)
             ecm_effect = self.calculate_ecm_effect(env, agent_id)
             effective_snr = snr - ground_clutter_effect - ecm_effect
-            snr_acceptable = effective_snr > 3.0  # 从8.0降低到3.0
-        except:
-            snr_acceptable = True  # 如果计算失败，默认可接受
+            snr_acceptable = effective_snr > 3.0
+        except Exception as e:
+            logging.error(f"SNR calculation error for {agent_id}: {e}")
+            effective_snr = 0.0
+            ground_clutter_effect = 0.0
+            ecm_effect = 0.0
+            snr_acceptable = True
 
-        # 雷达锁定条件
         radar_lock = (
                 basic_conditions and
-                (snr_acceptable or enemy_distance < 55000) and  # 近距离时忽略SNR
-                (doppler_detectable or enemy_distance < 45000)  # 近距离时忽略多普勒
+                (snr_acceptable or enemy_distance < 55000) and
+                (doppler_detectable or enemy_distance < 45000)
         )
 
         # 导弹威胁警告
         has_warning = self.detect_missile_threat(env, agent_id, missile_distance)
 
-        # 更新锁定时间
         if radar_lock:
             self.lock_time += 1
         else:
-            self.lock_time = max(0, self.lock_time - 1)  # 衰减
+            self.lock_time = max(0, self.lock_time - 1)
 
-        lock_stable = self.lock_time >= 3  # 稳定锁定需要5步
+        lock_stable = self.lock_time >= 3
 
         radar_state = {
             "radar_lock": radar_lock and lock_stable,
@@ -133,13 +141,10 @@ class RadarModel:
             "angle_accuracy": self.radar_modes[self.current_mode]["angle_accuracy"]
         }
 
-        # 战术模板相关的雷达状态
-        radar_state.update(self._get_tactical_radar_state(state, radar_state))
-
-        if env.current_step % 500 == 0:  # 减少日志频率
-            logging.info(f"Agent {agent_id} radar: lock={radar_lock}, SNR={effective_snr:.1f}dB, "
-                          f"doppler={doppler_shift:.1f}m/s, clutter={ground_clutter_effect:.1f}dB, "
-                          f"ecm={ecm_effect:.1f}dB, distance={enemy_distance:.0f}m")
+        try:
+            radar_state.update(self._get_tactical_radar_state(state, radar_state))
+        except Exception as e:
+            logging.error(f"Tactical radar state error for {agent_id}: {e}")
 
         return radar_state
 
@@ -172,28 +177,36 @@ class RadarModel:
         agent = env.agents[agent_id]
         enemies = agent.enemies
 
-        if not enemies or not enemies[0].is_alive:
+        # 修复：明确检查None和空列表
+        if not enemies or enemies is None:
             return 0.0
 
-        # 计算径向速度
-        ego_vel = agent.get_velocity()
-        enemy_vel = enemies[0].get_velocity()
-        relative_pos = enemies[0].get_position() - agent.get_position()
-
-        if np.linalg.norm(relative_pos) == 0:
+        # 修复：确保enemies是可迭代的
+        if not isinstance(enemies, (list, tuple)):
             return 0.0
 
-        # 径向速度分量
-        relative_vel = enemy_vel - ego_vel
-        unit_los = relative_pos / np.linalg.norm(relative_pos)
-        radial_velocity = np.dot(relative_vel, unit_los)
+        # 修复：检查第一个敌人是否存在
+        if len(enemies) == 0 or not enemies[0] or not enemies[0].is_alive:
+            return 0.0
 
-        # 多普勒频移 (假设X波段雷达，频率约10GHz)
-        c = 3e8  # 光速
-        frequency = 10e9  # 10GHz
-        doppler_shift = 2 * frequency * radial_velocity / c
+        try:
+            # 计算径向速度
+            ego_vel = agent.get_velocity()
+            enemy_vel = enemies[0].get_velocity()
+            relative_pos = enemies[0].get_position() - agent.get_position()
 
-        return radial_velocity  # 返回径向速度而非频移
+            if np.linalg.norm(relative_pos) == 0:
+                return 0.0
+
+            # 径向速度分量
+            relative_vel = enemy_vel - ego_vel
+            unit_los = relative_pos / np.linalg.norm(relative_pos)
+            radial_velocity = np.dot(relative_vel, unit_los)
+
+            return radial_velocity  # 返回径向速度而非频移
+        except Exception as e:
+            logging.error(f"Doppler shift calculation error for {agent_id}: {e}")
+            return 0.0
 
     def calculate_ground_clutter_effect(self, altitude: float, enemy_distance: float) -> float:
         """计算地面杂波影响。"""
@@ -216,48 +229,64 @@ class RadarModel:
         agent = env.agents[agent_id]
         enemies = agent.enemies
 
-        if not enemies:
+        # 修复：明确检查None和空列表
+        if not enemies or enemies is None:
+            return 0.0
+
+        # 修复：确保enemies是可迭代的
+        if not isinstance(enemies, (list, tuple)):
             return 0.0
 
         # 简化的ECM模型：基于距离和敌机能力
         ecm_effect = 0.0
         for enemy in enemies:
-            if enemy.is_alive:
-                distance = np.linalg.norm(enemy.get_position() - agent.get_position())
-                # 假设ECM功率随距离衰减
-                if distance < 30000:  # 30km内有ECM影响
-                    jam_power = 20 * (1 - distance / 30000)  # 最大20dB干扰
-                    if jam_power > self.ecm_resistance["jam_threshold"]:
-                        ecm_effect += (jam_power - self.ecm_resistance["jam_threshold"]) * (
+            if enemy and enemy.is_alive:  # 增加enemy非None检查
+                try:
+                    distance = np.linalg.norm(enemy.get_position() - agent.get_position())
+                    # 假设ECM功率随距离衰减
+                    if distance < 30000:  # 30km内有ECM影响
+                        jam_power = 20 * (1 - distance / 30000)  # 最大20dB干扰
+                        if jam_power > self.ecm_resistance["jam_threshold"]:
+                            ecm_effect += (jam_power - self.ecm_resistance["jam_threshold"]) * (
                                     1 - self.ecm_resistance["agility"])
+                except Exception as e:
+                    logging.error(f"ECM calculation error for enemy: {e}")
+                    continue
 
         return min(ecm_effect, 25.0)  # 最大25dB ECM影响
 
     def detect_missile_threat(self, env, agent_id: str, missile_distance: float) -> bool:
         """检测导弹威胁。"""
         if not hasattr(env, 'agents') or agent_id not in env.agents:
+            logging.warning(f"Agent {agent_id} not found in env for missile threat detection")
             return False
 
-        agent = env.agents[agent_id]
-        missile_sim = agent.check_missile_warning()
+        try:
+            agent = env.agents[agent_id]
+            missile_sim = agent.check_missile_warning()
 
-        if missile_sim is None:
+            if missile_sim is None:
+                logging.debug(f"No missile warning for agent {agent_id}")
+                return False
+
+            distance = np.linalg.norm(missile_sim.get_position() - agent.get_position())
+            velocity = np.linalg.norm(missile_sim.get_velocity())
+
+            # 威胁判断：基于距离、速度和接近率
+            threat_range = 60000  # 60km威胁距离
+            threat_velocity = 500  # 500m/s威胁速度
+
+            is_threat = (distance < threat_range and velocity > threat_velocity)
+
+            if is_threat:
+                logging.debug(f"Agent {agent_id} missile threat detected: distance={distance:.1f}m, "
+                              f"velocity={velocity:.1f}m/s")
+
+            return is_threat
+
+        except Exception as e:
+            logging.error(f"Error detecting missile threat for {agent_id}: {e}")
             return False
-
-        distance = np.linalg.norm(missile_sim.get_position() - agent.get_position())
-        velocity = np.linalg.norm(missile_sim.get_velocity())
-
-        # 威胁判断：基于距离、速度和接近率
-        threat_range = 60000  # 60km威胁距离
-        threat_velocity = 500  # 500m/s威胁速度
-
-        is_threat = (distance < threat_range and velocity > threat_velocity)
-
-        if is_threat:
-            logging.debug(f"Agent {agent_id} missile threat detected: distance={distance:.1f}m, "
-                          f"velocity={velocity:.1f}m/s")
-
-        return is_threat
 
     def _get_effective_range(self) -> float:
         """获取有效探测距离。"""
@@ -284,6 +313,12 @@ class RadarModel:
                 radar_state["radar_lock"] and
                 30 <= np.rad2deg(abs(radar_state["beam_angle"])) <= 60
         )
+
+        return {
+            "beam_optimal": beam_optimal,
+            "notch_effective": notch_effective,
+            "crank_optimal": crank_optimal
+        }
 
     def _default_radar_state(self) -> Dict[str, Any]:
         """返回默认雷达状态
