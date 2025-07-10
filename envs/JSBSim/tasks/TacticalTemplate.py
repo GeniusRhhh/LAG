@@ -7,7 +7,7 @@ from py_trees.composites import Sequence, Selector
 from py_trees.behaviour import Behaviour
 from ..core.catalog import Catalog as c
 from ..utils.RadarModel import RadarModel
-
+from .RefinedTacticalManeuvers import RefinedTacticalManeuvers
 
 class ConditionNode(Behaviour):
     def __init__(self, name: str, condition_func: callable):
@@ -59,7 +59,7 @@ class EnhancedTacticalTemplate:
     def __init__(self, is_enemy: bool = False, env=None, agent_id: str = None):
         if env is None or agent_id is None:
             raise ValueError("env and agent_id must be provided for TacticalTemplate initialization")
-
+        self.maneuver_states = {}
         self.is_enemy = is_enemy
         self.env = env
         self.agent_id = agent_id
@@ -88,6 +88,9 @@ class EnhancedTacticalTemplate:
         self._banzai_state = None
         self._defense_sequence_state = None
         self._orbit_state = None
+
+
+
 
     def _init_tactical_templates(self) -> Dict[int, Dict[str, Any]]:
         """初始化14种战术模板"""
@@ -410,124 +413,138 @@ class EnhancedTacticalTemplate:
 
         return action
 
-    def _crank_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Crank机动逻辑 - 修复版本"""
+    def get_maneuver_state(self, maneuver_type: str, agent_id: str = None) -> Dict[str, Any]:
+        """获取或初始化机动状态"""
+        if agent_id is None:
+            agent_id = self.agent_id
 
-        agent_id = state.get("agent_id", "A0100")
-        maneuver_state = self.get_maneuver_state("crank", agent_id)
+        key = f"{agent_id}_{maneuver_type}"
+        if key not in self.maneuver_states:
+            self.maneuver_states[key] = {
+                "phase": "init",
+                "timer": 0,
+                "completed": False,
+                "start_time": 0,
+                "quality_score": 0.0,
+                # 每种机动的特定状态
+                "threat_direction": 0.0,
+                "current_heading": 0.0,
+                "target_heading": 0.0,
+                "initial_altitude": 5000,
+                "target_altitude": 5000,
+                "missiles_fired": 0,
+                "last_threat_update": 0
+            }
+        return self.maneuver_states[key]
+
+    def _calculate_threat_direction(self, state: Dict[str, Any]) -> float:
+        """计算真正的威胁方向"""
+        missiles_incoming = state.get("missiles_incoming", [])
+        enemy_angle_off = state.get("enemy_angle_off", 0)
+
+        if missiles_incoming:
+            # 如果有导弹威胁，计算导弹来向
+            # 简化：假设导弹从敌机方向来
+            missile_bearing = np.radians(enemy_angle_off)
+            logging.debug(f"导弹威胁方向: {np.degrees(missile_bearing):.1f}°")
+            return missile_bearing
+        else:
+            # 没有导弹时，威胁方向就是敌机方向
+            return np.radians(enemy_angle_off)
+    def _smooth_heading_change(self, current: float, target: float, rate: float = 0.05) -> float:
+        """平滑的航向变化"""
+        diff = target - current
+
+        # 处理角度环绕
+        if diff > np.pi:
+            diff -= 2 * np.pi
+        elif diff < -np.pi:
+            diff += 2 * np.pi
+
+        # 限制变化率
+        max_change = rate
+        if abs(diff) <= max_change:
+            return target
+        else:
+            return current + np.sign(diff) * max_change
+
+    def _smooth_altitude_change(self, current: float, target: float, rate: float = 50.0) -> float:
+        """平滑的高度变化"""
+        diff = target - current
+        max_change = rate  # 每步最大高度变化50m
+
+        if abs(diff) <= max_change:
+            return target
+        else:
+            return current + np.sign(diff) * max_change
+
+    def _crank_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """修复后的Crank机动逻辑 - 更合理的触发条件"""
 
         enemy_distance = state.get("enemy_distance", 50000)
         enemy_angle_off = state.get("enemy_angle_off", 0)
-        missile_distance = state.get("missile_distance", np.inf)
-        has_warning = state.get("has_warning", False)
         radar_lock = state.get("radar_lock", False)
+        missile_distance = state.get("missile_distance", np.inf)
+        missiles_incoming = state.get("missiles_incoming", [])
+        has_missile_threat = len([m for m in missiles_incoming if hasattr(m, 'is_alive') and m.is_alive]) > 0
 
-        # **关键修复1：触发条件更严格**
+        # 【关键修复】: 更宽松和实用的触发条件
         should_crank = (
-                radar_lock and (
-                (has_warning and missile_distance < 45000) or
-                (enemy_distance < 55000 and abs(enemy_angle_off) < 30)
-        )
+                enemy_distance < 65000 or  # 扩大触发距离到65km
+                missile_distance < 40000 or  # 扩大导弹威胁距离
+                has_missile_threat or  # 任何导弹威胁
+                (enemy_distance < 70000 and radar_lock)  # 或者被锁定且距离<70km
         )
 
         if not should_crank:
-            maneuver_state["phase"] = "init"
-            return {"heading_cmd": 0, "altitude_cmd": 0, "velocity_cmd": 600, "shoot": False, "maneuver_active": False}
+            return {
+                "heading_cmd": 0,
+                "altitude_cmd": 0,
+                "velocity_cmd": 600,
+                "shoot": False,
+                "maneuver_active": False
+            }
 
-        maneuver_state["timer"] += 1
-
-        # **关键修复2：威胁方向计算**
-        threat_direction = self._calculate_threat_direction(state)
-
-        # **关键修复3：动态决定转向方向**
-        if maneuver_state["phase"] == "init":
-            # 根据威胁方向决定最优转向方向
-            if abs(enemy_angle_off) < 10:  # 正面威胁
-                # 选择远离导弹预测轨迹的方向
-                maneuver_state["crank_direction"] = 1 if np.random.random() > 0.5 else -1
-            else:
-                # 选择远离敌机的方向
-                maneuver_state["crank_direction"] = 1 if enemy_angle_off < 0 else -1
-
-            maneuver_state["phase"] = "cranking"
-            maneuver_state["target_heading"] = threat_direction + maneuver_state["crank_direction"] * np.radians(45)
-            maneuver_state["timer"] = 0
-
-            logging.debug(
-                f"Crank启动: 威胁方向={np.degrees(threat_direction):.1f}°, 转向方向={'右' if maneuver_state['crank_direction'] > 0 else '左'}")
-
-        # **关键修复4：Cranking阶段 - 限时和条件控制**
-        elif maneuver_state["phase"] == "cranking":
-            current_heading = np.radians(state.get("current_heading", 0))
-            target_heading = maneuver_state["target_heading"]
-
-            # 平滑航向变化
-            heading_cmd = self._smooth_heading_change(current_heading, target_heading, rate=0.08)
-
-            # **重要：Crank完成条件**
-            heading_diff = abs(target_heading - current_heading)
-            if heading_diff > np.pi:
-                heading_diff = 2 * np.pi - heading_diff
-
-            if (heading_diff < np.radians(10) or maneuver_state["timer"] > 150):  # 到达目标航向或超时
-                maneuver_state["phase"] = "maintaining"
-                maneuver_state["timer"] = 0
-                logging.debug("Crank转入维持阶段")
-
-            # 速度调整
-            if has_warning:
-                velocity_cmd = 680  # 有威胁时加速
-            else:
-                velocity_cmd = 620
-
-        # **关键修复5：Maintaining阶段 - 维持锁定并监控威胁**
-        elif maneuver_state["phase"] == "maintaining":
-            # 维持当前航向，小幅调整保持雷达锁定
-            heading_cmd = 0  # 保持当前航向
-
-            # 威胁评估
-            if missile_distance < 25000:  # 导弹接近，需要更激进规避
-                maneuver_state["phase"] = "emergency_evade"
-                maneuver_state["timer"] = 0
-            elif maneuver_state["timer"] > 200 or not radar_lock:  # 维持足够时间或失锁
-                maneuver_state["phase"] = "completion"
-                maneuver_state["timer"] = 0
-
-            velocity_cmd = 650
-
-        # **关键修复6：紧急规避阶段**
-        elif maneuver_state["phase"] == "emergency_evade":
-            # 加大规避角度
-            additional_turn = maneuver_state["crank_direction"] * np.radians(30)
-            heading_cmd = additional_turn
-            velocity_cmd = 720  # 最大速度
-
-            if missile_distance > 35000 or maneuver_state["timer"] > 100:
-                maneuver_state["phase"] = "completion"
-
-        # **关键修复7：完成阶段**
-        elif maneuver_state["phase"] == "completion":
-            # 恢复正常飞行态势
-            if maneuver_state["timer"] > 50:
-                maneuver_state["completed"] = True
-                maneuver_state["phase"] = "init"
-
-            heading_cmd = -maneuver_state["crank_direction"] * np.radians(15)  # 小幅回转
-            velocity_cmd = 600
-
+        # 威胁等级评估
+        if missile_distance < 25000 or has_missile_threat:
+            crank_angle = np.radians(55)  # 高威胁：大角度机动
+            velocity_boost = 75
+            priority = "HIGH"
+        elif enemy_distance < 45000:
+            crank_angle = np.radians(40)  # 中威胁：中等角度
+            velocity_boost = 50
+            priority = "MEDIUM"
         else:
-            heading_cmd = 0
-            velocity_cmd = 600
+            crank_angle = np.radians(30)  # 低威胁：小角度
+            velocity_boost = 25
+            priority = "LOW"
+
+        # 机动方向选择（基于敌机相对位置）
+        if enemy_angle_off > 0:
+            heading_cmd = -crank_angle  # 向左规避
+        else:
+            heading_cmd = crank_angle  # 向右规避
+
+        # 射击条件评估
+        shoot_ok = (
+                radar_lock and
+                30000 < enemy_distance < 50000 and  # 射击窗口
+                abs(heading_cmd) < np.radians(50) and  # 角度容限
+                not has_missile_threat  # 无导弹威胁时才射击
+        )
+
+        logging.info(f"Crank执行: 距离={enemy_distance:.0f}m, 角度={np.degrees(heading_cmd):.1f}°, "
+                     f"威胁={priority}, 射击={shoot_ok}")
 
         return {
             "heading_cmd": heading_cmd,
-            "altitude_cmd": 0,  # Crank主要是航向机动
-            "velocity_cmd": velocity_cmd,
+            "altitude_cmd": 0,
+            "velocity_cmd": 600 + velocity_boost,
             "maintain_lock": True,
-            "shoot": False,
+            "shoot": shoot_ok,
             "maneuver_active": True,
-            "crank_phase": maneuver_state["phase"],
-            "crank_direction": maneuver_state.get("crank_direction", 0)
+            "crank_angle": abs(heading_cmd),  # 用于质量评估
+            "threat_priority": priority
         }
     # 4. 立即修改Beam机动逻辑
     def _beam_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -591,7 +608,10 @@ class EnhancedTacticalTemplate:
         }
 
     def _notch_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Notch机动逻辑 - 地面杂波遮蔽"""
+        """Notch机动逻辑 - 地面杂波遮蔽，包含安全恢复"""
+
+        agent_id = state.get("agent_id", "A0100")
+        maneuver_state = self.get_maneuver_state("notch", agent_id)
 
         current_alt = state.get("current_altitude", 5000)
         missile_distance = state.get("missile_distance", np.inf)
@@ -601,72 +621,133 @@ class EnhancedTacticalTemplate:
 
         # 触发条件
         should_notch = (
-                missile_distance < 35000 or
+                missile_distance < 40000 or
                 has_missile_threat or
-                (enemy_distance < 20000)  # 近距离必须用Notch
+                enemy_distance < 20000
         )
 
         if not should_notch:
             return {"heading_cmd": 0, "altitude_cmd": 0, "velocity_cmd": 600, "shoot": False, "maneuver_active": False}
 
-        # 首先执行Beam机动
-        beam_action = self._beam_logic(state)
+        maneuver_state["timer"] += 1
 
-        # 高度管理 - Notch的关键
-        if missile_distance < 25000:
-            # 紧急情况：快速下降到杂波区
-            if current_alt > 2500:
-                target_altitude = 1500  # 目标1500米
-                altitude_cmd = max(-1000, target_altitude - current_alt)
-                notch_phase = "emergency_descent"
-            else:
-                altitude_cmd = -300  # 已在低空，继续下降
-                notch_phase = "in_clutter"
-        elif missile_distance < 40000:
-            # 预防性下降
-            if current_alt > 3500:
-                target_altitude = 2500
-                altitude_cmd = max(-600, target_altitude - current_alt)
-                notch_phase = "preventive_descent"
-            else:
-                altitude_cmd = -200
-                notch_phase = "clutter_level"
-        else:
-            altitude_cmd = 0
-            notch_phase = "normal"
+        # 阶段1：初始化Notch
+        if maneuver_state["phase"] == "init":
+            # 首先执行Beam机动
+            beam_action = self._beam_logic(state)
 
-        # 速度管理
-        if current_alt < 2000:
-            velocity_cmd = 580  # 低空减速，保持控制
-        elif altitude_cmd < -500:
-            velocity_cmd = 650  # 下降时可以加速
+            # 设置目标下降高度
+            if missile_distance < 20000:
+                target_altitude = 1200  # 紧急下降
+                descent_rate = 100.0  # 快速下降
+                notch_urgency = "EMERGENCY"
+            elif missile_distance < 30000:
+                target_altitude = 1800  # 标准下降
+                descent_rate = 80.0
+                notch_urgency = "HIGH"
+            else:
+                target_altitude = 2500  # 预防性下降
+                descent_rate = 60.0
+                notch_urgency = "PREVENTIVE"
+
+            maneuver_state["target_altitude"] = target_altitude
+            maneuver_state["initial_altitude"] = current_alt
+            maneuver_state["descent_rate"] = descent_rate
+            maneuver_state["notch_urgency"] = notch_urgency
+            maneuver_state["beam_heading"] = beam_action.get("heading_cmd", 0)
+            maneuver_state["phase"] = "descending"
+
+            logging.info(f"Notch启动: 当前高度={current_alt:.0f}m, 目标高度={target_altitude:.0f}m, 紧急度={notch_urgency}")
+
+        # 阶段2：下降到杂波区
+        elif maneuver_state["phase"] == "descending":
+            target_altitude = maneuver_state["target_altitude"]
+            descent_rate = maneuver_state["descent_rate"]
+
+            # 平滑下降，避免过快
+            altitude_cmd = self._smooth_altitude_change(0, target_altitude - current_alt, rate=descent_rate)
+
+            # 安全检查：防止过低
+            if current_alt < 800:  # 最低安全高度800m
+                maneuver_state["phase"] = "emergency_recovery"
+                logging.warning(f"Notch高度过低{current_alt:.0f}m，紧急恢复")
+            elif current_alt <= target_altitude + 100:  # 到达目标高度附近
+                maneuver_state["phase"] = "in_clutter"
+                maneuver_state["timer"] = 0
+                logging.debug(f"Notch到达杂波区: {current_alt:.0f}m")
+
+        # 阶段3：在杂波区保持
+        elif maneuver_state["phase"] == "in_clutter":
+            target_altitude = maneuver_state["target_altitude"]
+
+            # 维持在杂波区高度
+            altitude_error = target_altitude - current_alt
+            altitude_cmd = np.clip(altitude_error, -50, 50)  # 小幅调整
+
+            # 计算杂波效果
+            clutter_effectiveness = 0.0
+            if current_alt < 1500:
+                clutter_effectiveness = 0.85
+            elif current_alt < 2000:
+                clutter_effectiveness = 0.70
+            elif current_alt < 2500:
+                clutter_effectiveness = 0.50
+
+            # 威胁解除条件或超时恢复
+            if ((missile_distance > 50000 and not has_missile_threat) or
+                    maneuver_state["timer"] > 300):  # 最多在杂波区停留300步
+                maneuver_state["phase"] = "recovering"
+                maneuver_state["timer"] = 0
+                logging.debug(f"Notch开始恢复: 威胁解除或超时")
+
+        # 阶段4：恢复安全高度
+        elif maneuver_state["phase"] == "recovering" or maneuver_state["phase"] == "emergency_recovery":
+            initial_altitude = maneuver_state.get("initial_altitude", 5000)
+            recovery_target = max(initial_altitude, 3000)  # 至少恢复到3000m
+
+            # 渐进式爬升
+            altitude_cmd = self._smooth_altitude_change(0, recovery_target - current_alt, rate=70.0)
+
+            # 恢复完成条件
+            if current_alt >= recovery_target - 200:
+                maneuver_state["completed"] = True
+                maneuver_state["phase"] = "init"
+                logging.debug(f"Notch恢复完成: 高度={current_alt:.0f}m")
+
+            # 超时保护
+            elif maneuver_state["timer"] > 400:
+                maneuver_state["completed"] = True
+                maneuver_state["phase"] = "init"
+                logging.warning(f"Notch恢复超时")
+
+        # 速度控制
+        if maneuver_state["phase"] == "descending":
+            velocity_cmd = 650  # 下降时保持速度
+        elif maneuver_state["phase"] == "in_clutter":
+            velocity_cmd = 580  # 杂波区减速
         else:
-            velocity_cmd = 620
+            velocity_cmd = 620  # 恢复时正常速度
 
         # 计算杂波效果
         clutter_effectiveness = 0.0
-        if current_alt < 1800:
-            clutter_effectiveness = 0.85  # 85%杂波遮蔽
+        if current_alt < 1500:
+            clutter_effectiveness = 0.85
+        elif current_alt < 2000:
+            clutter_effectiveness = 0.70
         elif current_alt < 2500:
-            clutter_effectiveness = 0.65  # 65%效果
-        elif current_alt < 3500:
-            clutter_effectiveness = 0.35  # 35%效果
+            clutter_effectiveness = 0.50
 
-        logging.debug(
-            f"Notch执行: 高度={current_alt:.0f}m, 下降={altitude_cmd:.0f}m, 杂波效果={clutter_effectiveness:.2f}, 阶段={notch_phase}")
-
-        # 继承Beam的横向机动，添加高度控制
-        notch_action = beam_action.copy()
-        notch_action.update({
-            "altitude_cmd": altitude_cmd,
+        return {
+            "heading_cmd": maneuver_state.get("beam_heading", 0),  # 继承Beam的横向机动
+            "altitude_cmd": altitude_cmd if 'altitude_cmd' in locals() else 0,
             "velocity_cmd": velocity_cmd,
             "ground_clutter": True,
             "clutter_effectiveness": clutter_effectiveness,
-            "notch_phase": notch_phase,
-            "target_altitude": 1500 if missile_distance < 25000 else current_alt
-        })
-
-        return notch_action
+            "shoot": False,
+            "maneuver_active": True,
+            "notch_phase": maneuver_state["phase"],
+            "notch_urgency": maneuver_state.get("notch_urgency", "NORMAL")
+        }
 
     def _skate_logic(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Skate机动逻辑 - 复杂攻击序列"""

@@ -9,7 +9,7 @@ class Timeout(BaseTerminationCondition):
 
     def __init__(self, config):
         super().__init__(config)
-        self.max_steps = getattr(self.config, 'max_steps', 500)
+        self.max_steps = getattr(self.config, 'max_steps', 2000)
 
     def get_termination(self, task, env, agent_id, info={}):
         """
