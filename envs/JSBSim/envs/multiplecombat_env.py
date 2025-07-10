@@ -7,6 +7,7 @@ from typing import Tuple, Dict, Any  # 用于类型提示，提高代码可读�
 from gymnasium import spaces  # Gymnasium 库，用于定义强化学习环境的观测和动作空间
 from ..core.simulatior import AircraftSimulator, BaseSimulator  # 导入核心模拟器类
 from ..core.catalog import Catalog as c  # 导入 Catalog 类，包含状态和动作的变量定义
+from ..tasks import TacticalTemplateTestTask
 from ..tasks.multiplecombat_task import (
     HierarchicalMultipleCombatShootTask,
     HierarchicalMultipleCombatTask,
@@ -80,6 +81,8 @@ class MultipleCombatEnv(BaseEnv):
             self.task = HierarchicalMultipleCombatTask(self.config)  # 加载分层多智能体任务
         elif taskname == 'hierarchical_multiplecombat_shoot':
             self.task = HierarchicalMultipleCombatShootTask(self.config)  # 加载分层射击任务
+        elif taskname == 'tactical_template_test':
+            self.task = TacticalTemplateTestTask(self.config)
         else:
             logging.error(f"Unknown task name: {taskname}")  # 记录错误日志
             raise NotImplementedError(f"Unknown taskname: {taskname}")  # 抛出未实现异常
@@ -139,19 +142,41 @@ class MultipleCombatEnv(BaseEnv):
         logging.info(f"Loaded simulators: {list(self._jsbsims.keys())}")
 
     def _setup_formation_relationships(self):
-        """设置红方和蓝方的编队关系以及敌我关系。"""
-        # 红方编队（A0100 和 A0200）
-        self._jsbsims["A0100"].partners = [self._jsbsims["A0200"]]  # A0100 的队友是 A0200
-        self._jsbsims["A0100"].enemies = [self._jsbsims["B0100"], self._jsbsims["B0200"]]  # A0100 的敌人是蓝方
-        self._jsbsims["A0200"].partners = [self._jsbsims["A0100"]]  # A0200 的队友是 A0100
-        self._jsbsims["A0200"].enemies = [self._jsbsims["B0100"], self._jsbsims["B0200"]]  # A0200 的敌人是蓝方
+        """设置红方和蓝方的编队关系以及敌我关系。支持1v1和2v2配置"""
+        available_agents = list(self._jsbsims.keys())
+        logging.info(f"Setting up formation relationships for agents: {available_agents}")
 
-        # 蓝方编队（B0100 和 B0200）
-        self._jsbsims["B0100"].partners = [self._jsbsims["B0200"]]  # B0100 的队友是 B0200
-        self._jsbsims["B0100"].enemies = [self._jsbsims["A0100"], self._jsbsims["A0200"]]  # B0100 的敌人是红方
-        self._jsbsims["B0200"].partners = [self._jsbsims["B0100"]]  # B0200 的队友是 B0100
-        self._jsbsims["B0200"].enemies = [self._jsbsims["A0100"], self._jsbsims["A0200"]]  # B0200 的敌人是红方
+        # 检查是否是1v1配置
+        if len(available_agents) == 2 and "A0100" in available_agents and "B0100" in available_agents:
+            # 1v1配置
+            self._jsbsims["A0100"].partners = []  # 没有队友
+            self._jsbsims["A0100"].enemies = [self._jsbsims["B0100"]]
+            self._jsbsims["B0100"].partners = []  # 没有队友
+            self._jsbsims["B0100"].enemies = [self._jsbsims["A0100"]]
+            logging.info("1v1 formation relationships established: A0100 vs B0100")
 
+        # 检查是否是2v2配置
+        elif len(available_agents) == 4 and all(
+                agent in available_agents for agent in ["A0100", "A0200", "B0100", "B0200"]):
+            # 原有的2v2配置
+            # 红方编队（A0100 和 A0200）
+            self._jsbsims["A0100"].partners = [self._jsbsims["A0200"]]
+            self._jsbsims["A0100"].enemies = [self._jsbsims["B0100"], self._jsbsims["B0200"]]
+            self._jsbsims["A0200"].partners = [self._jsbsims["A0100"]]
+            self._jsbsims["A0200"].enemies = [self._jsbsims["B0100"], self._jsbsims["B0200"]]
+
+            # 蓝方编队（B0100 和 B0200）
+            self._jsbsims["B0100"].partners = [self._jsbsims["B0200"]]
+            self._jsbsims["B0100"].enemies = [self._jsbsims["A0100"], self._jsbsims["A0200"]]
+            self._jsbsims["B0200"].partners = [self._jsbsims["B0100"]]
+            self._jsbsims["B0200"].enemies = [self._jsbsims["A0100"], self._jsbsims["A0200"]]
+            logging.info("2v2 formation relationships established")
+
+        else:
+            # 未知配置，报错
+            logging.error(f"Unsupported agent configuration: {available_agents}")
+            raise ValueError(
+                f"Unsupported agent configuration. Expected 1v1 (A0100, B0100) or 2v2 (A0100, A0200, B0100, B0200), got: {available_agents}")
     def reset(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
         """重置环境状态，包括时间线、战术态势和模拟器。
 
