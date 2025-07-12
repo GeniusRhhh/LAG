@@ -76,7 +76,6 @@ class RadarModel:
         current_altitude = state.get("current_altitude", 5000)
         missiles_incoming = state.get("missiles_incoming", [])
 
-        # 确保 missiles_incoming 是可迭代的
         if not isinstance(missiles_incoming, (list, tuple)):
             logging.warning(f"missiles_incoming is not iterable for {agent_id}: {type(missiles_incoming)}")
             missiles_incoming = []

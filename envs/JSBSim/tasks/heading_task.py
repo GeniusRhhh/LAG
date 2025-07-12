@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 from gymnasium import spaces
 from .task_base import BaseTask
@@ -108,7 +110,6 @@ class HeadingTask(BaseTask):
         norm_act[2] = action[2] * 2. / (self.action_space.nvec[2] - 1.) - 1.
         norm_act[3] = action[3] * 0.5 / (self.action_space.nvec[3] - 1.) + 0.4
         return norm_act
-
 
 # import logging
 # import numpy as np
