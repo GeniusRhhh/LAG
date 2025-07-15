@@ -83,6 +83,9 @@ class MultipleCombatEnv(BaseEnv):
             self.task = HierarchicalMultipleCombatShootTask(self.config)  # 加载分层射击任务
         elif taskname == 'tactical_template_test':
             self.task = TacticalTemplateTestTask(self.config)
+        elif taskname == "pure_maneuver":  # 新增
+            from ..tasks import PureManeuverTask
+            self.task = PureManeuverTask(self.config)
         else:
             logging.error(f"Unknown task name: {taskname}")  # 记录错误日志
             raise NotImplementedError(f"Unknown taskname: {taskname}")  # 抛出未实现异常

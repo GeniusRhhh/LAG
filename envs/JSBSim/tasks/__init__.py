@@ -4,4 +4,4 @@ from .singlecombat_with_missle_task import SingleCombatDodgeMissileTask, Hierarc
     HierarchicalSingleCombatShootTask, SingleCombatShootMissileTask
 from .tactical_template_test_task import TacticalTemplateTestTask
 from .TacticalTemplate import TacticalTemplate
-from .RefinedTacticalManeuvers import RefinedTacticalManeuvers
+from .pure_maneuver_task import PureManeuverTask
