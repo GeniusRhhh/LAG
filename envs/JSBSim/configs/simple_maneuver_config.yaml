@@ -1,5 +1,5 @@
 # envs/JSBSim/configs/simple_maneuver_config.yaml
-task: pure_maneuver  # 新的任务类型
+task: pure_maneuver
 sim_freq: 60
 agent_interaction_steps: 12
 max_steps: 3000
