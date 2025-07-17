@@ -121,7 +121,7 @@ class PureManeuverTask(MultipleCombatTask):
         if agent_id not in self.initial_heading:
             current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_rad)
             self.initial_heading[agent_id] = np.rad2deg(current_heading)
-            logging.info(f"📍 {agent_id} initial heading: {self.initial_heading[agent_id]:.1f}°")
+            logging.info(f"{agent_id} initial heading: {self.initial_heading[agent_id]:.1f}°")
 
         # 区分测试飞机和观察飞机
         if agent_id == self.test_agent_id:
@@ -187,7 +187,7 @@ class PureManeuverTask(MultipleCombatTask):
                 velocity_cmd_id = 3  # 保持速度
             else:
                 # 调试输出
-                if env.current_step % 50 == 0:
+                if env.current_step % 100 == 0:
                     alt_info = f", Alt={target_altitude:.0f}ft" if target_altitude else ""
                     logging.info(
                         f" {agent_id} {self.maneuver_type.upper()} {phase}: Target={target_heading:.1f}°{alt_info}")
@@ -218,7 +218,7 @@ class PureManeuverTask(MultipleCombatTask):
             return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
 
         except Exception as e:
-            logging.error(f"❌ {agent_id} maneuver execution error: {e}")
+            logging.error(f" {agent_id} maneuver execution error: {e}")
             return self._direct_control_mapping(env, agent_id, 3, 4, 3)
 
     def _process_observer_behavior(self, env, agent_id):
@@ -232,7 +232,7 @@ class PureManeuverTask(MultipleCombatTask):
             return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
 
         except Exception as e:
-            logging.error(f"❌ {agent_id} observer behavior error: {e}")
+            logging.error(f"{agent_id} observer behavior error: {e}")
             return np.array([0.0, 0.0, 0.0, 0.7])
 
     def step(self, env):
@@ -495,7 +495,7 @@ class PureManeuverTask(MultipleCombatTask):
             return np.array([0.0, 0.0, 0.0, 0.7])
 
 
-    def set_crank_params(self, angle_deg=45.0, turn_rate_deg_per_sec=3.0, hold_time_sec=20.0):
+    def set_crank_params(self, angle_deg=60.0, turn_rate_deg_per_sec=3.0, hold_time_sec=30.0):
         """设置Crank机动参数"""
         self.maneuver_params = {
             "crank_angle_deg": angle_deg,
@@ -504,7 +504,7 @@ class PureManeuverTask(MultipleCombatTask):
         }
         logging.info(f"Crank参数更新: 角度={angle_deg}°, 转弯率={turn_rate_deg_per_sec}°/s, 保持时间={hold_time_sec}s")
 
-    def set_beam_params(self, angle_deg=90.0, turn_rate_deg_per_sec=5.0, hold_time_sec=15.0):
+    def set_beam_params(self, angle_deg=90.0, turn_rate_deg_per_sec=5.0, hold_time_sec=40.0):
         """设置Beam机动参数"""
         self.maneuver_params["beam_angle_deg"] = angle_deg
         self.maneuver_params["beam_turn_rate_deg_per_sec"] = turn_rate_deg_per_sec
@@ -512,9 +512,9 @@ class PureManeuverTask(MultipleCombatTask):
         logging.info(f"Beam参数设置: {angle_deg}°横向, {turn_rate_deg_per_sec}°/s, {hold_time_sec}s")
 
     def set_notch_params(self, angle_deg=90.0, turn_rate_deg_per_sec=4.0,
-                        descent_rate_ft_per_sec=60.0,
+                        descent_rate_ft_per_sec=70.0,
                         descent_time_sec=5.0,
-                        hold_time_sec=15.0):
+                        hold_time_sec=20.0):
         """设置Notch机动参数"""
         self.maneuver_params["notch_angle_deg"] = angle_deg
         self.maneuver_params["notch_turn_rate_deg_per_sec"] = turn_rate_deg_per_sec

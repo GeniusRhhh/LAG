@@ -137,8 +137,8 @@ class PureManeuvers:
                        initial_altitude_ft: float = 20000.0,
                        notch_angle_deg: float = 90.0,
                        turn_rate_deg_per_sec: float = 4.0,
-                       descent_rate_ft_per_sec: float = 60.0,  # 🔧 减少到安全的60 ft/s
-                       descent_time_sec: float = 5.0,  # 🔧 减少到5秒
+                       descent_rate_ft_per_sec: float = 60.0,
+                       descent_time_sec: float = 5.0,
                        hold_time_sec: float = 15.0):
         """
         Notch机动 - 地面杂波隐蔽机动，打断雷达锁定
@@ -161,7 +161,7 @@ class PureManeuvers:
         target_low_altitude = initial_altitude_ft - max_descent
 
         # 不低于安全高度
-        min_safe_altitude = 12000.0
+        min_safe_altitude = 9000.0
         if target_low_altitude < min_safe_altitude:
             target_low_altitude = min_safe_altitude
             # 重新计算实际下降率

@@ -596,7 +596,6 @@ class MissileSimulator(BaseSimulator):
         self._intercept_point = np.zeros(3)  # 预测拦截点
         self._terminal_distance = 8000  # 末段制导启动距离
 
-        # 调试输出标志
         self._phase_changed = False
 
     @property

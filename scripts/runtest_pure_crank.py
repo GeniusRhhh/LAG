@@ -92,7 +92,7 @@ def runtest_crank_maneuver():
 
         # 设置Crank机动和参数
         task.set_maneuver_type("crank")
-        task.set_crank_params(angle_deg=45.0, turn_rate_deg_per_sec=3.0, hold_time_sec=20.0)
+        task.set_crank_params(angle_deg=45.0, turn_rate_deg_per_sec=3.0, hold_time_sec=40.0)
         print("环境创建成功，Crank参数设置完成")
 
         # 创建ACMI生成器
