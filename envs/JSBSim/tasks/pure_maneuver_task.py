@@ -3,72 +3,64 @@ import logging
 import numpy as np
 import torch
 from typing import Dict, Any
-
-from gymnasium import spaces
-
 from .multiplecombat_task import MultipleCombatTask
-from .pure_maneuvers import PureManeuvers
+from .pure_maneuvers import PureManeuvers, BasicManeuvers, ManeuverComposer
 from ..core.catalog import Catalog as c
 from ..model.baseline_actor import BaselineActor
 from ..utils.utils import get_root_dir
 
 
 class PureManeuverTask(MultipleCombatTask):
-    """机动测试任务"""
+    """纯机动测试任务 - 支持基础机动和组合机动"""
 
     def __init__(self, config):
         super().__init__(config)
-        self.config = config  # 保存配置引用
-        #机动参数暴露
-        self.maneuver_type = "crank"
+
+        # 机动参数暴露，可以修改
+        self.maneuver_type = "crank"  # 支持: crank, beam, notch, basic, composite
         self.maneuver_params = {
-            # Crank机动参数
-            "crank_angle_deg": 45.0,
+            "crank_angle_deg": 60.0,
             "turn_rate_deg_per_sec": 3.0,
-            "hold_time_sec": 40.0,
-
-            # Beam机动参数 - 横向态势
-            "beam_angle_deg": 90.0,  # 90度横向
-            "beam_turn_rate_deg_per_sec": 5.0,  # 快速转向
-            "beam_hold_time_sec": 40.0,
-
-            # Notch机动参数 - 地面杂波隐蔽
-            "notch_angle_deg": 90.0,  # 横向转弯角度
-            "notch_turn_rate_deg_per_sec": 4.0,
-            "notch_descent_rate_ft_per_sec": 100.0,  # 下降率
-            "notch_descent_time_sec": 20.0,  # 下降时间
-            "notch_hold_time_sec": 40.0
+            "hold_time_sec": 20.0
         }
+
+        # 基础机动参数
+        self.basic_maneuver_params = {
+            "turn_angle": 45.0,
+            "turn_rate": 3.0,
+            "altitude_change": 1000.0,
+            "velocity_change": 50.0,
+            "duration": 10.0
+        }
+
+        # 组合机动参数
+        self.composite_maneuver_name = "escape"  # escape, attack, defense
 
         # 测试配置
         self.test_agent_id = "A0100"
         self.observer_agent_id = "B0100"
         self.test_start_time = 0.0
         self.initial_heading = {}
+        self.initial_altitude = {}
         self.trajectory_data = {}
 
-        # 三层架构
         self.my_lowlevel_policy = BaselineActor()
         self.enemy_baseline_policy = BaselineActor()
         self._inner_rnn_states = {}
         self._enemy_rnn_states = {}
 
-        # 参数映射
         self.norm_delta_altitude = np.array([-1000, -500, -200, 0, 200, 500, 1000]) / 1000.0
         self.norm_delta_heading = np.array(
             [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])
         self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 100.0
 
+        # 初始化机动组合器
+        self.maneuver_composer = ManeuverComposer()
+
         # 加载模型
         self._load_baseline_models()
 
-    @property
-    def num_agents(self) -> int:
-        return len(self.config.aircraft_configs)
-
-    def load_action_space(self):
-        """第二层高层控制"""
-        self.action_space = spaces.MultiDiscrete([7, 9, 7])  # [altitude_cmd_id, heading_cmd_id, velocity_cmd_id]
+        logging.info("PureManeuverTask initialized - 支持基础机动和组合机动")
 
     def _load_baseline_models(self):
         """加载baseline模型"""
@@ -86,9 +78,10 @@ class PureManeuverTask(MultipleCombatTask):
             self.my_lowlevel_policy.load_state_dict(checkpoint)
             self.my_lowlevel_policy.eval()
 
-            # 敌方使用相同的策略
+            # 敌方也使用相同的策略
             self.enemy_baseline_policy.load_state_dict(checkpoint)
             self.enemy_baseline_policy.eval()
+
 
         except Exception as e:
             logging.error(f"加载baseline模型失败: {e}")
@@ -97,6 +90,7 @@ class PureManeuverTask(MultipleCombatTask):
 
     def reset(self, env):
         """重置任务状态"""
+        # 调用基类重置
         from .task_base import BaseTask
         BaseTask.reset(self, env)
 
@@ -104,125 +98,283 @@ class PureManeuverTask(MultipleCombatTask):
         self.step_count = 0
         self.test_start_time = 0.0
         self.initial_heading.clear()
+        self.initial_altitude.clear()
         self.trajectory_data.clear()
 
         # 重置RNN状态
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
         self._enemy_rnn_states = {agent_id: torch.zeros(1, 1, 128) for agent_id in env.agents.keys()}
 
+        logging.info(f"PureManeuverTask reset - testing: {self.maneuver_type}")
+        logging.info(f"Maneuver params: {self.maneuver_params}")
+
     def normalize_action(self, env, agent_id, action):
-        """动作归一化"""
+        """动作归一化 """
         if agent_id not in env.agents or not env.agents[agent_id].is_alive:
             return np.array([0.0, 0.0, 0.0, 0.7])
 
         current_time = env.current_step * env.time_interval
 
-        # 记录初始航向
+        # 记录初始状态（只记录一次）
         if agent_id not in self.initial_heading:
             current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_rad)
             self.initial_heading[agent_id] = np.rad2deg(current_heading)
+
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            self.initial_altitude[agent_id] = current_altitude
+
             logging.info(f"{agent_id} initial heading: {self.initial_heading[agent_id]:.1f}°")
+            logging.info(f"{agent_id} initial altitude: {self.initial_altitude[agent_id]:.1f}m")
 
         # 区分测试飞机和观察飞机
         if agent_id == self.test_agent_id:
-            # 测试飞机：执行纯机动
+            # 测试飞机：执行机动
             return self._process_test_maneuver_action(env, agent_id, current_time)
         else:
-            # 观察飞机：使用baseline行为
+            # 观察飞机：使用智能baseline行为
             return self._process_observer_behavior(env, agent_id)
 
     def _process_test_maneuver_action(self, env, agent_id, current_time):
-        """处理测试飞机的机动动作 - 使用纯机动函数"""
+        """处理测试飞机的机动动作 - 支持多种机动类型"""
         try:
-            # 第一层：高层机动函数调用
             initial_heading = self.initial_heading[agent_id]
+            initial_altitude = self.initial_altitude[agent_id]
 
-            if self.maneuver_type == "crank":
-                maneuver_result = PureManeuvers.crank_maneuver(
-                    current_time,
-                    initial_heading,
-                    self.maneuver_params["crank_angle_deg"],
-                    self.maneuver_params["turn_rate_deg_per_sec"],
-                    self.maneuver_params["hold_time_sec"]
-                )
-                if maneuver_result:
-                    phase, target_heading, target_roll = maneuver_result
-                    target_altitude = None  # 保持当前高度
+            if self.maneuver_type in ["crank", "beam", "notch"]:
+                # 现有的大机动
+                return self._process_large_maneuver(env, agent_id, current_time, initial_heading, initial_altitude)
 
-            elif self.maneuver_type == "beam":
-                maneuver_result = PureManeuvers.beam_maneuver(
-                    current_time,
-                    initial_heading,
-                    self.maneuver_params["beam_angle_deg"],
-                    self.maneuver_params["beam_turn_rate_deg_per_sec"],
-                    self.maneuver_params["beam_hold_time_sec"]
-                )
-                if maneuver_result:
-                    phase, target_heading, target_roll = maneuver_result
-                    target_altitude = None  # 保持当前高度
+            elif self.maneuver_type == "basic":
+                # 基础机动
+                return self._process_basic_maneuver(env, agent_id, current_time, initial_heading, initial_altitude)
 
-            elif self.maneuver_type == "notch":
-                # 获取当前高度
-                current_altitude_ft = env.agents[agent_id].get_property_value(c.position_h_sl_ft)
+            elif self.maneuver_type == "composite":
+                # 组合机动
+                return self._process_composite_maneuver(env, agent_id, current_time, initial_heading, initial_altitude)
 
-                maneuver_result = PureManeuvers.notch_maneuver(
-                    current_time,
-                    initial_heading,
-                    current_altitude_ft,
-                    self.maneuver_params["notch_angle_deg"],
-                    self.maneuver_params["notch_turn_rate_deg_per_sec"],
-                    self.maneuver_params["notch_descent_rate_ft_per_sec"],
-                    self.maneuver_params["notch_descent_time_sec"],
-                    self.maneuver_params["notch_hold_time_sec"]
-                )
-                # Notch返回4个值，包含高度
-                if maneuver_result:
-                    phase, target_heading, target_altitude, target_roll = maneuver_result
             else:
-                maneuver_result = None
-
-            if maneuver_result is None:
-                altitude_cmd_id = 3  # 保持高度
-                heading_cmd_id = 4  # 保持航向
-                velocity_cmd_id = 3  # 保持速度
-            else:
-                # 调试输出
-                if env.current_step % 100 == 0:
-                    alt_info = f", Alt={target_altitude:.0f}ft" if target_altitude else ""
-                    logging.info(
-                        f" {agent_id} {self.maneuver_type.upper()} {phase}: Target={target_heading:.1f}°{alt_info}")
-
-                # 处理航向指令
-                current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
-                heading_diff = target_heading - current_heading
-                while heading_diff > 180:
-                    heading_diff -= 360
-                while heading_diff < -180:
-                    heading_diff += 360
-
-                if abs(heading_diff) < 2.0:
-                    heading_cmd_id = 4  # 保持航向
-                else:
-                    heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
-
-                # 处理高度指令
-                if target_altitude is None:
-                    altitude_cmd_id = 3  # 保持当前高度
-                else:
-                    current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_ft)
-                    altitude_diff = target_altitude - current_altitude
-                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
-
-                velocity_cmd_id = 3  # 保持速度
-
-            return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
+                # 默认保持稳定飞行
+                return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
 
         except Exception as e:
-            logging.error(f" {agent_id} maneuver execution error: {e}")
+            logging.error(f"❌ {agent_id} maneuver execution error: {e}")
             return self._direct_control_mapping(env, agent_id, 3, 4, 3)
 
+    def _process_large_maneuver(self, env, agent_id, current_time, initial_heading, initial_altitude):
+        """处理大机动 """
+        if self.maneuver_type == "crank":
+            maneuver_result = PureManeuvers.crank_maneuver(
+                current_time,
+                initial_heading,
+                self.maneuver_params["crank_angle_deg"],
+                self.maneuver_params["turn_rate_deg_per_sec"],
+                self.maneuver_params["hold_time_sec"]
+            )
+        elif self.maneuver_type == "beam":
+            maneuver_result = PureManeuvers.beam_maneuver(
+                current_time,
+                initial_heading,
+                self.maneuver_params.get("beam_angle_deg", 90.0),
+                self.maneuver_params.get("turn_rate_deg_per_sec", 5.0),
+                self.maneuver_params.get("hold_time_sec", 15.0)
+            )
+        elif self.maneuver_type == "notch":
+            maneuver_result = PureManeuvers.notch_maneuver(
+                current_time,
+                initial_heading,
+                initial_altitude,
+                self.maneuver_params.get("notch_angle_deg", 90.0),
+                self.maneuver_params.get("turn_rate_deg_per_sec", 4.0),
+                self.maneuver_params.get("descent_rate_ft_per_sec", 60.0),
+                self.maneuver_params.get("descent_time_sec", 5.0),
+                self.maneuver_params.get("hold_time_sec", 15.0)
+            )
+        else:
+            maneuver_result = None
+
+        if maneuver_result is None:
+            # 机动结束，保持稳定飞行
+            altitude_cmd_id = 3  # 保持高度
+            heading_cmd_id = 4  # 保持航向
+            velocity_cmd_id = 3  # 保持速度
+        else:
+            if len(maneuver_result) == 3:
+                phase, target_heading, target_roll = maneuver_result
+                target_altitude = None
+            else:
+                phase, target_heading, target_altitude, target_roll = maneuver_result
+
+            # 调试输出
+            if env.current_step % 100 == 0:
+                logging.info(
+                    f" {agent_id} {self.maneuver_type.title()} {phase}: Target={target_heading:.1f}°")
+
+            # 转换为导航指令
+            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            heading_diff = target_heading - current_heading
+
+            # 规范化角度差到 [-180, 180] 范围
+            while heading_diff > 180:
+                heading_diff -= 360
+            while heading_diff < -180:
+                heading_diff += 360
+
+            # 如果航向差很小，就保持当前航向
+            if abs(heading_diff) < 2.0:
+                heading_cmd_id = 4  # 保持航向
+            else:
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+
+            # 高度控制
+            if target_altitude is not None:
+                current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+                altitude_diff = target_altitude - current_altitude
+                altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+            else:
+                altitude_cmd_id = 3  # 保持高度
+
+            velocity_cmd_id = 3  # 保持速度
+
+        return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
+
+    def _process_basic_maneuver(self, env, agent_id, current_time, initial_heading, initial_altitude):
+        """处理基础机动"""
+        basic_maneuver_name = self.maneuver_params.get("basic_maneuver_name", "level_flight")
+
+        # 调用基础机动函数
+        if basic_maneuver_name == "level_flight":
+            result = BasicManeuvers.level_flight(current_time, self.basic_maneuver_params["duration"])
+        elif basic_maneuver_name == "accelerate":
+            result = BasicManeuvers.accelerate(current_time, self.basic_maneuver_params["duration"],
+                                               self.basic_maneuver_params["velocity_change"])
+        elif basic_maneuver_name == "decelerate":
+            result = BasicManeuvers.decelerate(current_time, self.basic_maneuver_params["duration"],
+                                               self.basic_maneuver_params["velocity_change"])
+        elif basic_maneuver_name == "turn":
+            result = BasicManeuvers.turn(current_time, initial_heading,
+                                         self.basic_maneuver_params["turn_angle"],
+                                         self.basic_maneuver_params["turn_rate"])
+        elif basic_maneuver_name == "pull_up":
+            result = BasicManeuvers.pull_up(current_time, self.basic_maneuver_params["duration"],
+                                            self.basic_maneuver_params["altitude_change"])
+        elif basic_maneuver_name == "dive":
+            result = BasicManeuvers.dive(current_time, self.basic_maneuver_params["duration"],
+                                         self.basic_maneuver_params["altitude_change"])
+        elif basic_maneuver_name == "diagonal_flight":
+            result = BasicManeuvers.diagonal_flight(current_time, self.basic_maneuver_params["duration"],
+                                                    self.basic_maneuver_params["turn_angle"],
+                                                    self.basic_maneuver_params["altitude_change"])
+        elif basic_maneuver_name == "roll":
+            result = BasicManeuvers.roll(current_time, self.basic_maneuver_params["duration"], 45.0)
+        elif basic_maneuver_name == "turn_pull_up":
+            result = BasicManeuvers.turn_pull_up(current_time, initial_heading,
+                                                 self.basic_maneuver_params["turn_angle"],
+                                                 self.basic_maneuver_params["turn_rate"],
+                                                 self.basic_maneuver_params["altitude_change"])
+        elif basic_maneuver_name == "turn_dive":
+            result = BasicManeuvers.turn_dive(current_time, initial_heading,
+                                              self.basic_maneuver_params["turn_angle"],
+                                              self.basic_maneuver_params["turn_rate"],
+                                              self.basic_maneuver_params["altitude_change"])
+        else:
+            result = (None, None, None, None, 0.0)
+
+        phase, target_heading, target_altitude, target_velocity, target_roll = result
+
+        if phase is None:
+            # 机动结束，保持稳定飞行
+            return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
+
+        # 调试输出
+        if env.current_step % 100 == 0:
+            logging.info(f" {agent_id} {basic_maneuver_name} {phase}")
+
+        # 转换为导航指令
+        altitude_cmd_id = 3  # 默认保持高度
+        heading_cmd_id = 4  # 默认保持航向
+        velocity_cmd_id = 3  # 默认保持速度
+
+        # 航向控制
+        if target_heading is not None:
+            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            heading_diff = target_heading - current_heading
+
+            # 规范化角度差
+            while heading_diff > 180:
+                heading_diff -= 360
+            while heading_diff < -180:
+                heading_diff += 360
+
+            if abs(heading_diff) < 2.0:
+                heading_cmd_id = 4  # 保持航向
+            else:
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+
+        # 高度控制
+        if target_altitude is not None:
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            altitude_diff = target_altitude - current_altitude
+            altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
+        # 速度控制
+        if target_velocity is not None:
+            velocity_cmd_id = self._convert_velocity_to_index(target_velocity)
+
+        return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
+
+    def _process_composite_maneuver(self, env, agent_id, current_time, initial_heading, initial_altitude):
+        """处理组合机动"""
+        result = self.maneuver_composer.execute_composite_maneuver(
+            self.composite_maneuver_name,
+            current_time,
+            initial_heading,
+            initial_altitude
+        )
+
+        phase, target_heading, target_altitude, target_velocity, target_roll = result
+
+        if phase is None:
+            # 机动结束，保持稳定飞行
+            return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
+
+        # 调试输出
+        if env.current_step % 100 == 0:
+            logging.info(f" {agent_id} {self.composite_maneuver_name} {phase}")
+
+        # 转换为导航指令
+        altitude_cmd_id = 3
+        heading_cmd_id = 4
+        velocity_cmd_id = 3
+
+        # 航向控制
+        if target_heading is not None:
+            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            heading_diff = target_heading - current_heading
+
+            while heading_diff > 180:
+                heading_diff -= 360
+            while heading_diff < -180:
+                heading_diff += 360
+
+            if abs(heading_diff) < 2.0:
+                heading_cmd_id = 4
+            else:
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+
+        # 高度控制
+        if target_altitude is not None:
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            altitude_diff = target_altitude - current_altitude
+            altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
+        # 速度控制
+        if target_velocity is not None:
+            velocity_cmd_id = self._convert_velocity_to_index(target_velocity)
+
+        return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
+
     def _process_observer_behavior(self, env, agent_id):
-        """处理观察飞机的行为 - 敌方baseline策略"""
+        """处理观察飞机的行为 """
         try:
             # 生成简单的高层指令保持稳定飞行
             altitude_cmd_id = 3  # 保持高度
@@ -289,7 +441,7 @@ class PureManeuverTask(MultipleCombatTask):
             self._record_trajectory_data(env, agent_id, current_time)
 
             # 定期输出状态信息
-            if env.current_step % 50 == 0:
+            if env.current_step %100 == 0:
                 logging.info(f"Step {env.current_step} - {agent_id}: "
                              f"Alt={agent_info['altitude']:.1f}m, "
                              f"Hdg={agent_info['heading']:.1f}°, "
@@ -317,6 +469,25 @@ class PureManeuverTask(MultipleCombatTask):
 
     def _evaluate_maneuver_performance(self, env, agent_id, current_time) -> float:
         """评估机动执行效果"""
+        try:
+            if self.maneuver_type in ["crank", "beam", "notch"]:
+                # 大机动评估
+                return self._evaluate_large_maneuver_performance(env, agent_id, current_time)
+            elif self.maneuver_type == "basic":
+                # 基础机动评估
+                return self._evaluate_basic_maneuver_performance(env, agent_id, current_time)
+            elif self.maneuver_type == "composite":
+                # 组合机动评估
+                return self._evaluate_composite_maneuver_performance(env, agent_id, current_time)
+
+            return 0.0
+
+        except Exception as e:
+            logging.error(f"机动性能评估错误: {e}")
+            return 0.0
+
+    def _evaluate_large_maneuver_performance(self, env, agent_id, current_time) -> float:
+        """评估大机动性能"""
         try:
             if self.maneuver_type == "crank":
                 initial_heading = self.initial_heading[agent_id]
@@ -347,7 +518,113 @@ class PureManeuverTask(MultipleCombatTask):
             return 0.0
 
         except Exception as e:
-            logging.error(f"机动性能评估错误: {e}")
+            logging.error(f"❌ 大机动性能评估错误: {e}")
+            return 0.0
+
+    def _evaluate_basic_maneuver_performance(self, env, agent_id, current_time) -> float:
+        """评估基础机动性能"""
+        try:
+            basic_maneuver_name = self.maneuver_params.get("basic_maneuver_name", "level_flight")
+
+            # 根据基础机动类型评估
+            if basic_maneuver_name in ["turn", "turn_pull_up", "turn_dive"]:
+                # 转弯类机动：评估航向跟踪
+                initial_heading = self.initial_heading[agent_id]
+                if basic_maneuver_name == "turn":
+                    result = BasicManeuvers.turn(current_time, initial_heading,
+                                                 self.basic_maneuver_params["turn_angle"],
+                                                 self.basic_maneuver_params["turn_rate"])
+                elif basic_maneuver_name == "turn_pull_up":
+                    result = BasicManeuvers.turn_pull_up(current_time, initial_heading,
+                                                         self.basic_maneuver_params["turn_angle"],
+                                                         self.basic_maneuver_params["turn_rate"],
+                                                         self.basic_maneuver_params["altitude_change"])
+                elif basic_maneuver_name == "turn_dive":
+                    result = BasicManeuvers.turn_dive(current_time, initial_heading,
+                                                      self.basic_maneuver_params["turn_angle"],
+                                                      self.basic_maneuver_params["turn_rate"],
+                                                      self.basic_maneuver_params["altitude_change"])
+
+                if result[0] is not None:
+                    phase, target_heading, target_altitude, target_velocity, target_roll = result
+                    current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+
+                    heading_error = abs(current_heading - target_heading)
+                    if heading_error > 180:
+                        heading_error = 360 - heading_error
+
+                    if heading_error < 5:
+                        return 0.3
+                    elif heading_error < 15:
+                        return 0.1
+                    else:
+                        return -0.05
+
+            elif basic_maneuver_name in ["pull_up", "dive"]:
+                # 高度变化机动：评估高度跟踪
+                current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+                initial_altitude = self.initial_altitude[agent_id]
+
+                if basic_maneuver_name == "pull_up":
+                    expected_altitude = initial_altitude + self.basic_maneuver_params["altitude_change"]
+                else:
+                    expected_altitude = initial_altitude - self.basic_maneuver_params["altitude_change"]
+
+                altitude_error = abs(current_altitude - expected_altitude)
+                if altitude_error < 100:
+                    return 0.3
+                elif altitude_error < 300:
+                    return 0.1
+                else:
+                    return -0.05
+
+            elif basic_maneuver_name in ["accelerate", "decelerate"]:
+                # 速度变化机动：评估速度跟踪
+                current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+                initial_velocity = 800.0  # 假设初始速度
+
+                if basic_maneuver_name == "accelerate":
+                    expected_velocity = initial_velocity + self.basic_maneuver_params["velocity_change"]
+                else:
+                    expected_velocity = initial_velocity - self.basic_maneuver_params["velocity_change"]
+
+                velocity_error = abs(current_velocity - expected_velocity)
+                if velocity_error < 20:
+                    return 0.3
+                elif velocity_error < 50:
+                    return 0.1
+                else:
+                    return -0.05
+
+            return 0.0
+
+        except Exception as e:
+            logging.error(f" 基础机动性能评估错误: {e}")
+            return 0.0
+
+    def _evaluate_composite_maneuver_performance(self, env, agent_id, current_time) -> float:
+        """评估组合机动性能"""
+        try:
+            # 组合机动评估：综合评估航向、高度、速度跟踪
+            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+
+            # 基础奖励
+            reward = 0.0
+
+            # 高度安全奖励
+            if 3000 <= current_altitude <= 4000:
+                reward += 0.1
+
+            # 速度稳定奖励
+            if 700 <= current_velocity <= 900:
+                reward += 0.1
+
+            return reward
+
+        except Exception as e:
+            logging.error(f" 组合机动性能评估错误: {e}")
             return 0.0
 
     def _record_trajectory_data(self, env, agent_id, current_time):
@@ -369,29 +646,14 @@ class PureManeuverTask(MultipleCombatTask):
         }
         self.trajectory_data[agent_id].append(state)
 
-
-    def _convert_altitude_to_index(self, altitude_diff_ft):
-        """将高度差转换为指令索引"""
-        altitude_diff_m = altitude_diff_ft * 0.3048  # 转换为米
-
-        # 映射到规范化的高度指令
-        if altitude_diff_m > 500:
-            return 6  # 大幅上升
-        elif altitude_diff_m > 200:
-            return 5  # 中等上升
-        elif altitude_diff_m > 50:
-            return 4  # 小幅上升
-        elif altitude_diff_m > -50:
-            return 3  # 保持高度
-        elif altitude_diff_m > -200:
-            return 2  # 小幅下降
-        elif altitude_diff_m > -500:
-            return 1  # 中等下降
-        else:
-            return 0  # 大幅下降
+    def _convert_altitude_to_index(self, altitude_cmd):
+        """高度指令转索引 - 复用你的成功实现"""
+        altitude_values = np.array([-1000, -500, -200, 0, 200, 500, 1000])
+        distances = np.abs(altitude_values - altitude_cmd)
+        return np.argmin(distances)
 
     def _convert_heading_to_index(self, heading_cmd):
-        """航向指令转索引"""
+        """航向指令转索引 - 复用你的成功实现"""
         heading_cmd = np.clip(heading_cmd, -np.pi, np.pi)
         heading_values = np.array(
             [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])
@@ -399,18 +661,19 @@ class PureManeuverTask(MultipleCombatTask):
         return np.argmin(distances)
 
     def _convert_velocity_to_index(self, velocity_offset):
-        """速度偏移转索引"""
+        """速度偏移转索引 - 复用你的成功实现"""
         velocity_values = np.array([-150, -100, -50, 0, 50, 100, 150])
         distances = np.abs(velocity_values - velocity_offset)
         return np.argmin(distances)
 
     def _use_lowlevel_policy(self, env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id):
-        """使用低级策略网络"""
+        """使用低级策略网络 """
 
         if self.my_lowlevel_policy is None:
             return self._direct_control_mapping(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
 
         try:
+            # 构建输入 - 完全按照你的成功格式
             raw_obs = self.get_obs(env, agent_id)
             input_obs = np.zeros(12)
 
@@ -494,39 +757,95 @@ class PureManeuverTask(MultipleCombatTask):
             logging.error(f"Direct control mapping error: {e}")
             return np.array([0.0, 0.0, 0.0, 0.7])
 
-
-    def set_crank_params(self, angle_deg=60.0, turn_rate_deg_per_sec=3.0, hold_time_sec=30.0):
+    def set_crank_params(self, angle_deg=45.0, turn_rate_deg_per_sec=3.0, hold_time_sec=20.0):
         """设置Crank机动参数"""
         self.maneuver_params = {
             "crank_angle_deg": angle_deg,
             "turn_rate_deg_per_sec": turn_rate_deg_per_sec,
             "hold_time_sec": hold_time_sec
         }
-        logging.info(f"Crank参数更新: 角度={angle_deg}°, 转弯率={turn_rate_deg_per_sec}°/s, 保持时间={hold_time_sec}s")
+        logging.info(f" Crank参数更新: 角度={angle_deg}°, 转弯率={turn_rate_deg_per_sec}°/s, 保持时间={hold_time_sec}s")
 
-    def set_beam_params(self, angle_deg=90.0, turn_rate_deg_per_sec=5.0, hold_time_sec=40.0):
+    def set_beam_params(self, angle_deg=90.0, turn_rate_deg_per_sec=5.0, hold_time_sec=15.0):
         """设置Beam机动参数"""
-        self.maneuver_params["beam_angle_deg"] = angle_deg
-        self.maneuver_params["beam_turn_rate_deg_per_sec"] = turn_rate_deg_per_sec
-        self.maneuver_params["beam_hold_time_sec"] = hold_time_sec
-        logging.info(f"Beam参数设置: {angle_deg}°横向, {turn_rate_deg_per_sec}°/s, {hold_time_sec}s")
+        self.maneuver_params = {
+            "beam_angle_deg": angle_deg,
+            "turn_rate_deg_per_sec": turn_rate_deg_per_sec,
+            "hold_time_sec": hold_time_sec
+        }
+        logging.info(f" Beam参数更新: 角度={angle_deg}°, 转弯率={turn_rate_deg_per_sec}°/s, 保持时间={hold_time_sec}s")
 
     def set_notch_params(self, angle_deg=90.0, turn_rate_deg_per_sec=4.0,
-                        descent_rate_ft_per_sec=70.0,
-                        descent_time_sec=5.0,
-                        hold_time_sec=20.0):
+                         descent_rate_ft_per_sec=60.0, descent_time_sec=5.0, hold_time_sec=15.0):
         """设置Notch机动参数"""
-        self.maneuver_params["notch_angle_deg"] = angle_deg
-        self.maneuver_params["notch_turn_rate_deg_per_sec"] = turn_rate_deg_per_sec
-        self.maneuver_params["notch_descent_rate_ft_per_sec"] = descent_rate_ft_per_sec
-        self.maneuver_params["notch_descent_time_sec"] = descent_time_sec
-        self.maneuver_params["notch_hold_time_sec"] = hold_time_sec
-        logging.info(f"Notch参数设置: {angle_deg}°转向, 安全下降{descent_rate_ft_per_sec}ft/s x {descent_time_sec}s, 保持{hold_time_sec}s")
+        self.maneuver_params = {
+            "notch_angle_deg": angle_deg,
+            "turn_rate_deg_per_sec": turn_rate_deg_per_sec,
+            "descent_rate_ft_per_sec": descent_rate_ft_per_sec,
+            "descent_time_sec": descent_time_sec,
+            "hold_time_sec": hold_time_sec
+        }
+        logging.info(f" Notch参数更新: 角度={angle_deg}°, 转弯率={turn_rate_deg_per_sec}°/s, "
+                     f"下降率={descent_rate_ft_per_sec}ft/s, 下降时间={descent_time_sec}s, 保持时间={hold_time_sec}s")
 
+    def set_basic_maneuver(self, maneuver_name="level_flight", **kwargs):
+        """设置基础机动"""
+        self.maneuver_type = "basic"
+        self.maneuver_params["basic_maneuver_name"] = maneuver_name
 
+        # 更新基础机动参数
+        for key, value in kwargs.items():
+            if key in self.basic_maneuver_params:
+                self.basic_maneuver_params[key] = value
 
+        logging.info(f" 基础机动设置: {maneuver_name}, 参数: {self.basic_maneuver_params}")
+
+    def set_composite_maneuver(self, maneuver_name="escape"):
+        """设置组合机动"""
+        self.maneuver_type = "composite"
+        self.composite_maneuver_name = maneuver_name
+
+        if maneuver_name in self.maneuver_composer.composite_maneuvers:
+            composite = self.maneuver_composer.composite_maneuvers[maneuver_name]
+            logging.info(f" 组合机动设置: {maneuver_name} - {composite.description}")
+        else:
+            logging.warning(f"️ 未知的组合机动: {maneuver_name}")
 
     def set_maneuver_type(self, maneuver_type="crank"):
         """设置机动类型"""
         self.maneuver_type = maneuver_type
         logging.info(f"机动类型设置为: {maneuver_type}")
+
+    def get_available_maneuvers(self):
+        """获取可用的机动列表"""
+        maneuvers = {
+            "large_maneuvers": ["crank", "beam", "notch"],
+            "basic_maneuvers": [
+                "level_flight", "accelerate", "decelerate", "turn",
+                "pull_up", "dive", "diagonal_flight", "roll",
+                "turn_pull_up", "turn_dive"
+            ],
+            "composite_maneuvers": list(self.maneuver_composer.composite_maneuvers.keys())
+        }
+        return maneuvers
+
+    def export_trajectory_data(self, filepath=None):
+        """导出轨迹数据"""
+        if not self.trajectory_data:
+            logging.warning("️ 没有轨迹数据可导出")
+            return None
+
+        if filepath is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = f"trajectory_data_{self.maneuver_type}_{timestamp}.json"
+
+        try:
+            import json
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.trajectory_data, f, indent=2, ensure_ascii=False)
+            logging.info(f"轨迹数据已导出到: {filepath}")
+            return filepath
+        except Exception as e:
+            logging.error(f" 轨迹数据导出失败: {e}")
+            return None
