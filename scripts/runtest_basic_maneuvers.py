@@ -228,22 +228,21 @@ def runtest_composite_maneuver(maneuver_name, custom_params=None):
 
 
 def run_all_basic_maneuvers():
-    """运行所有基础机动测试"""
+    """运行所有基础机动测试 - 修复版本"""
     print("基础机动测试系统")
     print("=" * 80)
 
     # 基础机动测试配置
     basic_maneuvers = [
-        ("level_flight", {}),#平飞
-        ("accelerate", {"velocity_change": 100.0, "duration": 15.0}),#加速
-        ("decelerate", {"velocity_change": 100.0, "duration": 15.0}),#减速
-        ("turn", {"turn_angle": 90.0, "turn_rate": 5.0}),#转弯
-        ("pull_up", {"altitude_change": 1500.0, "duration": 30.0}),#拉起
-        ("dive", {"altitude_change": 1500.0, "duration": 30.0}),#俯冲
-        ("diagonal_flight", {"turn_angle": 45.0, "altitude_change": 1500.0, "duration": 30.0}),#斜直飞
-        ("roll", {"duration": 4.0}),#滚转
-        ("turn_pull_up", {"turn_angle": 60.0, "turn_rate": 3.0, "altitude_change": 1500.0}),#转弯拉起
-        ("turn_dive", {"turn_angle": 60.0, "turn_rate": 3.0, "altitude_change": 1500.0})#转弯俯冲
+        ("level_flight", {}),
+        ("accelerate", {"velocity_change": 40.0, "duration": 30.0}),
+        ("decelerate", {"velocity_change": 40.0, "duration": 30.0}),
+        ("turn", {"turn_angle": 90.0, "turn_rate": 5.0}),
+        ("pull_up", {"altitude_change": 1500.0, "duration": 15.0}),
+        ("dive", {"altitude_change": 1500.0, "duration": 15.0, "min_altitude": 2000.0}),
+        ("diagonal_flight", {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 15.0, "min_altitude": 3000.0}),
+        ("circle", {"duration": 30.0, "radius": 1500.0, "direction": "clockwise", "turn_rate": 3.0}),
+        ("barrel_roll", {"duration": 10.0, "roll_revolutions": 1.0, "direction": "right"}),
     ]
 
     results = []
@@ -258,17 +257,28 @@ def run_all_basic_maneuvers():
 
 
 def run_all_composite_maneuvers():
-    """运行所有组合机动测试 - 支持参数和批量扫描"""
+    """运行所有组合机动测试 - 只保留turn_pull_up和turn_dive"""
     print("组合机动测试系统")
     print("=" * 80)
 
     composite_configs = [
-        ("escape", {"turn_angle": 120.0, "accel_velocity": 150.0}),
-        ("attack", {"side_climb_duration": 10.0, "dive_velocity": 60.0}),
-        ("defense", {"dive_alt": -1500.0, "turn_angle": 120.0}),
-        ("scissor", {"turn_angle": 60.0}),  # 新组合
-        ("high_yoyo", {"climb_alt": 2000.0})  # 新组合
+        ("turn_pull_up", {
+            "turn_angle": 80.0,
+            "turn_duration": 10.0,
+            "turn_rate": 5.0,
+            "altitude_gain": 1500.0,
+            "pull_up_duration": 10.0
+        }),
+        ("turn_dive", {
+            "turn_angle": 80.0,
+            "turn_duration": 10.0,
+            "turn_rate": 5.0,
+            "altitude_loss": 1500.0,
+            "dive_duration": 10.0,
+            "min_altitude": 2000.0
+        }),
     ]
+
     results = []
 
     for i, (maneuver_name, params) in enumerate(composite_configs, 1):
@@ -304,7 +314,7 @@ if __name__ == "__main__":
     if choice == 1:
         print("\n可用的基础机动:")
         basic_maneuvers = ["level_flight", "accelerate", "decelerate", "turn", "pull_up",
-                           "dive", "diagonal_flight", "roll", "turn_pull_up", "turn_dive"]
+                           "dive", "diagonal_flight", "circle","barrel_roll"]
         for i, name in enumerate(basic_maneuvers, 1):
             print(f"  {i} - {name}")
 
@@ -330,7 +340,7 @@ if __name__ == "__main__":
 
     elif choice == 3:
         print("\n可用的组合机动:")
-        composite_maneuvers = ["escape", "attack", "defense", "scissor", "high_yoyo"]
+        composite_maneuvers = ["turn_pull_up","turn_dive"]
         for i, name in enumerate(composite_maneuvers, 1):
             print(f"  {i} - {name}")
 
