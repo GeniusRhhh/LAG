@@ -1,4 +1,3 @@
-# envs/JSBSim/tasks/pure_maneuver_task.py
 import logging
 import numpy as np
 import torch
@@ -35,6 +34,7 @@ class PureManeuverTask(MultipleCombatTask):
 
         # 组合机动参数
         self.composite_maneuver_name = "escape"  # escape, attack, defense
+        self.composite_maneuver_params = {}  # 存储自定义参数
 
         # 测试配置
         self.test_agent_id = "A0100"
@@ -82,7 +82,6 @@ class PureManeuverTask(MultipleCombatTask):
             self.enemy_baseline_policy.load_state_dict(checkpoint)
             self.enemy_baseline_policy.eval()
 
-
         except Exception as e:
             logging.error(f"加载baseline模型失败: {e}")
             self.my_lowlevel_policy = None
@@ -104,6 +103,9 @@ class PureManeuverTask(MultipleCombatTask):
         # 重置RNN状态
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
         self._enemy_rnn_states = {agent_id: torch.zeros(1, 1, 128) for agent_id in env.agents.keys()}
+
+        # 重新初始化组合机动模板
+        self.maneuver_composer._setup_tactical_templates(custom_params=self.composite_maneuver_params)
 
         logging.info(f"PureManeuverTask reset - testing: {self.maneuver_type}")
         logging.info(f"Maneuver params: {self.maneuver_params}")
@@ -328,7 +330,8 @@ class PureManeuverTask(MultipleCombatTask):
             self.composite_maneuver_name,
             current_time,
             initial_heading,
-            initial_altitude
+            initial_altitude,
+            params=self.composite_maneuver_params
         )
 
         phase, target_heading, target_altitude, target_velocity, target_roll = result
@@ -441,7 +444,7 @@ class PureManeuverTask(MultipleCombatTask):
             self._record_trajectory_data(env, agent_id, current_time)
 
             # 定期输出状态信息
-            if env.current_step %100 == 0:
+            if env.current_step % 100 == 0:
                 logging.info(f"Step {env.current_step} - {agent_id}: "
                              f"Alt={agent_info['altitude']:.1f}m, "
                              f"Hdg={agent_info['heading']:.1f}°, "
@@ -800,10 +803,14 @@ class PureManeuverTask(MultipleCombatTask):
 
         logging.info(f" 基础机动设置: {maneuver_name}, 参数: {self.basic_maneuver_params}")
 
-    def set_composite_maneuver(self, maneuver_name="escape"):
+    def set_composite_maneuver(self, maneuver_name="escape", custom_params=None):
         """设置组合机动"""
         self.maneuver_type = "composite"
         self.composite_maneuver_name = maneuver_name
+        self.composite_maneuver_params = custom_params or {}
+
+        # 重新初始化组合机动模板以应用新参数
+        self.maneuver_composer._setup_tactical_templates(custom_params=self.composite_maneuver_params)
 
         if maneuver_name in self.maneuver_composer.composite_maneuvers:
             composite = self.maneuver_composer.composite_maneuvers[maneuver_name]

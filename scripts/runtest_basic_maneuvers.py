@@ -1,4 +1,4 @@
-# scripts/test_basic_maneuvers.py
+# scripts/runtest_basic_maneuvers.py
 import os
 import sys
 import logging
@@ -75,7 +75,7 @@ class ACMIGenerator:
             return False
 
 
-def test_basic_maneuver(maneuver_name, **params):
+def runtest_basic_maneuver(maneuver_name, **params):
     """测试单个基础机动"""
     try:
         from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
@@ -151,8 +151,8 @@ def test_basic_maneuver(maneuver_name, **params):
         return None
 
 
-def test_composite_maneuver(maneuver_name):
-    """测试组合机动"""
+def runtest_composite_maneuver(maneuver_name, custom_params=None):
+    """测试组合机动 - 添加自定义参数支持"""
     try:
         from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
 
@@ -164,9 +164,9 @@ def test_composite_maneuver(maneuver_name):
         env = MultipleCombatEnv(config_name)
         task = env.task
 
-        # 设置组合机动
-        task.set_composite_maneuver(maneuver_name)
-        print(f"组合机动设置完成: {maneuver_name}")
+        # 设置组合机动，支持参数
+        task.set_composite_maneuver(maneuver_name, custom_params=custom_params)
+        print(f"组合机动设置完成: {maneuver_name} with params {custom_params}")
 
         # 创建ACMI生成器
         acmi_generator = ACMIGenerator()
@@ -182,7 +182,7 @@ def test_composite_maneuver(maneuver_name):
 
         # 初始化ACMI文件
         if not acmi_generator.initialize_acmi_file(acmi_filepath):
-            return False
+            return None  # 修改为返回None以匹配原有逻辑
 
         # 运行测试
         step = 0
@@ -234,23 +234,23 @@ def run_all_basic_maneuvers():
 
     # 基础机动测试配置
     basic_maneuvers = [
-        ("level_flight", {}),
-        ("accelerate", {"velocity_change": 100.0, "duration": 8.0}),
-        ("decelerate", {"velocity_change": 100.0, "duration": 8.0}),
-        ("turn", {"turn_angle": 90.0, "turn_rate": 5.0}),
-        ("pull_up", {"altitude_change": 1500.0, "duration": 10.0}),
-        ("dive", {"altitude_change": 1500.0, "duration": 10.0}),
-        ("diagonal_flight", {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 12.0}),
-        ("roll", {"duration": 4.0}),
-        ("turn_pull_up", {"turn_angle": 60.0, "turn_rate": 4.0, "altitude_change": 1200.0}),
-        ("turn_dive", {"turn_angle": 60.0, "turn_rate": 4.0, "altitude_change": 1200.0})
+        ("level_flight", {}),#平飞
+        ("accelerate", {"velocity_change": 100.0, "duration": 15.0}),#加速
+        ("decelerate", {"velocity_change": 100.0, "duration": 15.0}),#减速
+        ("turn", {"turn_angle": 90.0, "turn_rate": 5.0}),#转弯
+        ("pull_up", {"altitude_change": 1500.0, "duration": 30.0}),#拉起
+        ("dive", {"altitude_change": 1500.0, "duration": 30.0}),#俯冲
+        ("diagonal_flight", {"turn_angle": 45.0, "altitude_change": 1500.0, "duration": 30.0}),#斜直飞
+        ("roll", {"duration": 4.0}),#滚转
+        ("turn_pull_up", {"turn_angle": 60.0, "turn_rate": 3.0, "altitude_change": 1500.0}),#转弯拉起
+        ("turn_dive", {"turn_angle": 60.0, "turn_rate": 3.0, "altitude_change": 1500.0})#转弯俯冲
     ]
 
     results = []
 
     for i, (maneuver_name, params) in enumerate(basic_maneuvers, 1):
         print(f"\n【{i}/{len(basic_maneuvers)}】测试{maneuver_name}")
-        file_path = test_basic_maneuver(maneuver_name, **params)
+        file_path = runtest_basic_maneuver(maneuver_name, **params)
         if file_path:
             results.append((maneuver_name, file_path))
 
@@ -258,21 +258,26 @@ def run_all_basic_maneuvers():
 
 
 def run_all_composite_maneuvers():
-    """运行所有组合机动测试"""
+    """运行所有组合机动测试 - 支持参数和批量扫描"""
     print("组合机动测试系统")
     print("=" * 80)
 
-    composite_maneuvers = ["escape", "attack", "defense"]
+    composite_configs = [
+        ("escape", {"turn_angle": 120.0, "accel_velocity": 150.0}),
+        ("attack", {"side_climb_duration": 10.0, "dive_velocity": 60.0}),
+        ("defense", {"dive_alt": -1500.0, "turn_angle": 120.0}),
+        ("scissor", {"turn_angle": 60.0}),  # 新组合
+        ("high_yoyo", {"climb_alt": 2000.0})  # 新组合
+    ]
     results = []
 
-    for i, maneuver_name in enumerate(composite_maneuvers, 1):
-        print(f"\n【{i}/{len(composite_maneuvers)}】测试{maneuver_name}组合机动")
-        file_path = test_composite_maneuver(maneuver_name)
+    for i, (maneuver_name, params) in enumerate(composite_configs, 1):
+        print(f"\n【{i}/{len(composite_configs)}】测试{maneuver_name}组合机动")
+        file_path = runtest_composite_maneuver(maneuver_name, custom_params=params)
         if file_path:
             results.append((maneuver_name, file_path))
 
     return results
-
 
 if __name__ == "__main__":
     print("基础机动和组合机动测试系统")
@@ -309,7 +314,7 @@ if __name__ == "__main__":
                 maneuver_choice = int(maneuver_choice)
                 if 1 <= maneuver_choice <= len(basic_maneuvers):
                     maneuver_name = basic_maneuvers[maneuver_choice - 1]
-                    success = test_basic_maneuver(maneuver_name) is not None
+                    success = runtest_basic_maneuver(maneuver_name) is not None
                     break
                 else:
                     print(f"请输入1到{len(basic_maneuvers)}之间的数字")
@@ -325,7 +330,7 @@ if __name__ == "__main__":
 
     elif choice == 3:
         print("\n可用的组合机动:")
-        composite_maneuvers = ["escape", "attack", "defense"]
+        composite_maneuvers = ["escape", "attack", "defense", "scissor", "high_yoyo"]
         for i, name in enumerate(composite_maneuvers, 1):
             print(f"  {i} - {name}")
 
@@ -335,7 +340,7 @@ if __name__ == "__main__":
                 maneuver_choice = int(maneuver_choice)
                 if 1 <= maneuver_choice <= len(composite_maneuvers):
                     maneuver_name = composite_maneuvers[maneuver_choice - 1]
-                    success = test_composite_maneuver(maneuver_name) is not None
+                    success = runtest_composite_maneuver(maneuver_name) is not None
                     break
                 else:
                     print(f"请输入1到{len(composite_maneuvers)}之间的数字")
