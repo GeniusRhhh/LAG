@@ -1,15 +1,12 @@
-# scripts/runtest_basic_maneuvers.py
 import os
 import sys
 import logging
 import numpy as np
 from datetime import datetime
 
-# 添加项目根目录到路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-# 修正日志编码问题
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -31,47 +28,37 @@ class ACMIGenerator:
         """初始化ACMI文件"""
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-            # 写入文件头
             with open(filepath, mode='w', encoding='utf-8-sig') as f:
                 f.write("FileType=text/acmi/tacview\n")
                 f.write("FileVersion=2.1\n")
                 f.write("0,ReferenceTime=2020-04-01T00:00:00Z\n")
-
             self.file_created = True
-            print(f"ACMI文件初始化成功: {filepath}")
+            logging.info(f"ACMI文件初始化成功: {filepath}")
             return True
-
         except Exception as e:
-            print(f"ACMI文件初始化失败: {e}")
+            logging.error(f"ACMI文件初始化失败: {e}")
             return False
 
     def write_frame_to_file(self, filepath, env):
         """实时写入一帧到文件"""
         if not self.file_created:
             self.initialize_acmi_file(filepath)
-
         try:
             with open(filepath, mode='a', encoding='utf-8-sig') as f:
                 timestamp = env.current_step * env.time_interval
                 f.write(f"#{timestamp:.2f}\n")
-
-                # 写入所有飞机的日志
                 for agent_id, agent in env.agents.items():
                     if agent.is_alive:
                         log_msg = agent.log()
                         if log_msg:
                             f.write(log_msg + "\n")
-
                 for sim in env._tempsims.values():
                     log_msg = sim.log()
                     if log_msg:
                         f.write(log_msg + "\n")
-
             return True
-
         except Exception as e:
-            print(f"写入ACMI帧失败: {e}")
+            logging.error(f"写入ACMI帧失败: {e}")
             return False
 
 
@@ -79,171 +66,114 @@ def runtest_basic_maneuver(maneuver_name, **params):
     """测试单个基础机动"""
     try:
         from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
-
-        print(f"测试基础机动: {maneuver_name}")
-        print(f"参数: {params}")
-        print("=" * 60)
-
-        # 创建环境
+        logging.info(f"测试基础机动: {maneuver_name}")
+        logging.info(f"参数: {params}")
         config_name = "simple_maneuver_config"
         env = MultipleCombatEnv(config_name)
         task = env.task
-
-        # 设置基础机动
         task.set_basic_maneuver(maneuver_name, **params)
-        print(f"基础机动设置完成: {maneuver_name}")
-
-        # 创建ACMI生成器
+        logging.info(f"基础机动设置完成: {maneuver_name}")
         acmi_generator = ACMIGenerator()
-
-        # 准备ACMI文件路径
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         maneuver_results_dir = os.path.join(project_root, "maneuver_results")
         acmi_filename = f"Basic_{maneuver_name}_{timestamp}.acmi"
         acmi_filepath = os.path.join(maneuver_results_dir, acmi_filename)
-
-        # 重置环境
         obs, share_obs = env.reset()
-
-        # 初始化ACMI文件
         if not acmi_generator.initialize_acmi_file(acmi_filepath):
             return False
-
-        # 运行测试
         step = 0
         done = False
         frame_count = 0
-
-        # 根据机动类型调整最大步数
         if maneuver_name == "circle":
-            max_steps = 2000  # Circle需要更长时间来展示完整的圆形路径
+            max_steps = 2000
         elif maneuver_name == "barrel_roll":
-            max_steps = 1000  # Barrel roll需要足够时间完成滚转
+            max_steps = 1000
         else:
-            max_steps = 800  # 其他基础机动
-
-        print(f"开始记录{maneuver_name}机动ACMI数据到: {acmi_filepath}")
-        print(f"最大步数: {max_steps}")
-
+            max_steps = 800
+        logging.info(f"开始记录{maneuver_name}机动ACMI数据到: {acmi_filepath}")
+        logging.info(f"最大步数: {max_steps}")
         while not done and step < max_steps:
             action_dim = env.action_space.shape[0]
             actions = np.zeros((env.n_rollout_threads, env.num_agents, action_dim), dtype=np.float32)
-
             obs, share_obs, rewards, dones, infos = env.step(actions)
-
             if step % 2 == 0:
                 acmi_generator.write_frame_to_file(acmi_filepath, env)
                 frame_count += 1
-
             step += 1
             done = np.any(dones)
-
             if step % 100 == 0:
                 current_time = env.current_step * env.time_interval
-                print(f"步骤 {step}, 时间: {current_time:.1f}s")
-
+                logging.info(f"步骤 {step}, 时间: {current_time:.1f}s")
         env.close()
-
         if os.path.exists(acmi_filepath):
             file_size = os.path.getsize(acmi_filepath)
-            print(f"{maneuver_name} ACMI文件生成成功！")
-            print(f"文件: {os.path.basename(acmi_filepath)}")
-            print(f"大小: {file_size} 字节, 帧数: {frame_count}")
+            logging.info(f"{maneuver_name} ACMI文件生成成功")
+            logging.info(f"文件: {os.path.basename(acmi_filepath)}")
+            logging.info(f"大小: {file_size} 字节, 帧数: {frame_count}")
             return acmi_filepath
         else:
+            logging.error(f"{maneuver_name} ACMI文件未生成")
             return None
-
     except Exception as e:
-        print(f"{maneuver_name}测试失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logging.error(f"{maneuver_name}测试失败: {e}", exc_info=True)
         return None
 
 
 def runtest_composite_maneuver(maneuver_name, custom_params=None):
-    """测试组合机动 - 修复参数传递格式"""
+    """测试组合机动"""
     try:
         from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
-
-        print(f"测试组合机动: {maneuver_name}")
-        print(f"参数: {custom_params}")
-        print("=" * 60)
-
-        # 创建环境
+        logging.info(f"测试组合机动: {maneuver_name}")
+        logging.info(f"参数: {custom_params}")
         config_name = "simple_maneuver_config"
         env = MultipleCombatEnv(config_name)
         task = env.task
-
-        # 修复：直接传递参数，不要嵌套格式
-        print(f"传递给task的参数: {custom_params}")
         task.set_composite_maneuver(maneuver_name, custom_params=custom_params)
-        print(f"组合机动设置完成: {maneuver_name}")
-
-        # 创建ACMI生成器
+        logging.info(f"组合机动设置完成: {maneuver_name}")
         acmi_generator = ACMIGenerator()
-
-        # 准备ACMI文件路径
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         maneuver_results_dir = os.path.join(project_root, "maneuver_results")
         acmi_filename = f"Composite_{maneuver_name}_{timestamp}.acmi"
         acmi_filepath = os.path.join(maneuver_results_dir, acmi_filename)
-
-        # 重置环境
         obs, share_obs = env.reset()
-
-        # 初始化ACMI文件
         if not acmi_generator.initialize_acmi_file(acmi_filepath):
             return None
-
-        # 运行测试
         step = 0
         done = False
         frame_count = 0
-        max_steps = 2000  # 组合机动需要更多时间
-
-        print(f"开始记录{maneuver_name}组合机动ACMI数据到: {acmi_filepath}")
-
+        max_steps = 2000
+        logging.info(f"开始记录{maneuver_name}组合机动ACMI数据到: {acmi_filepath}")
+        logging.info(f"最大步数: {max_steps}")
         while not done and step < max_steps:
             action_dim = env.action_space.shape[0]
             actions = np.zeros((env.n_rollout_threads, env.num_agents, action_dim), dtype=np.float32)
-
             obs, share_obs, rewards, dones, infos = env.step(actions)
-
             if step % 2 == 0:
                 acmi_generator.write_frame_to_file(acmi_filepath, env)
                 frame_count += 1
-
             step += 1
             done = np.any(dones)
-
             if step % 100 == 0:
                 current_time = env.current_step * env.time_interval
-                print(f"步骤 {step}, 时间: {current_time:.1f}s")
-
+                logging.info(f"步骤 {step}, 时间: {current_time:.1f}s")
         env.close()
-
         if os.path.exists(acmi_filepath):
             file_size = os.path.getsize(acmi_filepath)
-            print(f"{maneuver_name}组合机动ACMI文件生成成功！")
-            print(f"文件: {os.path.basename(acmi_filepath)}")
-            print(f"大小: {file_size} 字节, 帧数: {frame_count}")
+            logging.info(f"{maneuver_name} ACMI文件生成成功")
+            logging.info(f"文件: {os.path.basename(acmi_filepath)}")
+            logging.info(f"大小: {file_size} 字节, 帧数: {frame_count}")
             return acmi_filepath
         else:
+            logging.error(f"{maneuver_name} ACMI文件未生成")
             return None
-
     except Exception as e:
-        print(f"{maneuver_name}组合机动测试失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logging.error(f"{maneuver_name}测试失败: {e}", exc_info=True)
         return None
 
 
 def run_all_basic_maneuvers():
-    """运行所有基础机动测试 - 修复参数传递问题"""
-    print("基础机动测试系统")
-    print("=" * 80)
-
-    # 基础机动测试配置 - 确保参数正确传递
+    """运行所有基础机动测试"""
+    logging.info("基础机动测试")
     basic_maneuvers = [
         ("level_flight", {"duration": 40.0}),
         ("accelerate", {"velocity_change": 50.0, "duration": 25.0}),
@@ -253,197 +183,165 @@ def run_all_basic_maneuvers():
         ("dive", {"altitude_change": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
         ("diagonal_flight", {"turn_angle": 70.0, "altitude_change": 1000.0, "duration": 20.0}),
     ]
-
     results = []
-
     for i, (maneuver_name, params) in enumerate(basic_maneuvers, 1):
-        print(f"\n【{i}/{len(basic_maneuvers)}】测试{maneuver_name}")
-        print(f"参数: {params}")
+        logging.info(f"测试 {i}/{len(basic_maneuvers)}: {maneuver_name}")
+        logging.info(f"参数: {params}")
         file_path = runtest_basic_maneuver(maneuver_name, **params)
         if file_path:
             results.append((f"{maneuver_name}_{i}", file_path))
-
     return results
 
 
 def run_all_composite_maneuvers():
-    """运行简化后的组合机动测试 - 只保留三个机动"""
-    print("组合机动测试系统")
-    print("=" * 80)
-
-    # 简化后的组合机动配置 - 只保留turn_pull_up、turn_dive和spiral_climb
+    """运行所有组合机动测试"""
+    logging.info("组合机动测试")
     composite_configs = [
-        # turn_pull_up - 增加duration确保能达到90度
         ("turn_pull_up", {
             "turn_pull_up": {
                 "turn_angle": 90.0,
-                "turn_duration": 35.0,  # 增加时间：90度÷3度/秒=30秒，加5秒余量
+                "turn_duration": 35.0,
                 "turn_rate": 3.0,
                 "altitude_gain": 2000.0,
-                "pull_up_duration": 20.0  # 增加拉起时间
+                "pull_up_duration": 20.0
             }
         }),
-
-        # turn_dive - 增加duration确保能达到90度
         ("turn_dive", {
             "turn_dive": {
                 "turn_angle": 90.0,
-                "turn_duration": 40.0,  # 增加时间确保完成转弯
+                "turn_duration": 40.0,
                 "turn_rate": 4.0,
                 "altitude_loss": 1500.0,
-                "dive_duration": 20.0,  # 增加俯冲时间
+                "dive_duration": 20.0,
                 "min_altitude": 2000.0
             }
         }),
-
-        # spiral_climb - 使用默认参数
         ("spiral_climb", {})
     ]
-
     results = []
-
     for i, (maneuver_name, params) in enumerate(composite_configs, 1):
-        print(f"\n【{i}/{len(composite_configs)}】测试{maneuver_name}组合机动")
-        print(f"参数配置: {params}")
+        logging.info(f"测试 {i}/{len(composite_configs)}: {maneuver_name}")
+        logging.info(f"参数: {params}")
         file_path = runtest_composite_maneuver(maneuver_name, custom_params=params)
         if file_path:
             results.append((f"{maneuver_name}_{i}", file_path))
-
     return results
 
+
 if __name__ == "__main__":
-    print("基础机动和组合机动测试系统")
-    print("\n请选择要运行的测试：")
-    print("  1 - 单个基础机动测试")
-    print("  2 - 所有基础机动测试")
-    print("  3 - 单个组合机动测试")
-    print("  4 - 所有组合机动测试")
-    print("  5 - 全部测试")
+    logging.info("基础机动和组合机动测试系统")
+    logging.info("可用测试选项:")
+    logging.info("  1 - 单个基础机动测试")
+    logging.info("  2 - 所有基础机动测试")
+    logging.info("  3 - 单个组合机动测试")
+    logging.info("  4 - 所有组合机动测试")
+    logging.info("  5 - 全部测试")
 
     while True:
         try:
             choice = input("请输入数字 (1-5): ").strip()
             choice = int(choice)
             if choice not in [1, 2, 3, 4, 5]:
-                print("请输入1、2、3、4或5")
+                logging.warning("请输入1、2、3、4或5")
                 continue
             break
         except ValueError:
-            print("请输入有效的数字")
+            logging.warning("请输入有效的数字")
 
     success = False
+    basic_maneuvers = [
+        ("level_flight", {"duration": 40.0}),
+        ("accelerate", {"velocity_change": 50.0, "duration": 25.0}),
+        ("decelerate", {"velocity_change": 50.0, "duration": 25.0}),
+        ("turn", {"turn_angle": -60.0, "turn_rate": 3.0}),
+        ("pull_up", {"altitude_change": 1500.0, "duration": 20.0}),
+        ("dive", {"altitude_change": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
+        ("diagonal_flight", {"turn_angle": 70.0, "altitude_change": 1000.0, "duration": 20.0}),
+    ]
+    composite_configs = [
+        ("turn_pull_up", {
+            "turn_pull_up": {
+                "turn_angle": 90.0,
+                "turn_duration": 35.0,
+                "turn_rate": 3.0,
+                "altitude_gain": 2000.0,
+                "pull_up_duration": 20.0
+            }
+        }),
+        ("turn_dive", {
+            "turn_dive": {
+                "turn_angle": 90.0,
+                "turn_duration": 40.0,
+                "turn_rate": 4.0,
+                "altitude_loss": 1500.0,
+                "dive_duration": 20.0,
+                "min_altitude": 2000.0
+            }
+        }),
+        ("spiral_climb", {})
+    ]
 
     if choice == 1:
-        print("\n可用的基础机动:")
-        basic_maneuvers = ["level_flight", "accelerate", "decelerate", "turn", "pull_up",
-                           "dive", "diagonal_flight"]
-        for i, name in enumerate(basic_maneuvers, 1):
-            print(f"  {i} - {name}")
-
+        logging.info("可用的基础机动:")
+        for i, (name, _) in enumerate(basic_maneuvers, 1):
+            logging.info(f"  {i} - {name}")
         while True:
             try:
-                maneuver_choice = input("请选择基础机动编号: ").strip()
-                maneuver_choice = int(maneuver_choice)
+                maneuver_choice = int(input("请选择基础机动编号: ").strip())
                 if 1 <= maneuver_choice <= len(basic_maneuvers):
-                    maneuver_name = basic_maneuvers[maneuver_choice - 1]
-
-                    # 根据机动类型提供默认参数
-                    default_params = {
-                        "level_flight": {"duration": 30.0},
-                        "accelerate": {"velocity_change": 60.0, "duration": 25.0},
-                        "decelerate": {"velocity_change": 60.0, "duration": 25.0},
-                        "turn": {"turn_angle": 90.0, "turn_rate": 3.0},
-                        "pull_up": {"altitude_change": 1500.0, "duration": 20.0},
-                        "dive": {"altitude_change": 1500.0, "duration": 20.0, "min_altitude": 2000.0},
-                        "diagonal_flight": {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 20.0},
-                        "circle": {"duration": 120.0, "radius": 1500.0, "direction": "clockwise", "turn_rate": 3.0},
-                        "barrel_roll": {"duration": 25.0, "roll_revolutions": 2.0, "direction": "right"}
-                    }
-
-                    params = default_params.get(maneuver_name, {})
+                    maneuver_name, params = basic_maneuvers[maneuver_choice - 1]
+                    logging.info(f"执行 {maneuver_name}，参数: {params}")
                     success = runtest_basic_maneuver(maneuver_name, **params) is not None
                     break
                 else:
-                    print(f"请输入1到{len(basic_maneuvers)}之间的数字")
+                    logging.warning(f"请输入1到{len(basic_maneuvers)}之间的数字")
             except ValueError:
-                print("请输入有效的数字")
+                logging.warning("请输入有效的数字")
 
     elif choice == 2:
-        print("\n运行所有基础机动测试...")
+        logging.info("运行所有基础机动测试")
         results = run_all_basic_maneuvers()
         success = len(results) > 0
         if success:
-            print(f"\n成功生成 {len(results)} 个基础机动ACMI文件")
+            logging.info(f"成功生成 {len(results)} 个基础机动ACMI文件")
 
     elif choice == 3:
-        print("\n可用的组合机动:")
-        composite_maneuvers = ["turn_pull_up", "turn_dive"]
-        for i, name in enumerate(composite_maneuvers, 1):
-            print(f"  {i} - {name}")
-
+        logging.info("可用的组合机动:")
+        for i, (name, _) in enumerate(composite_configs, 1):
+            logging.info(f"  {i} - {name}")
         while True:
             try:
-                maneuver_choice = input("请选择组合机动编号: ").strip()
-                maneuver_choice = int(maneuver_choice)
-                if 1 <= maneuver_choice <= len(composite_maneuvers):
-                    maneuver_name = composite_maneuvers[maneuver_choice - 1]
-
-                    # 提供默认参数
-                    default_composite_params = {
-                        "turn_pull_up": {
-                            "turn_pull_up": {
-                                "turn_angle": 90.0,
-                                "turn_duration": 30.0,
-                                "turn_rate": 3.0,
-                                "altitude_gain": 2000.0,
-                                "pull_up_duration": 15.0
-                            }
-                        },
-                        "turn_dive": {
-                            "turn_dive": {
-                                "turn_angle": 90.0,
-                                "turn_duration": 30.0,
-                                "turn_rate": 3.0,
-                                "altitude_loss": 1500.0,
-                                "dive_duration": 15.0,
-                                "min_altitude": 2000.0
-                            }
-                        }
-                    }
-
-                    params = default_composite_params.get(maneuver_name, {})
+                maneuver_choice = int(input("请选择组合机动编号: ").strip())
+                if 1 <= maneuver_choice <= len(composite_configs):
+                    maneuver_name, params = composite_configs[maneuver_choice - 1]
+                    logging.info(f"执行 {maneuver_name}，参数: {params}")
                     success = runtest_composite_maneuver(maneuver_name, custom_params=params) is not None
                     break
                 else:
-                    print(f"请输入1到{len(composite_maneuvers)}之间的数字")
+                    logging.warning(f"请输入1到{len(composite_configs)}之间的数字")
             except ValueError:
-                print("请输入有效的数字")
+                logging.warning("请输入有效的数字")
 
     elif choice == 4:
-        print("\n运行所有组合机动测试...")
+        logging.info("运行所有组合机动测试")
         results = run_all_composite_maneuvers()
         success = len(results) > 0
         if success:
-            print(f"\n成功生成 {len(results)} 个组合机动ACMI文件")
+            logging.info(f"成功生成 {len(results)} 个组合机动ACMI文件")
 
     elif choice == 5:
-        print("\n运行全部测试...")
+        logging.info("运行全部测试")
         basic_results = run_all_basic_maneuvers()
         composite_results = run_all_composite_maneuvers()
         success = len(basic_results) > 0 or len(composite_results) > 0
         if success:
-            print(f"\n成功生成 {len(basic_results)} 个基础机动 + {len(composite_results)} 个组合机动ACMI文件")
+            logging.info(f"成功生成 {len(basic_results)} 个基础机动 + {len(composite_results)} 个组合机动ACMI文件")
 
     if success:
-        print("\n🎉 测试成功完成！")
-        print("ACMI文件已保存到 maneuver_results/ 目录")
-        print("\n使用Tacview查看ACMI文件:")
-        print("1. 下载并安装Tacview: https://tacview.net/")
-        print("2. 打开Tacview软件")
-        print("3. 拖拽ACMI文件到Tacview窗口")
-        print("4. 使用鼠标和键盘控制视角")
+        logging.info("测试成功完成")
+        logging.info("ACMI文件已保存到 maneuver_results/ 目录")
     else:
-        print("测试失败，请检查日志")
+        logging.error("测试失败，请检查日志")
         sys.exit(1)
 
-    print("\n测试完成！")
+    logging.info("测试完成")

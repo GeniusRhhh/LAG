@@ -16,12 +16,12 @@ def normalize_heading(heading_deg: float) -> float:
 
 
 class BasicManeuvers:
-    """基础机动库 - 保持不变"""
+    """基础机动库"""
 
     @staticmethod
     def level_flight(time_sec: float, duration: float = 10.0, current_altitude: float = 0.0,
                      current_velocity: float = 0.0):
-        """平飞 - 完全不改变任何控制量"""
+        """平飞 - 保持当前状态"""
         if time_sec <= duration:
             return "LEVEL_FLIGHT", None, None, None, None
         return None, None, None, None, None
@@ -29,7 +29,7 @@ class BasicManeuvers:
     @staticmethod
     def accelerate(time_sec: float, current_velocity: float, duration: float = 5.0, velocity_increase: float = 50.0,
                    max_velocity: float = 350.0):
-        """加速 - 只改变速度，绝对不改变航向和高度"""
+        """加速 - 仅改变速度"""
         if time_sec <= duration:
             progress = time_sec / duration
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
@@ -44,7 +44,7 @@ class BasicManeuvers:
     @staticmethod
     def decelerate(time_sec: float, current_velocity: float, duration: float = 5.0, velocity_decrease: float = 50.0,
                    min_velocity: float = 150.0):
-        """减速 - 只改变速度，绝对不改变航向和高度"""
+        """减速 - 仅改变速度"""
         if time_sec <= duration:
             progress = time_sec / duration
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
@@ -58,18 +58,14 @@ class BasicManeuvers:
 
     @staticmethod
     def turn(time_sec: float, initial_heading: float, turn_angle: float = 45.0, turn_rate: float = 3.0):
-        """转弯 - 只改变航向，支持任意角度，包括大角度和负角度（左转）"""
+        """转弯 - 仅改变航向，支持任意角度"""
         turn_time = abs(turn_angle) / turn_rate
         if time_sec <= turn_time:
             progress = time_sec / turn_time
-            target_heading = initial_heading + turn_angle * progress
-            target_heading = normalize_heading(target_heading)
-
-            # 优化的滚转角计算
-            required_roll = abs(turn_rate) * 12.0  # 调整系数
+            target_heading = normalize_heading(initial_heading + turn_angle * progress)
+            required_roll = abs(turn_rate) * 12.0
             roll_magnitude = min(required_roll, 50.0)
             target_roll = roll_magnitude * (1 if turn_angle > 0 else -1) * math.sin(progress * math.pi)
-
             return "TURN", target_heading, None, None, target_roll
         else:
             final_heading = normalize_heading(initial_heading + turn_angle)
@@ -77,7 +73,7 @@ class BasicManeuvers:
 
     @staticmethod
     def pull_up(time_sec: float, initial_altitude: float, duration: float = 8.0, altitude_gain: float = 1000.0):
-        """拉起 - 只改变高度，不改变航向"""
+        """拉起 - 仅改变高度"""
         if time_sec <= duration:
             progress = time_sec / duration
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
@@ -90,7 +86,7 @@ class BasicManeuvers:
     @staticmethod
     def dive(time_sec: float, initial_altitude: float, duration: float = 8.0, altitude_loss: float = 1000.0,
              min_altitude: float = 3000.0):
-        """俯冲 - 只改变高度，不改变航向"""
+        """俯冲 - 仅改变高度"""
         target_final_altitude = max(initial_altitude - altitude_loss, min_altitude)
         actual_altitude_loss = initial_altitude - target_final_altitude
 
@@ -114,17 +110,12 @@ class BasicManeuvers:
         if time_sec <= duration:
             progress = time_sec / duration
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
-
             target_heading = normalize_heading(initial_heading + heading_change * smooth_progress)
             target_altitude = initial_altitude + actual_altitude_change * smooth_progress
-
             target_roll = min(20.0, abs(heading_change) / 4) * (1 if heading_change > 0 else -1) * math.sin(
                 progress * math.pi)
-
-            velocity_compensation = -abs(
-                actual_altitude_change) * 0.01 / duration if actual_altitude_change > 0 else abs(
+            velocity_compensation = -abs(actual_altitude_change) * 0.01 / duration if actual_altitude_change > 0 else abs(
                 actual_altitude_change) * 0.01 / duration
-
             return "DIAGONAL_FLIGHT", target_heading, target_altitude, velocity_compensation, target_roll
         else:
             return "DIAGONAL_FLIGHT_COMPLETE", normalize_heading(
@@ -134,13 +125,13 @@ class BasicManeuvers:
 @dataclass
 class ManeuverStep:
     """单个机动步骤定义"""
-    name: str  # 机动名称
-    params: Dict[str, Any]  # 机动参数
-    duration: float  # 持续时间
+    name: str
+    params: Dict[str, Any]
+    duration: float
 
 
 class CompositeManeuverExecutor:
-    """全新的组合机动执行器 - 简单直接的拼装方式"""
+    """组合机动执行器"""
 
     def __init__(self):
         self.basic_maneuvers = BasicManeuvers()
@@ -150,42 +141,32 @@ class CompositeManeuverExecutor:
 
     def _setup_predefined_maneuvers(self):
         """设置预定义的组合机动"""
-
-        # 转弯拉起：先转弯，再拉起 - 增加时间确保完成
         self.maneuver_definitions["turn_pull_up"] = [
-            ManeuverStep("turn", {"turn_angle": 90.0, "turn_rate": 3.0}, 35.0),  # 增加到35秒
-            ManeuverStep("pull_up", {"altitude_gain": 2000.0}, 20.0)  # 增加到20秒
+            ManeuverStep("turn", {"turn_angle": 90.0, "turn_rate": 3.0}, 35.0),
+            ManeuverStep("pull_up", {"altitude_gain": 2000.0}, 20.0)
         ]
-
-        # 转弯俯冲：先转弯，再俯冲 - 增加时间确保完成
         self.maneuver_definitions["turn_dive"] = [
-            ManeuverStep("turn", {"turn_angle": 90.0, "turn_rate": 3.0}, 35.0),  # 增加到35秒
-            ManeuverStep("dive", {"altitude_loss": 1500.0, "min_altitude": 2000.0}, 20.0)  # 增加到20秒
+            ManeuverStep("turn", {"turn_angle": 90.0, "turn_rate": 3.0}, 35.0),
+            ManeuverStep("dive", {"altitude_loss": 1500.0, "min_altitude": 2000.0}, 20.0)
         ]
-
-        # 盘旋爬升：360度转弯 + 拉起 - 确保有足够时间
         self.maneuver_definitions["spiral_climb"] = [
-            ManeuverStep("turn", {"turn_angle": 360.0, "turn_rate": 2.0}, 180.0),  # 360度需要180秒
-            ManeuverStep("pull_up", {"altitude_gain": 1500.0}, 25.0)  # 增加拉起时间
+            ManeuverStep("turn", {"turn_angle": 360.0, "turn_rate": 2.0}, 180.0),
+            ManeuverStep("pull_up", {"altitude_gain": 1500.0}, 25.0)
         ]
 
     def update_maneuver_params(self, maneuver_name: str, custom_params: Dict[str, Any]):
         """更新组合机动的参数"""
         if maneuver_name not in self.maneuver_definitions:
-            logging.warning(f"❌ 未知的组合机动: {maneuver_name}")
+            logging.warning(f"未知的组合机动: {maneuver_name}")
             return
 
-        # 根据传入的参数更新机动定义
         if maneuver_name == "turn_pull_up" and "turn_pull_up" in custom_params:
             params = custom_params["turn_pull_up"]
-            # 更新转弯步骤
             self.maneuver_definitions[maneuver_name][0].params.update({
                 "turn_angle": params.get("turn_angle", 90.0),
                 "turn_rate": params.get("turn_rate", 3.0)
             })
             self.maneuver_definitions[maneuver_name][0].duration = params.get("turn_duration", 30.0)
-
-            # 更新拉起步骤
             self.maneuver_definitions[maneuver_name][1].params.update({
                 "altitude_gain": params.get("altitude_gain", 2000.0)
             })
@@ -193,36 +174,31 @@ class CompositeManeuverExecutor:
 
         elif maneuver_name == "turn_dive" and "turn_dive" in custom_params:
             params = custom_params["turn_dive"]
-            # 更新转弯步骤
             self.maneuver_definitions[maneuver_name][0].params.update({
                 "turn_angle": params.get("turn_angle", 90.0),
                 "turn_rate": params.get("turn_rate", 3.0)
             })
             self.maneuver_definitions[maneuver_name][0].duration = params.get("turn_duration", 30.0)
-
-            # 更新俯冲步骤
             self.maneuver_definitions[maneuver_name][1].params.update({
                 "altitude_loss": params.get("altitude_loss", 1500.0),
                 "min_altitude": params.get("min_altitude", 2000.0)
             })
             self.maneuver_definitions[maneuver_name][1].duration = params.get("dive_duration", 15.0)
 
-        logging.info(f"✅ 组合机动 {maneuver_name} 参数更新完成")
+        logging.info(f"组合机动 {maneuver_name} 参数更新完成")
         for i, step in enumerate(self.maneuver_definitions[maneuver_name]):
-            logging.info(f"   步骤{i + 1}: {step.name} {step.params} 持续{step.duration}s")
+            logging.info(f"步骤{i + 1}: {step.name} {step.params} 持续{step.duration}s")
 
     def execute_composite_maneuver(self, maneuver_name: str, total_time: float,
                                    initial_heading: float, initial_altitude: float,
                                    current_velocity: float, current_altitude: float) -> Tuple:
-        """执行组合机动 - 简单直接的方式"""
-
+        """执行组合机动"""
         if maneuver_name not in self.maneuver_definitions:
-            logging.warning(f"❌ 未知的组合机动: {maneuver_name}")
+            logging.warning(f"未知的组合机动: {maneuver_name}")
             return None, None, None, None, None
 
         steps = self.maneuver_definitions[maneuver_name]
 
-        # 初始化状态
         if maneuver_name not in self.active_states:
             self.active_states[maneuver_name] = {
                 "current_step": 0,
@@ -233,8 +209,6 @@ class CompositeManeuverExecutor:
             }
 
         state = self.active_states[maneuver_name]
-
-        # 计算当前应该执行的步骤
         elapsed_time = 0.0
         current_step_index = -1
 
@@ -244,17 +218,12 @@ class CompositeManeuverExecutor:
                 break
             elapsed_time += step.duration
 
-        # 检查是否完成
         if current_step_index == -1:
-            # 所有步骤完成
             if maneuver_name in self.active_states:
                 del self.active_states[maneuver_name]
-            # logging.info(f"✅ 组合机动 {maneuver_name} 执行完成")
             return None, None, None, None, None
 
-        # 步骤切换处理
         if current_step_index != state["current_step"]:
-            # 更新累积状态
             if current_step_index > 0:
                 prev_step = steps[current_step_index - 1]
                 if prev_step.name == "turn":
@@ -270,20 +239,17 @@ class CompositeManeuverExecutor:
             state["current_step"] = current_step_index
             state["step_start_time"] = elapsed_time
 
-            logging.info(f"🔄 组合机动 {maneuver_name} 切换到步骤 {current_step_index + 1}: {steps[current_step_index].name}")
-            logging.info(f"   累积航向: {state['cumulative_heading']:.1f}°")
-            logging.info(f"   累积高度: {state['cumulative_altitude']:.1f}m")
+            logging.info(f"组合机动 {maneuver_name} 切换到步骤 {current_step_index + 1}: {steps[current_step_index].name}")
+            logging.info(f"累积航向: {state['cumulative_heading']:.1f}°")
+            logging.info(f"累积高度: {state['cumulative_altitude']:.1f}m")
 
-        # 执行当前步骤
         current_step = steps[current_step_index]
         step_time = total_time - state["step_start_time"]
 
-        # 调试输出
-        if int(total_time * 5) % 25 == 0:  # 每0.2秒输出一次
-            logging.info(f"🎯 组合机动 {maneuver_name} 步骤{current_step_index + 1}/{len(steps)}: {current_step.name}")
-            logging.info(f"   总时间: {total_time:.1f}s, 步骤时间: {step_time:.1f}s/{current_step.duration:.1f}s")
+        if int(total_time * 5) % 25 == 0:
+            logging.info(f"组合机动 {maneuver_name} 步骤{current_step_index + 1}/{len(steps)}: {current_step.name}")
+            logging.info(f"总时间: {total_time:.1f}s, 步骤时间: {step_time:.1f}s/{current_step.duration:.1f}s")
 
-        # 调用相应的基础机动
         if current_step.name == "turn":
             return self.basic_maneuvers.turn(
                 step_time,
@@ -321,14 +287,14 @@ class CompositeManeuverExecutor:
                 current_step.params["velocity_decrease"]
             )
         else:
-            logging.warning(f"❌ 未知的基础机动: {current_step.name}")
+            logging.warning(f"未知的基础机动: {current_step.name}")
             return None, None, None, None, None
 
     def reset_maneuver_state(self, maneuver_name: str):
         """重置组合机动状态"""
         if maneuver_name in self.active_states:
             del self.active_states[maneuver_name]
-            logging.info(f"🔄 重置组合机动 {maneuver_name} 状态")
+            logging.info(f"重置组合机动 {maneuver_name} 状态")
 
     def get_available_maneuvers(self) -> List[str]:
         """获取可用的组合机动列表"""
@@ -341,7 +307,6 @@ class CompositeManeuverExecutor:
 
         steps = self.maneuver_definitions[maneuver_name]
         total_duration = sum(step.duration for step in steps)
-
         return {
             "name": maneuver_name,
             "steps": [(step.name, step.params, step.duration) for step in steps],
@@ -350,7 +315,6 @@ class CompositeManeuverExecutor:
         }
 
 
-# 保持旧的接口兼容性
 class ManeuverComposer:
     """兼容性包装器"""
 
@@ -360,7 +324,7 @@ class ManeuverComposer:
         self.maneuver_states = {}
 
     def _setup_tactical_templates(self, custom_params=None):
-        """设置战术模板 - 使用新的执行器"""
+        """设置战术模板"""
         if custom_params:
             for maneuver_name in ["turn_pull_up", "turn_dive"]:
                 if maneuver_name in custom_params or any(key in custom_params for key in [maneuver_name]):
@@ -369,10 +333,9 @@ class ManeuverComposer:
     def execute_composite_maneuver(self, maneuver_name: str, time_sec: float,
                                    initial_heading: float, initial_altitude: float,
                                    params: Dict[str, Any] = None):
-        """执行组合机动 - 使用新的执行器"""
+        """执行组合机动"""
         current_velocity = params.get("current_velocity", 250.0) if params else 250.0
         current_altitude = params.get("current_altitude", initial_altitude) if params else initial_altitude
-
         return self.executor.execute_composite_maneuver(
             maneuver_name, time_sec, initial_heading, initial_altitude,
             current_velocity, current_altitude
@@ -384,7 +347,7 @@ class ManeuverComposer:
 
 
 class PureManeuvers:
-    """纯机动函数库 - 保持不变"""
+    """纯机动函数库"""
 
     @staticmethod
     def crank_maneuver(time_sec: float,
@@ -394,7 +357,6 @@ class PureManeuvers:
                        hold_time_sec: float = 20.0):
         """Crank机动"""
         turn_time = abs(crank_angle_deg) / turn_rate_deg_per_sec
-
         if time_sec <= turn_time:
             phase = "TURN_TO_CRANK"
             progress = time_sec / turn_time
@@ -413,7 +375,6 @@ class PureManeuvers:
             else:
                 target_heading = normalize_heading(initial_heading_deg)
             target_roll = 0.0
-
         return phase, target_heading, target_roll
 
     @staticmethod
@@ -424,7 +385,6 @@ class PureManeuvers:
                       hold_time_sec: float = 15.0):
         """Beam机动"""
         turn_time = abs(beam_angle_deg) / turn_rate_deg_per_sec
-
         if time_sec <= turn_time:
             phase = "TURN_TO_BEAM"
             progress = time_sec / turn_time
@@ -443,7 +403,6 @@ class PureManeuvers:
             else:
                 target_heading = normalize_heading(initial_heading_deg)
             target_roll = 0.0
-
         return phase, target_heading, target_roll
 
     @staticmethod
@@ -501,7 +460,6 @@ class PureManeuvers:
                 target_heading = normalize_heading(initial_heading_deg)
                 target_altitude = initial_altitude_ft
             target_roll = 0.0
-
         target_altitude = max(target_altitude, min_safe_altitude)
         return phase, target_heading, target_altitude, target_roll
 
