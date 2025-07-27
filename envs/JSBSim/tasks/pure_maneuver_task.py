@@ -219,18 +219,22 @@ class PureManeuverTask(MultipleCombatTask):
         else:
             return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
 
+
     def _process_composite_maneuver(self, env, agent_id, current_time, initial_heading, initial_altitude):
-        """处理组合机动"""
+        """处理组合机动 - 完全修复版本"""
         current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
         current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+
         result = self.composite_executor.execute_composite_maneuver(
             self.composite_maneuver_name, current_time, initial_heading, initial_altitude,
             current_velocity, current_altitude
         )
         phase, target_heading, target_altitude, velocity_offset, target_roll = result
+
         if phase is None:
             return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
+
         if env.current_step % 50 == 0:
             log_msg = f"{agent_id} 组合机动 {self.composite_maneuver_name} [{phase}] at t={current_time:.1f}s | "
             if target_heading is not None:
@@ -240,23 +244,65 @@ class PureManeuverTask(MultipleCombatTask):
             if velocity_offset is not None:
                 log_msg += f"Vel: Δ{velocity_offset:+.1f}m/s |"
             logging.info(log_msg)
+
         altitude_cmd_id, heading_cmd_id, velocity_cmd_id = 3, 4, 3
-        if "TURN" in phase and target_altitude is None:
-            altitude_diff = initial_altitude - current_altitude
-            if abs(altitude_diff) > 15.0:
-                altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
+        # 强制高度控制逻辑 - 解决转弯时高度爬升问题
+        if phase in ["TURNING"]:
+            # 转弯状态：强制保持初始高度
+            if hasattr(self, 'turn_initial_altitude'):
+                altitude_diff = self.turn_initial_altitude - current_altitude
+                if abs(altitude_diff) > 50.0:  # 如果偏离初始高度超过50米
+                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+            else:
+                # 记录转弯开始时的高度
+                self.turn_initial_altitude = current_altitude
+        elif phase in ["TURN_ADJUSTING", "TURN_FINISHED"]:
+            # 转弯调整和完成状态：继续保持初始高度
+            if hasattr(self, 'turn_initial_altitude'):
+                altitude_diff = self.turn_initial_altitude - current_altitude
+                if abs(altitude_diff) > 30.0:
+                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+        elif phase in ["MAINTAINING_HEADING"]:
+            # 重置转弯高度记录
+            if hasattr(self, 'turn_initial_altitude'):
+                delattr(self, 'turn_initial_altitude')
+        elif phase in ["DIVING", "DIVE_FINISHED"]:
+            # 俯冲状态：按照目标高度调整
+            if target_altitude is not None:
+                altitude_diff = target_altitude - current_altitude
+                if abs(altitude_diff) > 15.0:
+                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+        elif phase in ["MAINTAINING_HEADING"]:
+            # 保持航向状态：保持当前高度，不做调整
+            pass
         elif target_altitude is not None:
+            # 其他状态：按照目标高度调整
             altitude_diff = target_altitude - current_altitude
             if abs(altitude_diff) > 15.0:
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
         if target_heading is not None:
             heading_diff_rad = np.deg2rad(target_heading - current_heading)
             while heading_diff_rad > np.pi: heading_diff_rad -= 2 * np.pi
             while heading_diff_rad < -np.pi: heading_diff_rad += 2 * np.pi
-            if abs(np.rad2deg(heading_diff_rad)) > 2.0:
+
+            # 根据阶段调整精度 - 提高转弯精度
+            if phase in ["TURN_ADJUSTING"]:
+                threshold = 0.3  # 转弯调整阶段：提高到0.3度精度
+            elif phase in ["MAINTAINING_HEADING"]:
+                threshold = 0.8  # 保持航向：0.8度精度
+            else:
+                threshold = 1.2  # 其他阶段：1.2度精度
+
+            if abs(np.rad2deg(heading_diff_rad)) > threshold:
                 heading_cmd_id = self._convert_heading_to_index(heading_diff_rad)
+
+        # 速度控制
         if velocity_offset is not None and abs(velocity_offset) > 2.0:
             velocity_cmd_id = self._convert_velocity_to_index(velocity_offset)
+
+        # 滚转控制
         if target_roll is not None and abs(target_roll) > 1.0:
             return self._use_lowlevel_policy_with_roll(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id,
                                                        target_roll)
@@ -384,6 +430,13 @@ class PureManeuverTask(MultipleCombatTask):
                 params.get("altitude_change", 1000.0),
                 params.get("min_altitude", 3000.0)
             )
+        elif basic_maneuver_name == "maintain_heading_flight":
+            return BasicManeuvers.maintain_heading_flight(
+                current_time,
+                params.get("target_heading", initial_heading),
+                params.get("duration", 15.0)
+            )
+
         else:
             return (None, None, None, None, None)
 

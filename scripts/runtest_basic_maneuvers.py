@@ -62,11 +62,11 @@ class ACMIGenerator:
             return False
 
 
-def runtest_basic_maneuver(maneuver_name, **params):
+def runtest_basic_maneuver(maneuver_name, maneuver_index, **params):
     """测试单个基础机动"""
     try:
         from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
-        logging.info(f"测试基础机动: {maneuver_name}")
+        logging.info(f"测试基础机动: {maneuver_name} (编号: {maneuver_index})")
         logging.info(f"参数: {params}")
         config_name = "simple_maneuver_config"
         env = MultipleCombatEnv(config_name)
@@ -74,9 +74,9 @@ def runtest_basic_maneuver(maneuver_name, **params):
         task.set_basic_maneuver(maneuver_name, **params)
         logging.info(f"基础机动设置完成: {maneuver_name}")
         acmi_generator = ACMIGenerator()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%m%d%H%M")
         maneuver_results_dir = os.path.join(project_root, "maneuver_results")
-        acmi_filename = f"Basic_{maneuver_name}_{timestamp}.acmi"
+        acmi_filename = f"Basic_{maneuver_index}_{maneuver_name}_{timestamp}.acmi"
         acmi_filepath = os.path.join(maneuver_results_dir, acmi_filename)
         obs, share_obs = env.reset()
         if not acmi_generator.initialize_acmi_file(acmi_filepath):
@@ -84,12 +84,7 @@ def runtest_basic_maneuver(maneuver_name, **params):
         step = 0
         done = False
         frame_count = 0
-        if maneuver_name == "circle":
-            max_steps = 2000
-        elif maneuver_name == "barrel_roll":
-            max_steps = 1000
-        else:
-            max_steps = 800
+        max_steps = 800
         logging.info(f"开始记录{maneuver_name}机动ACMI数据到: {acmi_filepath}")
         logging.info(f"最大步数: {max_steps}")
         while not done and step < max_steps:
@@ -119,11 +114,11 @@ def runtest_basic_maneuver(maneuver_name, **params):
         return None
 
 
-def runtest_composite_maneuver(maneuver_name, custom_params=None):
+def runtest_composite_maneuver(maneuver_name, maneuver_index, custom_params=None):
     """测试组合机动"""
     try:
         from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
-        logging.info(f"测试组合机动: {maneuver_name}")
+        logging.info(f"测试组合机动: {maneuver_name} (编号: {maneuver_index})")
         logging.info(f"参数: {custom_params}")
         config_name = "simple_maneuver_config"
         env = MultipleCombatEnv(config_name)
@@ -131,9 +126,9 @@ def runtest_composite_maneuver(maneuver_name, custom_params=None):
         task.set_composite_maneuver(maneuver_name, custom_params=custom_params)
         logging.info(f"组合机动设置完成: {maneuver_name}")
         acmi_generator = ACMIGenerator()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%m%d%H%M")
         maneuver_results_dir = os.path.join(project_root, "maneuver_results")
-        acmi_filename = f"Composite_{maneuver_name}_{timestamp}.acmi"
+        acmi_filename = f"Composite_{maneuver_index}_{maneuver_name}_{timestamp}.acmi"
         acmi_filepath = os.path.join(maneuver_results_dir, acmi_filename)
         obs, share_obs = env.reset()
         if not acmi_generator.initialize_acmi_file(acmi_filepath):
@@ -155,7 +150,7 @@ def runtest_composite_maneuver(maneuver_name, custom_params=None):
             done = np.any(dones)
             if step % 100 == 0:
                 current_time = env.current_step * env.time_interval
-                logging.info(f"步骤 {step}, 时间: {current_time:.1f}s")
+                logging.info(f"步骤 {step}, 时间: {current_time + current_time:.1f}")
         env.close()
         if os.path.exists(acmi_filepath):
             file_size = os.path.getsize(acmi_filepath)
@@ -178,16 +173,17 @@ def run_all_basic_maneuvers():
         ("level_flight", {"duration": 40.0}),
         ("accelerate", {"velocity_change": 50.0, "duration": 25.0}),
         ("decelerate", {"velocity_change": 50.0, "duration": 25.0}),
-        ("turn", {"turn_angle": 30.0, "turn_rate": 3.0}),
-        ("pull_up", {"altitude_change": 1500.0, "duration": 20.0}),
-        ("dive", {"altitude_change": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
+        ("turn", {"turn_angle": 80.0, "turn_rate": 3.0}),
+        ("pull_up", {"altitude_gain": 1500.0, "duration": 20.0}),
+        ("dive", {"altitude_loss": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
         ("diagonal_flight", {"turn_angle": 70.0, "altitude_change": 1000.0, "duration": 20.0}),
+        ("level_flight_maintain_heading", {"duration": 40.0}),
     ]
     results = []
     for i, (maneuver_name, params) in enumerate(basic_maneuvers, 1):
         logging.info(f"测试 {i}/{len(basic_maneuvers)}: {maneuver_name}")
         logging.info(f"参数: {params}")
-        file_path = runtest_basic_maneuver(maneuver_name, **params)
+        file_path = runtest_basic_maneuver(maneuver_name, i, **params)
         if file_path:
             results.append((f"{maneuver_name}_{i}", file_path))
     return results
@@ -216,13 +212,31 @@ def run_all_composite_maneuvers():
                 "min_altitude": 2000.0
             }
         }),
-        ("spiral_climb", {})
+        ("spiral_climb", {}),
     ]
     results = []
     for i, (maneuver_name, params) in enumerate(composite_configs, 1):
         logging.info(f"测试 {i}/{len(composite_configs)}: {maneuver_name}")
         logging.info(f"参数: {params}")
-        file_path = runtest_composite_maneuver(maneuver_name, custom_params=params)
+        file_path = runtest_composite_maneuver(maneuver_name, i, custom_params=params)
+        if file_path:
+            results.append((f"{maneuver_name}_{i}", file_path))
+    return results
+
+
+def run_all_tactical_maneuvers_simple():
+    """运行新增的3个战术机动测试"""
+    logging.info("新增战术机动测试")
+    tactical_configs = [
+        ("crank_tactical", {}),
+        ("beam_tactical", {}),
+        ("notch_tactical", {})
+    ]
+    results = []
+    for i, (maneuver_name, params) in enumerate(tactical_configs, 1):
+        logging.info(f"测试 {i}/{len(tactical_configs)}: {maneuver_name}")
+        logging.info(f"参数: {params}")
+        file_path = runtest_composite_maneuver(maneuver_name, i, custom_params=params)
         if file_path:
             results.append((f"{maneuver_name}_{i}", file_path))
     return results
@@ -235,14 +249,15 @@ if __name__ == "__main__":
     logging.info("  2 - 所有基础机动测试")
     logging.info("  3 - 单个组合机动测试")
     logging.info("  4 - 所有组合机动测试")
-    logging.info("  5 - 全部测试")
+    logging.info("  5 - 新增战术机动测试")
+    logging.info("  6 - 全部测试")
 
     while True:
         try:
-            choice = input("请输入数字 (1-5): ").strip()
+            choice = input("请输入数字 (1-6): ").strip()
             choice = int(choice)
-            if choice not in [1, 2, 3, 4, 5]:
-                logging.warning("请输入1、2、3、4或5")
+            if choice not in [1, 2, 3, 4, 5, 6]:
+                logging.warning("请输入1、2、3、4、5或6")
                 continue
             break
         except ValueError:
@@ -253,10 +268,11 @@ if __name__ == "__main__":
         ("level_flight", {"duration": 40.0}),
         ("accelerate", {"velocity_change": 50.0, "duration": 25.0}),
         ("decelerate", {"velocity_change": 50.0, "duration": 25.0}),
-        ("turn", {"turn_angle": -60.0, "turn_rate": 3.0}),
-        ("pull_up", {"altitude_change": 1500.0, "duration": 20.0}),
-        ("dive", {"altitude_change": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
+        ("turn", {"turn_angle": 80.0, "turn_rate": 3.0}),
+        ("pull_up", {"altitude_gain": 1500.0, "duration": 20.0}),
+        ("dive", {"altitude_loss": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
         ("diagonal_flight", {"turn_angle": 70.0, "altitude_change": 1000.0, "duration": 20.0}),
+        ("level_flight_maintain_heading", {"duration": 40.0}),
     ]
     composite_configs = [
         ("turn_pull_up", {
@@ -278,7 +294,7 @@ if __name__ == "__main__":
                 "min_altitude": 2000.0
             }
         }),
-        ("spiral_climb", {})
+        ("spiral_climb", {}),
     ]
 
     if choice == 1:
@@ -291,7 +307,7 @@ if __name__ == "__main__":
                 if 1 <= maneuver_choice <= len(basic_maneuvers):
                     maneuver_name, params = basic_maneuvers[maneuver_choice - 1]
                     logging.info(f"执行 {maneuver_name}，参数: {params}")
-                    success = runtest_basic_maneuver(maneuver_name, **params) is not None
+                    success = runtest_basic_maneuver(maneuver_name, maneuver_choice, **params) is not None
                     break
                 else:
                     logging.warning(f"请输入1到{len(basic_maneuvers)}之间的数字")
@@ -315,7 +331,7 @@ if __name__ == "__main__":
                 if 1 <= maneuver_choice <= len(composite_configs):
                     maneuver_name, params = composite_configs[maneuver_choice - 1]
                     logging.info(f"执行 {maneuver_name}，参数: {params}")
-                    success = runtest_composite_maneuver(maneuver_name, custom_params=params) is not None
+                    success = runtest_composite_maneuver(maneuver_name, maneuver_choice, custom_params=params) is not None
                     break
                 else:
                     logging.warning(f"请输入1到{len(composite_configs)}之间的数字")
@@ -330,12 +346,20 @@ if __name__ == "__main__":
             logging.info(f"成功生成 {len(results)} 个组合机动ACMI文件")
 
     elif choice == 5:
+        logging.info("运行新增战术机动测试")
+        results = run_all_tactical_maneuvers_simple()
+        success = len(results) > 0
+        if success:
+            logging.info(f"成功生成 {len(results)} 个战术机动ACMI文件")
+
+    elif choice == 6:
         logging.info("运行全部测试")
         basic_results = run_all_basic_maneuvers()
         composite_results = run_all_composite_maneuvers()
-        success = len(basic_results) > 0 or len(composite_results) > 0
+        tactical_results = run_all_tactical_maneuvers_simple()
+        success = len(basic_results) > 0 or len(composite_results) > 0 or len(tactical_results) > 0
         if success:
-            logging.info(f"成功生成 {len(basic_results)} 个基础机动 + {len(composite_results)} 个组合机动ACMI文件")
+            logging.info(f"成功生成 {len(basic_results)} 个基础机动 + {len(composite_results)} 个组合机动 + {len(tactical_results)} 个战术机动ACMI文件")
 
     if success:
         logging.info("测试成功完成")
@@ -345,3 +369,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     logging.info("测试完成")
+
+
