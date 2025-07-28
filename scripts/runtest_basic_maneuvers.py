@@ -96,9 +96,16 @@ def runtest_basic_maneuver(maneuver_name, maneuver_index, **params):
                 frame_count += 1
             step += 1
             done = np.any(dones)
-            if step % 100 == 0:
-                current_time = env.current_step * env.time_interval
-                logging.info(f"步骤 {step}, 时间: {current_time:.1f}s")
+            # 动态日志记录频率：前80秒详细记录，后面间隔久一点
+            current_time = env.current_step * env.time_interval
+            if current_time <= 80.0:
+                # 前80秒：每50步记录一次
+                if step % 50 == 0:
+                    logging.info(f"[详细] 步骤 {step}, 时间: {current_time:.1f}s")
+            else:
+                # 80秒后：每200步记录一次
+                if step % 200 == 0:
+                    logging.info(f"[概要] 步骤 {step}, 时间: {current_time:.1f}s")
         env.close()
         if os.path.exists(acmi_filepath):
             file_size = os.path.getsize(acmi_filepath)
@@ -225,12 +232,13 @@ def run_all_composite_maneuvers():
 
 
 def run_all_tactical_maneuvers_simple():
-    """运行新增的3个战术机动测试"""
+    """运行新增的战术机动测试，包括Short Skate"""
     logging.info("新增战术机动测试")
     tactical_configs = [
         ("crank_tactical", {}),
         ("beam_tactical", {}),
-        ("notch_tactical", {})
+        ("notch_tactical", {}),
+        ("short_skate_tactical", {})  # 新增Short Skate机动测试
     ]
     results = []
     for i, (maneuver_name, params) in enumerate(tactical_configs, 1):

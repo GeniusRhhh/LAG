@@ -58,32 +58,69 @@ class BasicManeuvers:
 
     @staticmethod
     def turn(time_sec: float, initial_heading: float, turn_angle: float = 45.0, turn_rate: float = 3.0):
-        """转弯 - 精度优化版本，确保达到目标角度"""
-        # 增加更多时间确保精度
+        """转弯 - 基于目标角度的精确控制版本"""
+        # 计算目标航向
+        target_final_heading = normalize_heading(initial_heading + turn_angle)
+
+        # 基础转弯时间 + 足够的调整时间
         base_turn_time = abs(turn_angle) / turn_rate
-        adjustment_time = 5.0  # 增加到5秒调整时间
-        turn_time = base_turn_time + adjustment_time
-        
-        if time_sec <= base_turn_time:
-            # 主要转弯阶段
-            progress = time_sec / base_turn_time
-            target_heading = initial_heading + turn_angle * progress
-            target_heading = normalize_heading(target_heading)
-            
-            # 减小滚转角以降低高度变化
-            required_roll = abs(turn_rate) * 8.0  # 从10.0降到8.0
-            roll_magnitude = min(required_roll, 35.0)  # 从40.0降到35.0
-            target_roll = roll_magnitude * (1 if turn_angle > 0 else -1) * math.sin(progress * math.pi)
-            
-            return "TURNING", target_heading, None, None, target_roll
-        elif time_sec <= turn_time:
-            # 精确调整阶段 - 确保达到精确角度
-            final_heading = normalize_heading(initial_heading + turn_angle)
-            return "TURN_ADJUSTING", final_heading, None, None, None
+        max_turn_time = base_turn_time + 15.0  # 给足够时间确保达到目标
+
+        if time_sec <= max_turn_time:
+            # 转弯阶段：直接返回目标角度，让控制系统处理实时反馈
+            progress = min(time_sec / base_turn_time, 1.0)
+
+            # 使用平滑的进度曲线
+            smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
+            current_target = initial_heading + turn_angle * smooth_progress
+            current_target = normalize_heading(current_target)
+
+            # 计算滚转角 - 减小以降低高度变化
+            if progress < 1.0:
+                required_roll = abs(turn_rate) * 6.0  # 降低滚转角强度
+                roll_magnitude = min(required_roll, 25.0)  # 限制最大滚转角
+                target_roll = roll_magnitude * (1 if turn_angle > 0 else -1) * math.sin(progress * math.pi)
+            else:
+                target_roll = 0.0  # 转弯完成后归零滚转角
+
+            phase = "TURNING" if progress < 0.95 else "TURN_ADJUSTING"
+            return phase, current_target, None, None, target_roll
         else:
             # 转弯完成
-            final_heading = normalize_heading(initial_heading + turn_angle)
-            return "TURN_FINISHED", final_heading, None, None, None
+            return "TURN_FINISHED", target_final_heading, None, None, 0.0
+
+    @staticmethod
+    def turn_level(time_sec: float, initial_heading: float, initial_altitude: float,
+                   turn_angle: float = 45.0, turn_rate: float = 3.0):
+        """保持高度的转弯 - 专门抑制高度变化"""
+        # 计算目标航向
+        target_final_heading = normalize_heading(initial_heading + turn_angle)
+
+        # 基础转弯时间 + 调整时间
+        base_turn_time = abs(turn_angle) / turn_rate
+        max_turn_time = base_turn_time + 10.0
+
+        if time_sec <= max_turn_time:
+            progress = min(time_sec / base_turn_time, 1.0)
+            smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
+            current_target = initial_heading + turn_angle * smooth_progress
+            current_target = normalize_heading(current_target)
+
+            # 极小的滚转角，最大限度减少高度变化
+            if progress < 1.0:
+                required_roll = abs(turn_rate) * 4.0  # 进一步降低滚转角
+                roll_magnitude = min(required_roll, 20.0)  # 限制最大滚转角到20度
+                target_roll = roll_magnitude * (1 if turn_angle > 0 else -1) * math.sin(progress * math.pi)
+            else:
+                target_roll = 0.0
+
+            # 强制保持初始高度
+            target_altitude = initial_altitude
+
+            phase = "TURNING_LEVEL" if progress < 0.95 else "TURN_LEVEL_ADJUSTING"
+            return phase, current_target, target_altitude, 0.0, target_roll
+        else:
+            return "TURN_LEVEL_FINISHED", target_final_heading, initial_altitude, 0.0, 0.0
 
     @staticmethod
     def pull_up(time_sec: float, initial_altitude: float, duration: float = 8.0, altitude_gain: float = 1000.0):
@@ -100,18 +137,24 @@ class BasicManeuvers:
     @staticmethod
     def dive(time_sec: float, initial_altitude: float, duration: float = 8.0, altitude_loss: float = 1000.0,
              min_altitude: float = 3000.0):
-        """俯冲 - 修复版本，确保高度不反弹"""
+        """俯冲 - 抑制高度补偿版本，防止JSBSim自动升力补偿"""
         target_final_altitude = max(initial_altitude - altitude_loss, min_altitude)
         actual_altitude_loss = initial_altitude - target_final_altitude
 
         if time_sec <= duration:
             progress = time_sec / duration
-            smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
-            target_altitude = initial_altitude - actual_altitude_loss * smooth_progress
-            velocity_compensation = actual_altitude_loss * 0.02 / duration
-            return "DIVING", None, target_altitude, velocity_compensation, None  # 改为DIVING
+            # 使用线性下降，避免过于激进
+            target_altitude = initial_altitude - actual_altitude_loss * progress
+
+            # 确保不低于最小高度
+            target_altitude = max(target_altitude, min_altitude)
+
+            # 完全消除速度补偿，避免JSBSim的升力补偿
+            # 不给任何速度补偿，让飞机自然下降
+            return "DIVING", None, target_altitude, 0.0, None
         else:
-            return "DIVE_FINISHED", None, target_final_altitude, None, None  # 改为DIVE_FINISHED
+            # 俯冲完成，确保达到目标高度
+            return "DIVE_FINISHED", None, target_final_altitude, 0.0, None
 
     @staticmethod
     def diagonal_flight(time_sec: float, initial_heading: float, initial_altitude: float,
@@ -146,6 +189,23 @@ class BasicManeuvers:
         if time_sec <= duration:
             return "MAINTAINING_HEADING", target_heading, None, None, None
         return "MAINTAIN_COMPLETE", target_heading, None, None, None
+
+    @staticmethod
+    def accelerate_escape(time_sec: float, target_heading: float, duration: float = 15.0,
+                         acceleration: float = 50.0):
+        """加速逃离 - 保持航向并加速"""
+        if time_sec <= duration:
+            # 计算速度增量，前半段加速，后半段保持
+            if time_sec <= duration / 2:
+                # 前半段：逐渐加速
+                progress = time_sec / (duration / 2)
+                velocity_offset = acceleration * progress
+            else:
+                # 后半段：保持最大加速
+                velocity_offset = acceleration
+
+            return "ACCELERATING_ESCAPE", target_heading, None, velocity_offset, None
+        return "ESCAPE_COMPLETE", target_heading, None, acceleration, None
 
 @dataclass
 class ManeuverStep:
@@ -184,36 +244,63 @@ class CompositeManeuverExecutor:
             ManeuverStep("turn", {"turn_angle": 360.0, "turn_rate": 2.0}, 180.0),  # 360度需要180秒
             ManeuverStep("pull_up", {"altitude_gain": 1500.0}, 25.0)  # 增加拉起时间
         ]
-        # 1. Crank机动：转45度 + 保持新航向（简化版）
+        # 1. Crank机动：转70度 + 保持新航向（保持高度版）
         self.maneuver_definitions["crank_tactical"] = [
-            ManeuverStep("turn", {
+            ManeuverStep("turn_level", {
                 "turn_angle": 70.0,
-                "turn_rate": 8.0
-            }, 10.0),  # 45°/4°/s + 2秒调整 = 13.25秒，设15秒
+                "turn_rate": 4.0  # 降低转弯率以减少高度变化
+            }, 20.0),  # 给足够时间确保角度精确
             ManeuverStep("maintain_heading_flight", {}, 30.0)
         ]
 
-        # 2. Beam机动：转90度 + 保持横向态势（优化版）
+        # 2. Beam机动：转90度 + 保持横向态势（保持高度版）
         self.maneuver_definitions["beam_tactical"] = [
-            ManeuverStep("turn", {
+            ManeuverStep("turn_level", {
                 "turn_angle": 90.0,
-                "turn_rate": 9  # 降低转弯率减少高度变化
-            }, 13.0),  # 90°/3.5°/s + 5秒调整 = 30.7秒，设32秒
+                "turn_rate": 4.0  # 降低转弯率减少高度变化
+            }, 25.0),  # 给足够时间确保90度精确
             ManeuverStep("maintain_heading_flight", {}, 35.0)
         ]
 
-        # 3. Notch机动：下降 + 稳定 + 转90度 + 保持（优化版）
+        # 3. Notch机动：下降 + 稳定 + 转90度 + 保持（保持高度版）
         self.maneuver_definitions["notch_tactical"] = [
             ManeuverStep("dive", {
                 "altitude_loss": 1200.0,
                 "min_altitude": 2500.0
             }, 10.0),  # 充分的下降时间
-            ManeuverStep("maintain_heading_flight", {}, 3.0),  # 稳定在低高度，使用maintain_heading_flight
-            ManeuverStep("turn", {
+            ManeuverStep("maintain_heading_flight", {}, 3.0),  # 稳定在低高度
+            ManeuverStep("turn_level", {  # 使用turn_level保持低高度
                 "turn_angle": 90.0,
-                "turn_rate": 9  # 降低转弯率减少高度变化
-            }, 16.0),  # 在低高度转弯，增加时间确保精度
-            ManeuverStep("maintain_heading_flight", {}, 25.0)  # 保持低高度新航向
+                "turn_rate": 4.0  # 降低转弯率减少高度变化
+            }, 25.0),  # 在低高度转弯，给足够时间确保精度和高度控制
+            ManeuverStep("maintain_heading_flight", {}, 16.0)  # 保持低高度新航向
+        ]
+
+        # 4. Short Skate机动：激进的脱离式火力投送战术
+        # Short Skate: 发射 → Crank维持锁定 → Turn Cold快速脱离 → 加速逃离
+        self.maneuver_definitions["short_skate_tactical"] = [
+            # 阶段1：保持航向准备发射（模拟发射阶段）
+            ManeuverStep("maintain_heading_flight", {}, 5.0),  # 保持5秒准备发射
+
+            # 阶段2：Crank机动 - 偏离40度维持雷达锁定
+            ManeuverStep("turn_level", {
+                "turn_angle": 40.0,  # Crank角度40度
+                "turn_rate": 5.0     # 稍快的转弯率
+            }, 12.0),  # 缩短Crank转弯时间
+
+            # 阶段3：短暂保持Crank角度
+            ManeuverStep("maintain_heading_flight", {}, 6.0),  # 保持Crank角度6秒
+
+            # 阶段4：Turn Cold - 快速掉头脱离
+            ManeuverStep("turn_level", {
+                "turn_angle": 100.0,  # 100度掉头（总共140度）
+                "turn_rate": 6.0      # 更快的转弯率用于快速脱离
+            }, 25.0),  # 缩短转弯时间
+
+            # 阶段5：加速逃离 - 保持逃逸航向并加速
+            ManeuverStep("accelerate_escape", {
+                "acceleration": 50.0  # 加速50m/s
+            }, 20.0)  # 加速逃离20秒
         ]
 
     def update_maneuver_params(self, maneuver_name: str, custom_params: Dict[str, Any]):
@@ -293,9 +380,28 @@ class CompositeManeuverExecutor:
             elapsed_time += step.duration
 
         if current_step_index == -1:
+            # 机动完成后，保持最终状态而不是返回None
             if maneuver_name in self.active_states:
-                del self.active_states[maneuver_name]
-            return None, None, None, None, None
+                # 计算理论上的最终航向（累积所有转弯角度）
+                theoretical_final_heading = initial_heading
+                for step in steps:
+                    if step.name in ["turn", "turn_level"]:
+                        theoretical_final_heading = normalize_heading(
+                            theoretical_final_heading + step.params["turn_angle"]
+                        )
+
+                # 使用理论最终航向，确保角度累积正确
+                final_heading = theoretical_final_heading
+                final_altitude = state.get("final_altitude", initial_altitude)
+
+                # 调试信息
+                logging.debug(f"{maneuver_name} 完成: 理论最终航向={final_heading:.1f}°")
+
+                # 保持最终状态，继续平稳飞行
+                return "MANEUVER_COMPLETED", final_heading, final_altitude, 0.0, 0.0
+            else:
+                # 如果没有状态记录，保持初始状态
+                return "MANEUVER_COMPLETED", initial_heading, initial_altitude, 0.0, 0.0
 
         current_step = steps[current_step_index]
 
@@ -305,20 +411,36 @@ class CompositeManeuverExecutor:
             step_initial_heading = state["step_initial_heading"]
             step_initial_altitude = state["step_initial_altitude"]
 
-            # 累积前面步骤的效果
+            # 使用实际的最终状态而不是累积计算
             if current_step_index > 0:
-                for i in range(current_step_index):
-                    prev_step = steps[i]
-                    if prev_step.name == "turn":
-                        step_initial_heading = normalize_heading(
-                            step_initial_heading + prev_step.params["turn_angle"]
-                        )
-                    elif prev_step.name == "dive":
-                        step_initial_altitude -= prev_step.params["altitude_loss"]
-                        step_initial_altitude = max(step_initial_altitude,
-                                                    prev_step.params.get("min_altitude", 2000.0))
-                    elif prev_step.name == "pull_up":
-                        step_initial_altitude += prev_step.params["altitude_gain"]
+                # 优先使用实际的最终状态
+                if "final_heading" in state and state["final_heading"] is not None:
+                    step_initial_heading = state["final_heading"]
+                    logging.debug(f"使用实际最终航向: {step_initial_heading:.1f}°")
+                else:
+                    # 备用方案：累积计算
+                    for i in range(current_step_index):
+                        prev_step = steps[i]
+                        if prev_step.name in ["turn", "turn_level"]:
+                            old_heading = step_initial_heading
+                            step_initial_heading = normalize_heading(
+                                step_initial_heading + prev_step.params["turn_angle"]
+                            )
+                            logging.debug(f"累积计算 步骤{i+1} {prev_step.name}: {old_heading:.1f}° + {prev_step.params['turn_angle']:.1f}° = {step_initial_heading:.1f}°")
+
+                # 高度处理
+                if "final_altitude" in state and state["final_altitude"] is not None:
+                    step_initial_altitude = state["final_altitude"]
+                else:
+                    # 备用方案：累积计算
+                    for i in range(current_step_index):
+                        prev_step = steps[i]
+                        if prev_step.name == "dive":
+                            step_initial_altitude -= prev_step.params["altitude_loss"]
+                            step_initial_altitude = max(step_initial_altitude,
+                                                        prev_step.params.get("min_altitude", 2000.0))
+                        elif prev_step.name == "pull_up":
+                            step_initial_altitude += prev_step.params["altitude_gain"]
 
             # 更新状态
             state["current_step"] = current_step_index
@@ -334,28 +456,62 @@ class CompositeManeuverExecutor:
 
         # 调用相应的基础机动
         if current_step.name == "turn":
-            return self.basic_maneuvers.turn(
+            result = self.basic_maneuvers.turn(
                 step_time,
                 state["step_initial_heading"],
                 current_step.params["turn_angle"],
                 current_step.params["turn_rate"]
             )
+            # 更新最终状态
+            if result[0] in ["TURN_FINISHED", "TURN_ADJUSTING"]:
+                state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
+            return result
+        elif current_step.name == "turn_level":
+            # 对于turn_level，如果有实际的最终高度，使用实际高度而不是累积计算的高度
+            if "final_altitude" in state and state["final_altitude"] is not None:
+                target_altitude = state["final_altitude"]
+            else:
+                target_altitude = state["step_initial_altitude"]
+
+            result = self.basic_maneuvers.turn_level(
+                step_time,
+                state["step_initial_heading"],
+                target_altitude,  # 使用实际高度
+                current_step.params["turn_angle"],
+                current_step.params["turn_rate"]
+            )
+            # 更新最终状态
+            if result[0] in ["TURN_LEVEL_FINISHED", "TURN_LEVEL_ADJUSTING"]:
+                state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
+                state["final_altitude"] = result[2] if result[2] is not None else state["final_altitude"]
+            return result
         elif current_step.name == "maintain_heading_flight":
-            # 如果是转弯后的保持航向，使用累积后的航向
-            target_heading = state["step_initial_heading"]
-            return self.basic_maneuvers.maintain_heading_flight(
+            # 保持航向：使用最终状态的航向，如果没有则使用累积航向
+            if "final_heading" in state and state["final_heading"] is not None:
+                target_heading = state["final_heading"]
+            else:
+                target_heading = state["step_initial_heading"]
+            result = self.basic_maneuvers.maintain_heading_flight(
                 step_time,
                 target_heading,
                 current_step.duration
             )
+            # 更新最终状态
+            if result[0] in ["MAINTAINING_HEADING", "MAINTAIN_COMPLETE"]:
+                state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
+            return result
         elif current_step.name == "dive":
-            return self.basic_maneuvers.dive(
+            result = self.basic_maneuvers.dive(
                 step_time,
                 state["step_initial_altitude"],
                 current_step.duration,
                 current_step.params["altitude_loss"],
                 current_step.params.get("min_altitude", 3000.0)
             )
+            # 更新最终状态
+            if result[0] in ["DIVING", "DIVE_FINISHED"]:
+                state["final_altitude"] = result[2] if result[2] is not None else state["final_altitude"]
+            return result
         elif current_step.name == "pull_up":
             return self.basic_maneuvers.pull_up(
                 step_time,
@@ -363,6 +519,22 @@ class CompositeManeuverExecutor:
                 current_step.duration,
                 current_step.params["altitude_gain"]
             )
+        elif current_step.name == "accelerate_escape":
+            # 加速逃离：使用最终状态的航向
+            if "final_heading" in state and state["final_heading"] is not None:
+                target_heading = state["final_heading"]
+            else:
+                target_heading = state["step_initial_heading"]
+            result = self.basic_maneuvers.accelerate_escape(
+                step_time,
+                target_heading,
+                current_step.duration,
+                current_step.params.get("acceleration", 50.0)
+            )
+            # 更新最终状态
+            if result[0] in ["ACCELERATING_ESCAPE", "ESCAPE_COMPLETE"]:
+                state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
+            return result
         elif current_step.name == "hold_altitude_and_heading":
             return self.basic_maneuvers.hold_altitude_and_heading(
                 step_time,

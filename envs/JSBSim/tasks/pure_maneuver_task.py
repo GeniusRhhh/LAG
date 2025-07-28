@@ -39,9 +39,29 @@ class PureManeuverTask(MultipleCombatTask):
         self.enemy_baseline_policy = BaselineActor()
         self._inner_rnn_states = {}
         self._enemy_rnn_states = {}
-        self.norm_delta_altitude = np.array([-1000, -500, -200, 0, 200, 500, 1000]) / 1000.0
-        self.norm_delta_heading = np.array(
-            [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])
+        # 扩充控制映射数组，与索引转换函数保持一致
+        self.norm_delta_altitude = np.array([
+            -1500, -1000, -750, -500, -300, -150, -50, 0, 50, 150, 300, 500, 750, 1000, 1500
+        ]) / 1000.0
+        self.norm_delta_heading = np.array([
+            -np.pi,           # -180°
+            -2*np.pi/3,       # -120°
+            -np.pi/2,         # -90°
+            -5*np.pi/12,      # -75°
+            -np.pi/3,         # -60°
+            -np.pi/4,         # -45°
+            -np.pi/6,         # -30°
+            -np.pi/12,        # -15°
+            0,                # 0°
+            np.pi/12,         # 15°
+            np.pi/6,          # 30°
+            np.pi/4,          # 45°
+            np.pi/3,          # 60°
+            5*np.pi/12,       # 75°
+            np.pi/2,          # 90°
+            2*np.pi/3,        # 120°
+            np.pi             # 180°
+        ])
         self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 100.0
         self.composite_executor = CompositeManeuverExecutor()
         self.maneuver_composer = self.composite_executor
@@ -184,7 +204,9 @@ class PureManeuverTask(MultipleCombatTask):
         phase, target_heading, target_altitude, velocity_offset, target_roll = result
         if phase is None:
             return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
-        if env.current_step % 50 == 0:
+        # 动态日志频率控制
+        log_interval = 25 if current_time <= 80.0 else 100  # 前80秒每25步，后面每100步
+        if env.current_step % log_interval == 0:
             log_msg = f"{agent_id} 执行 {basic_maneuver_name} [{phase}] at t={current_time:.1f}s | "
             if target_heading is not None:
                 log_msg += f"Hdg: {current_heading:.1f}° -> {target_heading:.1f}° | "
@@ -193,23 +215,36 @@ class PureManeuverTask(MultipleCombatTask):
             if velocity_offset is not None:
                 log_msg += f"Vel: {current_velocity:.1f}m/s (Δ{velocity_offset:+.1f}) |"
             logging.info(log_msg)
-        altitude_cmd_id = 3
-        heading_cmd_id = 4
-        velocity_cmd_id = 3
-        if basic_maneuver_name in ["turn", "accelerate", "decelerate", "level_flight"]:
+        # 使用新数组的中间索引作为默认值
+        altitude_cmd_id = 7  # 15个值的中间索引，对应0米变化
+        heading_cmd_id = 8   # 17个值的中间索引，对应0度变化
+        velocity_cmd_id = 3  # 7个值的中间索引，对应0m/s变化
+        # 高度控制 - 增强稳定性，抑制JSBSim的自动升力补偿
+        if basic_maneuver_name in ["turn", "turn_level", "accelerate", "decelerate", "level_flight"]:
+            # 对于转弯等机动，强制保持初始高度，抑制高度上升
             altitude_diff = initial_altitude - current_altitude
-            if abs(altitude_diff) > 15.0:
+            if abs(altitude_diff) > 5.0:  # 进一步降低阈值到5米，更敏感地控制高度
+                # 如果高度上升，给予更强的下降指令
+                if current_altitude > initial_altitude + 30.0:  # 高度上升超过30米就强制下降
+                    altitude_diff = altitude_diff * 2.0  # 增强下降控制到200%
+                elif current_altitude > initial_altitude + 15.0:  # 高度上升超过15米
+                    altitude_diff = altitude_diff * 1.5  # 增强下降控制到150%
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         elif target_altitude is not None:
             altitude_diff = target_altitude - current_altitude
-            if abs(altitude_diff) > 15.0:
+            if abs(altitude_diff) > 5.0:  # 降低阈值到5米
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
+        # 角度控制 - 使用扩充的离散控制
         if target_heading is not None:
             heading_diff = target_heading - current_heading
             while heading_diff > 180: heading_diff -= 360
             while heading_diff < -180: heading_diff += 360
-            if abs(heading_diff) > 2.0:
+
+            # 强制角度控制：如果角度差异超过1度就进行控制
+            if abs(heading_diff) > 1.0:
                 heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+
         if velocity_offset is not None and basic_maneuver_name in ["accelerate", "decelerate"]:
             if abs(velocity_offset) > 2.0:
                 velocity_cmd_id = self._convert_velocity_to_index(velocity_offset)
@@ -233,9 +268,12 @@ class PureManeuverTask(MultipleCombatTask):
         phase, target_heading, target_altitude, velocity_offset, target_roll = result
 
         if phase is None:
-            return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
+            # 机动完成后保持平稳飞行，使用新数组的中间索引
+            return self._use_lowlevel_policy(env, agent_id, 7, 8, 3)
 
-        if env.current_step % 50 == 0:
+        # 动态日志频率控制
+        log_interval = 25 if current_time <= 80.0 else 100  # 前80秒每25步，后面每100步
+        if env.current_step % log_interval == 0:
             log_msg = f"{agent_id} 组合机动 {self.composite_maneuver_name} [{phase}] at t={current_time:.1f}s | "
             if target_heading is not None:
                 log_msg += f"Hdg: {current_heading:.1f}° -> {target_heading:.1f}° | "
@@ -245,58 +283,59 @@ class PureManeuverTask(MultipleCombatTask):
                 log_msg += f"Vel: Δ{velocity_offset:+.1f}m/s |"
             logging.info(log_msg)
 
-        altitude_cmd_id, heading_cmd_id, velocity_cmd_id = 3, 4, 3
+        # 使用新数组的中间索引作为默认值
+        altitude_cmd_id, heading_cmd_id, velocity_cmd_id = 7, 8, 3
 
-        # 强制高度控制逻辑 - 解决转弯时高度爬升问题
-        if phase in ["TURNING"]:
-            # 转弯状态：强制保持初始高度
-            if hasattr(self, 'turn_initial_altitude'):
-                altitude_diff = self.turn_initial_altitude - current_altitude
-                if abs(altitude_diff) > 50.0:  # 如果偏离初始高度超过50米
-                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+        # 高度控制逻辑 - 增强稳定性控制
+        if phase in ["TURNING", "TURNING_LEVEL", "TURN_LEVEL_ADJUSTING"]:
+            # 转弯状态：强制保持目标高度或初始高度，更严格的控制
+            if target_altitude is not None:
+                altitude_diff = target_altitude - current_altitude
             else:
-                # 记录转弯开始时的高度
-                self.turn_initial_altitude = current_altitude
-        elif phase in ["TURN_ADJUSTING", "TURN_FINISHED"]:
-            # 转弯调整和完成状态：继续保持初始高度
-            if hasattr(self, 'turn_initial_altitude'):
-                altitude_diff = self.turn_initial_altitude - current_altitude
-                if abs(altitude_diff) > 30.0:
-                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
-        elif phase in ["MAINTAINING_HEADING"]:
-            # 重置转弯高度记录
-            if hasattr(self, 'turn_initial_altitude'):
-                delattr(self, 'turn_initial_altitude')
+                altitude_diff = initial_altitude - current_altitude
+
+            # 更严格的高度控制，降低阈值并增强控制强度
+            if abs(altitude_diff) > 5.0:  # 进一步降低阈值到5米
+                # 对于大的高度偏差，增强控制强度
+                if abs(altitude_diff) > 100.0:
+                    altitude_diff = altitude_diff * 1.5  # 增强50%控制强度
+                altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
         elif phase in ["DIVING", "DIVE_FINISHED"]:
             # 俯冲状态：按照目标高度调整
             if target_altitude is not None:
                 altitude_diff = target_altitude - current_altitude
-                if abs(altitude_diff) > 15.0:
+                if abs(altitude_diff) > 5.0:  # 降低阈值到5米
                     altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
-        elif phase in ["MAINTAINING_HEADING"]:
-            # 保持航向状态：保持当前高度，不做调整
-            pass
+
+        elif phase in ["MANEUVER_COMPLETED"]:
+            # 机动完成状态：保持目标高度和航向，确保平稳飞行
+            if target_altitude is not None:
+                altitude_diff = target_altitude - current_altitude
+                if abs(altitude_diff) > 5.0:  # 保持精确高度控制
+                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+
         elif target_altitude is not None:
             # 其他状态：按照目标高度调整
             altitude_diff = target_altitude - current_altitude
-            if abs(altitude_diff) > 15.0:
+            if abs(altitude_diff) > 5.0:  # 降低阈值到5米
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
 
         if target_heading is not None:
-            heading_diff_rad = np.deg2rad(target_heading - current_heading)
-            while heading_diff_rad > np.pi: heading_diff_rad -= 2 * np.pi
-            while heading_diff_rad < -np.pi: heading_diff_rad += 2 * np.pi
+            heading_diff = target_heading - current_heading
+            while heading_diff > 180: heading_diff -= 360
+            while heading_diff < -180: heading_diff += 360
 
-            # 根据阶段调整精度 - 提高转弯精度
-            if phase in ["TURN_ADJUSTING"]:
-                threshold = 0.3  # 转弯调整阶段：提高到0.3度精度
-            elif phase in ["MAINTAINING_HEADING"]:
-                threshold = 0.8  # 保持航向：0.8度精度
+            # 根据阶段调整精度
+            if phase in ["TURN_ADJUSTING", "TURN_LEVEL_ADJUSTING"]:
+                threshold = 1.0  # 转弯调整阶段：1度精度
+            elif phase in ["MAINTAINING_HEADING", "MANEUVER_COMPLETED"]:
+                threshold = 1.5  # 保持航向和机动完成：1.5度精度
             else:
-                threshold = 1.2  # 其他阶段：1.2度精度
+                threshold = 1.0  # 其他阶段：1度精度
 
-            if abs(np.rad2deg(heading_diff_rad)) > threshold:
-                heading_cmd_id = self._convert_heading_to_index(heading_diff_rad)
+            if abs(heading_diff) > threshold:
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
 
         # 速度控制
         if velocity_offset is not None and abs(velocity_offset) > 2.0:
@@ -341,7 +380,7 @@ class PureManeuverTask(MultipleCombatTask):
         else:
             maneuver_result = None
         if maneuver_result is None:
-            return self._use_lowlevel_policy(env, agent_id, 3, 4, 3)
+            return self._use_lowlevel_policy(env, agent_id, 7, 8, 3)  # 使用新数组的中间索引
         if len(maneuver_result) == 3:
             phase, target_heading, target_roll = maneuver_result
             target_altitude = None
@@ -356,7 +395,7 @@ class PureManeuverTask(MultipleCombatTask):
         while heading_diff < -180:
             heading_diff += 360
         if abs(heading_diff) < 2.0:
-            heading_cmd_id = 4
+            heading_cmd_id = 8  # 使用新数组的中间索引
         else:
             heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
         if target_altitude is not None:
@@ -364,7 +403,7 @@ class PureManeuverTask(MultipleCombatTask):
             altitude_diff = target_altitude - current_altitude
             altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         else:
-            altitude_cmd_id = 3
+            altitude_cmd_id = 7  # 使用新数组的中间索引
         velocity_cmd_id = 3
         return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
 
@@ -405,6 +444,16 @@ class PureManeuverTask(MultipleCombatTask):
                 turn_angle,
                 turn_rate
             )
+        elif basic_maneuver_name == "turn_level":
+            turn_angle = params.get("turn_angle", 45.0)
+            turn_rate = params.get("turn_rate", 3.0)
+            return BasicManeuvers.turn_level(
+                current_time,
+                initial_heading,
+                initial_altitude,
+                turn_angle,
+                turn_rate
+            )
         elif basic_maneuver_name == "pull_up":
             return BasicManeuvers.pull_up(
                 current_time,
@@ -441,11 +490,15 @@ class PureManeuverTask(MultipleCombatTask):
             return (None, None, None, None, None)
 
     def _process_observer_behavior(self, env, agent_id):
-        """处理观察飞机的行为"""
+        """处理观察飞机的行为 - 修复索引以保持平稳飞行"""
         try:
-            altitude_cmd_id = 3
-            heading_cmd_id = 4
-            velocity_cmd_id = 3
+            # 使用新数组的中间索引来保持平稳飞行
+            # 高度：15个值的中间是索引7 (对应0米变化)
+            # 航向：17个值的中间是索引8 (对应0度变化)
+            # 速度：7个值的中间是索引3 (对应0m/s变化)
+            altitude_cmd_id = 7  # 对应0米高度变化
+            heading_cmd_id = 8   # 对应0度航向变化
+            velocity_cmd_id = 3  # 对应0m/s速度变化
             return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
         except Exception as e:
             logging.error(f"{agent_id} 观察行为错误: {e}")
@@ -488,12 +541,24 @@ class PureManeuverTask(MultipleCombatTask):
             }
             infos[agent_id] = agent_info
             self._record_trajectory_data(env, agent_id, current_time)
-            if env.current_step % 100 == 0:
-                logging.info(f"步骤 {env.current_step} - {agent_id}: "
-                             f"高度={agent_info['altitude']:.1f}m, "
-                             f"航向={agent_info['heading']:.1f}°, "
-                             f"速度={agent_info['velocity']:.1f}m/s, "
-                             f"奖励={reward:.3f}")
+
+            # 动态日志记录频率：前80秒详细记录，后面间隔久一点
+            if current_time <= 80.0:
+                # 前80秒：每20步（约3.3秒）记录一次
+                if env.current_step % 20 == 0:
+                    logging.info(f"[详细] 步骤 {env.current_step} (t={current_time:.1f}s) - {agent_id}: "
+                                 f"高度={agent_info['altitude']:.1f}m, "
+                                 f"航向={agent_info['heading']:.1f}°, "
+                                 f"速度={agent_info['velocity']:.1f}m/s, "
+                                 f"奖励={reward:.3f}")
+            else:
+                # 80秒后：每200步（约33秒）记录一次
+                if env.current_step % 200 == 0:
+                    logging.info(f"[概要] 步骤 {env.current_step} (t={current_time:.1f}s) - {agent_id}: "
+                                 f"高度={agent_info['altitude']:.1f}m, "
+                                 f"航向={agent_info['heading']:.1f}°, "
+                                 f"速度={agent_info['velocity']:.1f}m/s, "
+                                 f"奖励={reward:.3f}")
         return obs, share_obs, rewards, dones, infos
 
     def _calculate_maneuver_reward(self, env, agent_id, current_time) -> float:
@@ -629,16 +694,41 @@ class PureManeuverTask(MultipleCombatTask):
         self.trajectory_data[agent_id].append(state)
 
     def _convert_altitude_to_index(self, altitude_cmd):
-        """高度指令转索引"""
-        altitude_values = np.array([-1000, -500, -200, 0, 200, 500, 1000])
+        """高度指令转索引 - 扩充精度版本"""
+        # 扩充高度控制精度
+        # 原来：[-1000, -500, -200, 0, 200, 500, 1000]
+        # 现在：[-1500, -1000, -750, -500, -300, -150, -50, 0, 50, 150, 300, 500, 750, 1000, 1500]
+        altitude_values = np.array([
+            -1500, -1000, -750, -500, -300, -150, -50, 0, 50, 150, 300, 500, 750, 1000, 1500
+        ])
         distances = np.abs(altitude_values - altitude_cmd)
         return np.argmin(distances)
 
     def _convert_heading_to_index(self, heading_cmd):
-        """航向指令转索引"""
+        """航向指令转索引 - 扩充精度版本"""
         heading_cmd = np.clip(heading_cmd, -np.pi, np.pi)
-        heading_values = np.array(
-            [-np.pi, -np.pi / 2, -np.pi / 3, -np.pi / 6, 0, np.pi / 6, np.pi / 3, np.pi / 2, np.pi])
+        # 扩充到更多离散值，提高精度
+        # 原来：[-180°, -90°, -60°, -30°, 0°, 30°, 60°, 90°, 180°]
+        # 现在：[-180°, -120°, -90°, -75°, -60°, -45°, -30°, -15°, 0°, 15°, 30°, 45°, 60°, 75°, 90°, 120°, 180°]
+        heading_values = np.array([
+            -np.pi,           # -180°
+            -2*np.pi/3,       # -120°
+            -np.pi/2,         # -90°
+            -5*np.pi/12,      # -75°
+            -np.pi/3,         # -60°
+            -np.pi/4,         # -45°
+            -np.pi/6,         # -30°
+            -np.pi/12,        # -15°
+            0,                # 0°
+            np.pi/12,         # 15°
+            np.pi/6,          # 30°
+            np.pi/4,          # 45°
+            np.pi/3,          # 60°
+            5*np.pi/12,       # 75°
+            np.pi/2,          # 90°
+            2*np.pi/3,        # 120°
+            np.pi             # 180°
+        ])
         distances = np.abs(heading_values - heading_cmd)
         return np.argmin(distances)
 
@@ -648,6 +738,8 @@ class PureManeuverTask(MultipleCombatTask):
         distances = np.abs(velocity_values - velocity_offset)
         return np.argmin(distances)
 
+
+
     def _use_lowlevel_policy(self, env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id):
         """使用低级策略网络"""
         if self.my_lowlevel_policy is None:
@@ -655,6 +747,12 @@ class PureManeuverTask(MultipleCombatTask):
         try:
             raw_obs = self.get_obs(env, agent_id)
             input_obs = np.zeros(12)
+
+            # 安全索引访问，防止越界
+            altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
+            heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+            velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
+
             input_obs[0] = self.norm_delta_altitude[altitude_cmd_id]
             input_obs[1] = self.norm_delta_heading[heading_cmd_id]
             input_obs[2] = self.norm_delta_velocity[velocity_cmd_id]
@@ -692,6 +790,12 @@ class PureManeuverTask(MultipleCombatTask):
         try:
             raw_obs = self.get_obs(env, agent_id)
             input_obs = np.zeros(12)
+
+            # 安全索引访问，防止越界
+            altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
+            heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+            velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
+
             input_obs[0] = self.norm_delta_altitude[altitude_cmd_id]
             input_obs[1] = self.norm_delta_heading[heading_cmd_id]
             input_obs[2] = self.norm_delta_velocity[velocity_cmd_id]
@@ -739,7 +843,11 @@ class PureManeuverTask(MultipleCombatTask):
             elevator = 0.0
             rudder = 0.0
             throttle = 0.7
-            target_altitude_change = [-1000, -500, -200, 0, 200, 500, 1000][altitude_cmd_id]
+            # 安全索引访问，防止越界
+            altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
+            heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+
+            target_altitude_change = self.norm_delta_altitude[altitude_cmd_id] * 1000.0  # 转换回米
             if target_altitude_change > 0:
                 elevator = 0.1
                 throttle = 0.8
@@ -812,6 +920,13 @@ class PureManeuverTask(MultipleCombatTask):
         """设置机动类型"""
         self.maneuver_type = maneuver_type
         logging.info(f"机动类型设置为: {maneuver_type}")
+
+    def set_short_skate_maneuver(self, custom_params=None):
+        """设置Short Skate机动 - 发射后快速脱离战术"""
+        self.set_composite_maneuver("short_skate_tactical", custom_params)
+        logging.info("Short Skate机动设置完成")
+        logging.info("机动描述: 发射后快速脱离战术")
+        logging.info("阶段: 发射准备 -> Crank机动 -> Turn Cold逃逸")
 
     def get_available_maneuvers(self):
         """获取可用的机动列表"""
