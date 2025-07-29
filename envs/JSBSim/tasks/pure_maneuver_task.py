@@ -39,7 +39,7 @@ class PureManeuverTask(MultipleCombatTask):
         self.enemy_baseline_policy = BaselineActor()
         self._inner_rnn_states = {}
         self._enemy_rnn_states = {}
-        # 扩充控制映射数组，与索引转换函数保持一致
+
         self.norm_delta_altitude = np.array([
             -1500, -1000, -750, -500, -300, -150, -50, 0, 50, 150, 300, 500, 750, 1000, 1500
         ]) / 1000.0
@@ -131,6 +131,12 @@ class PureManeuverTask(MultipleCombatTask):
                 default_params["min_altitude"] = 2000.0
         elif maneuver_name == "diagonal_flight":
             default_params = {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 15.0}
+        elif maneuver_name == "high_g_turn":
+            default_params = {"turn_angle": 180.0, "g_force": 7.0, "turn_rate": 8.0, "duration": 25.0}
+        elif maneuver_name == "accelerate_escape":
+            default_params = {"acceleration": 50.0, "duration": 20.0}
+        elif maneuver_name == "vertical_loop":
+            default_params = {"loop_type": "half", "g_force": 6.0, "duration": 15.0}
         else:
             default_params = {"duration": 20.0}
         self.basic_maneuver_params.update(default_params)
@@ -308,8 +314,11 @@ class PureManeuverTask(MultipleCombatTask):
                 if abs(altitude_diff) > 5.0:  # 降低阈值到5米
                     altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
 
-        elif phase in ["MANEUVER_COMPLETED"]:
-            # 机动完成状态：保持目标高度和航向，确保平稳飞行
+        elif phase in ["MANEUVER_COMPLETED", "BARREL_ROLLING", "BARREL_ROLL_COMPLETE",
+                       "HIGH_G_TURNING", "HIGH_G_TURN_COMPLETE", "ACCELERATING_ESCAPE", "ESCAPE_COMPLETE",
+                       "VERTICAL_LOOPING", "VERTICAL_LOOP_COMPLETE", "ADAPTIVE_CRANKING", "ADAPTIVE_CRANK_COMPLETE",
+                       "ADAPTIVE_TURNING", "ADAPTIVE_TURN_COMPLETE", "ENTERING_INVERTED", "INVERTED_FLIGHT_READY"]:
+            # 机动完成状态和特殊机动状态：保持目标高度和航向，确保平稳飞行
             if target_altitude is not None:
                 altitude_diff = target_altitude - current_altitude
                 if abs(altitude_diff) > 5.0:  # 保持精确高度控制
@@ -329,7 +338,9 @@ class PureManeuverTask(MultipleCombatTask):
             # 根据阶段调整精度
             if phase in ["TURN_ADJUSTING", "TURN_LEVEL_ADJUSTING"]:
                 threshold = 1.0  # 转弯调整阶段：1度精度
-            elif phase in ["MAINTAINING_HEADING", "MANEUVER_COMPLETED"]:
+            elif phase in ["MAINTAINING_HEADING", "MANEUVER_COMPLETED", "BARREL_ROLL_COMPLETE",
+                           "HIGH_G_TURN_COMPLETE", "ESCAPE_COMPLETE", "VERTICAL_LOOP_COMPLETE",
+                           "ADAPTIVE_CRANK_COMPLETE", "ADAPTIVE_TURN_COMPLETE", "INVERTED_FLIGHT_READY"]:
                 threshold = 1.5  # 保持航向和机动完成：1.5度精度
             else:
                 threshold = 1.0  # 其他阶段：1度精度
@@ -485,7 +496,35 @@ class PureManeuverTask(MultipleCombatTask):
                 params.get("target_heading", initial_heading),
                 params.get("duration", 15.0)
             )
-
+        elif basic_maneuver_name == "barrel_roll":
+            return BasicManeuvers.barrel_roll(
+                current_time,
+                initial_heading,
+                params.get("roll_angle", 135.0),
+                params.get("roll_rate", 45.0)
+            )
+        elif basic_maneuver_name == "high_g_turn":
+            return BasicManeuvers.high_g_turn(
+                current_time,
+                initial_heading,
+                params.get("turn_angle", 180.0),
+                params.get("g_force", 7.0),
+                params.get("turn_rate", 8.0)
+            )
+        elif basic_maneuver_name == "accelerate_escape":
+            return BasicManeuvers.accelerate_escape(
+                current_time,
+                initial_heading,
+                params.get("duration", 20.0),
+                params.get("acceleration", 50.0)
+            )
+        elif basic_maneuver_name == "vertical_loop":
+            return BasicManeuvers.vertical_loop(
+                current_time,
+                initial_heading,
+                params.get("loop_type", "half"),
+                params.get("g_force", 6.0)
+            )
         else:
             return (None, None, None, None, None)
 
@@ -927,6 +966,20 @@ class PureManeuverTask(MultipleCombatTask):
         logging.info("Short Skate机动设置完成")
         logging.info("机动描述: 发射后快速脱离战术")
         logging.info("阶段: 发射准备 -> Crank机动 -> Turn Cold逃逸")
+
+    def set_banzai_maneuver(self, custom_params=None):
+        """设置Banzai机动 - 发射后决策战术"""
+        self.set_composite_maneuver("banzai_tactical", custom_params)
+        logging.info("Banzai机动设置完成")
+        logging.info("机动描述: 发射后决策战术(Launch & Decide)")
+        logging.info("阶段: 发射准备 -> Crank防御 -> 决策转向 -> 迎敌格斗")
+
+    def set_sliceback_maneuver(self, custom_params=None):
+        """设置Sliceback机动 - 水平滚转+高G回旋"""
+        self.set_composite_maneuver("sliceback_tactical", custom_params)
+        logging.info("Sliceback机动设置完成")
+        logging.info("机动描述: 水平滚转135度 + 高G力拉杆回旋")
+        logging.info("阶段: 桶滚135度 -> 高G回旋180度 -> 恢复平飞")
 
     def get_available_maneuvers(self):
         """获取可用的机动列表"""

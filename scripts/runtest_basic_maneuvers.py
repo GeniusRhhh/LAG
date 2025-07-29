@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import numpy as np
+import math
 from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -185,6 +186,10 @@ def run_all_basic_maneuvers():
         ("dive", {"altitude_loss": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
         ("diagonal_flight", {"turn_angle": 70.0, "altitude_change": 1000.0, "duration": 20.0}),
         ("level_flight_maintain_heading", {"duration": 40.0}),
+        # 保留有效的新增基础机动
+        ("high_g_turn", {"turn_angle": 180.0, "g_force": 7.0, "turn_rate": 8.0, "duration": 25.0}),
+        ("accelerate_escape", {"acceleration": 50.0, "duration": 20.0}),
+        ("vertical_loop", {"loop_type": "half", "g_force": 6.0, "duration": 15.0}),
     ]
     results = []
     for i, (maneuver_name, params) in enumerate(basic_maneuvers, 1):
@@ -250,6 +255,94 @@ def run_all_tactical_maneuvers_simple():
     return results
 
 
+def run_new_maneuvers_test():
+    """运行新增机动测试"""
+    logging.info("=" * 60)
+    logging.info("新增机动测试系统")
+    logging.info("=" * 60)
+
+    # 新增基础机动
+    new_basic_maneuvers = [
+        ("barrel_roll", "桶滚机动 - 水平滚转135度"),
+        ("high_g_turn", "高G转弯 - 高机动性转弯"),
+        ("accelerate_escape", "加速逃离 - 保持航向并加速"),
+        ("vertical_loop", "垂直回旋 - 上下方向的高G机动")
+    ]
+
+    # 新增战术机动
+    new_tactical_maneuvers = [
+        ("banzai_tactical", "Banzai机动 - 发射后决策战术"),
+        ("sliceback_tactical", "Sliceback机动 - 水平滚转+垂直回旋")
+    ]
+
+    logging.info("可用的新增机动:")
+    logging.info("基础机动:")
+    for i, (name, desc) in enumerate(new_basic_maneuvers, 1):
+        logging.info(f"  {i} - {name}: {desc}")
+
+    logging.info("战术机动:")
+    for i, (name, desc) in enumerate(new_tactical_maneuvers, len(new_basic_maneuvers) + 1):
+        logging.info(f"  {i} - {name}: {desc}")
+
+    total_options = len(new_basic_maneuvers) + len(new_tactical_maneuvers)
+    logging.info(f"  {total_options + 1} - 测试所有新增机动")
+
+    while True:
+        try:
+            choice = int(input(f"请选择机动编号 (1-{total_options + 1}): ").strip())
+
+            if 1 <= choice <= len(new_basic_maneuvers):
+                # 测试单个基础机动
+                maneuver_name, desc = new_basic_maneuvers[choice - 1]
+                logging.info(f"测试基础机动: {maneuver_name} - {desc}")
+
+                file_path = runtest_basic_maneuver(maneuver_name, choice)
+                success = file_path is not None
+
+            elif len(new_basic_maneuvers) + 1 <= choice <= total_options:
+                # 测试单个战术机动
+                tactical_index = choice - len(new_basic_maneuvers) - 1
+                maneuver_name, desc = new_tactical_maneuvers[tactical_index]
+                logging.info(f"测试战术机动: {maneuver_name} - {desc}")
+
+                file_path = runtest_composite_maneuver(maneuver_name, choice)
+                success = file_path is not None
+
+            elif choice == total_options + 1:
+                # 测试所有新增机动
+                logging.info("测试所有新增机动...")
+                results = []
+
+                # 测试所有新增基础机动
+                for i, (name, desc) in enumerate(new_basic_maneuvers, 1):
+                    logging.info(f"测试基础机动 {i}/{len(new_basic_maneuvers)}: {name}")
+                    file_path = runtest_basic_maneuver(name, i)
+                    if file_path:
+                        results.append(f"basic_{name}")
+
+                # 测试所有新增战术机动
+                for i, (name, desc) in enumerate(new_tactical_maneuvers, 1):
+                    logging.info(f"测试战术机动 {i}/{len(new_tactical_maneuvers)}: {name}")
+                    file_path = runtest_composite_maneuver(name, i + len(new_basic_maneuvers))
+                    if file_path:
+                        results.append(f"tactical_{name}")
+
+                success = len(results) > 0
+                if success:
+                    logging.info(f"成功测试 {len(results)} 个新增机动")
+
+            else:
+                logging.warning(f"请输入1到{total_options + 1}之间的数字")
+                continue
+
+            break
+
+        except ValueError:
+            logging.warning("请输入有效的数字")
+
+    return success
+
+
 if __name__ == "__main__":
     logging.info("基础机动和组合机动测试系统")
     logging.info("可用测试选项:")
@@ -259,13 +352,14 @@ if __name__ == "__main__":
     logging.info("  4 - 所有组合机动测试")
     logging.info("  5 - 新增战术机动测试")
     logging.info("  6 - 全部测试")
+    logging.info("  7 - 新增机动专项测试 (基础机动+战术机动)")
 
     while True:
         try:
-            choice = input("请输入数字 (1-6): ").strip()
+            choice = input("请输入数字 (1-7): ").strip()
             choice = int(choice)
-            if choice not in [1, 2, 3, 4, 5, 6]:
-                logging.warning("请输入1、2、3、4、5或6")
+            if choice not in [1, 2, 3, 4, 5, 6, 7]:
+                logging.warning("请输入1、2、3、4、5、6或7")
                 continue
             break
         except ValueError:
@@ -368,6 +462,10 @@ if __name__ == "__main__":
         success = len(basic_results) > 0 or len(composite_results) > 0 or len(tactical_results) > 0
         if success:
             logging.info(f"成功生成 {len(basic_results)} 个基础机动 + {len(composite_results)} 个组合机动 + {len(tactical_results)} 个战术机动ACMI文件")
+
+    elif choice == 7:
+        logging.info("运行新增机动专项测试")
+        success = run_new_maneuvers_test()
 
     if success:
         logging.info("测试成功完成")
