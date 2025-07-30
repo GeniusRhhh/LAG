@@ -149,7 +149,6 @@ class BasicManeuvers:
             # 确保不低于最小高度
             target_altitude = max(target_altitude, min_altitude)
 
-            # 完全消除速度补偿，避免JSBSim的升力补偿
             # 不给任何速度补偿，让飞机自然下降
             return "DIVING", None, target_altitude, 0.0, None
         else:
@@ -223,7 +222,7 @@ class BasicManeuvers:
             current_turn = turn_angle * smooth_progress
             current_heading = normalize_heading(initial_heading + current_turn)
 
-            # 关键：在初始滚转角基础上增加转弯滚转
+            # 在初始滚转角基础上增加转弯滚转
             # 如果已经是倒飞（135度），就在倒飞状态下转弯
             turn_roll = 30.0 * math.sin(progress * math.pi)  # 转弯时的额外滚转
             current_roll = initial_roll + turn_roll
@@ -269,7 +268,6 @@ class BasicManeuvers:
             max_pitch = 20.0  # 从60度减少到20度
             pitch_angle = max_pitch * math.sin(loop_progress)
 
-            # 关键修复：保持初始滚转角，不改变！
             # 如果是倒飞状态（135度），就保持倒飞进行垂直机动
             current_roll = initial_roll
 
@@ -394,7 +392,7 @@ class CompositeManeuverExecutor:
         # 1. Crank机动：转70度 + 保持新航向（保持高度版）
         self.maneuver_definitions["crank_tactical"] = [
             ManeuverStep("turn_level", {
-                "turn_angle": 30.0,
+                "turn_angle": 60.0,
                 "turn_rate": 4.0  # 降低转弯率以减少高度变化
             }, 20.0),  # 给足够时间确保角度精确
             ManeuverStep("maintain_heading_flight", {}, 30.0)
@@ -491,7 +489,7 @@ class CompositeManeuverExecutor:
     def update_maneuver_params(self, maneuver_name: str, custom_params: Dict[str, Any]):
         """更新组合机动的参数"""
         if maneuver_name not in self.maneuver_definitions:
-            logging.warning(f"❌ 未知的组合机动: {maneuver_name}")
+            logging.warning(f"未知的组合机动: {maneuver_name}")
             return
 
         # 根据传入的参数更新机动定义
@@ -526,7 +524,7 @@ class CompositeManeuverExecutor:
             })
             self.maneuver_definitions[maneuver_name][1].duration = params.get("dive_duration", 15.0)
 
-        logging.info(f"✅ 组合机动 {maneuver_name} 参数更新完成")
+        logging.info(f"组合机动 {maneuver_name} 参数更新完成")
         for i, step in enumerate(self.maneuver_definitions[maneuver_name]):
             logging.info(f"   步骤{i + 1}: {step.name} {step.params} 持续{step.duration}s")
 
@@ -536,7 +534,7 @@ class CompositeManeuverExecutor:
         """执行组合机动 - 精确控制版本"""
 
         if maneuver_name not in self.maneuver_definitions:
-            logging.warning(f"❌ 未知的组合机动: {maneuver_name}")
+            logging.warning(f"未知的组合机动: {maneuver_name}")
             return None, None, None, None, None
 
         steps = self.maneuver_definitions[maneuver_name]
@@ -595,7 +593,7 @@ class CompositeManeuverExecutor:
 
         current_step = steps[current_step_index]
 
-        # 步骤切换处理（简化版）
+        # 步骤切换处理
         if current_step_index != state["current_step"]:
             # 计算累积状态
             step_initial_heading = state["step_initial_heading"]
@@ -847,14 +845,14 @@ class CompositeManeuverExecutor:
                 state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
             return result
         else:
-            logging.warning(f"❌ 未知的基础机动: {current_step.name}")
+            logging.warning(f" 未知的基础机动: {current_step.name}")
             return None, None, None, None, None
 
     def reset_maneuver_state(self, maneuver_name: str):
         """重置组合机动状态"""
         if maneuver_name in self.active_states:
             del self.active_states[maneuver_name]
-            logging.info(f"🔄 重置组合机动 {maneuver_name} 状态")
+            logging.info(f"重置组合机动 {maneuver_name} 状态")
 
     def get_available_maneuvers(self) -> List[str]:
         """获取可用的组合机动列表"""
