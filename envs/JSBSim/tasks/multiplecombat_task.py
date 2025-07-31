@@ -870,8 +870,14 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
     def get_state_dict(self, env, agent_id):
         """获取增强状态字典，支持14种战术模板。"""
-        ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
-        enemies = env.agents[agent_id].enemies
+        try:
+            ego_state = np.array(env.agents[agent_id].get_property_values(self.state_var))
+            enemies = env.agents[agent_id].enemies
+        except Exception as e:
+            logging.warning(f"Error getting state for {agent_id}: {e}")
+            # 返回默认状态
+            ego_state = np.zeros(len(self.state_var))
+            enemies = []
 
         # 计算敌方状态
         enemy_distances = [np.linalg.norm(enemy.get_position() - env.agents[agent_id].get_position())
@@ -1205,174 +1211,190 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
 
     def step(self, env):
         """执行一步仿真，集成战术模板和阶段管理"""
-        self.step_count += 1
+        try:
+            self.step_count += 1
 
-        # 更新所有智能体的作战阶段
-        for agent_id in env.agents.keys():
-            self.update_combat_phase(env, agent_id)
-            if agent_id in self.tactical_templates:
-                state = self.get_state_dict(env, agent_id)
-                self.tactical_templates[agent_id].update_phase(state)
-
-        # 目标分配
-        allocation_agents = [aid for aid in env.agents.keys()
-                             if self.current_phases.get(aid) == "target_allocation"]
-        if allocation_agents:
-            self.allocate_targets(env)
-
-        # 修复的导弹发射逻辑
-        for agent_id, agent in env.agents.items():
-            if not agent.is_alive:
-                continue
-
-            target_list = self._target_allocation.get(agent_id, agent.enemies)
-            if not target_list:
-                continue
-
-            # 找到最近的存活目标
-            alive_targets = [t for t in target_list if t.is_alive]
-            if not alive_targets:
-                continue
-
-            target = min(alive_targets,
-                         key=lambda t: np.linalg.norm(t.get_position() - agent.get_position()))
-            distance = np.linalg.norm(target.get_position() - agent.get_position())
-
-            # 计算攻击角度
-            target_vec = target.get_position() - agent.get_position()
-            heading = agent.get_velocity()
-            if np.linalg.norm(heading) > 0 and np.linalg.norm(target_vec) > 0:
-                attack_angle = np.rad2deg(np.arccos(np.clip(
-                    np.dot(target_vec, heading) / (np.linalg.norm(target_vec) * np.linalg.norm(heading)),
-                    -1, 1)))
-            else:
-                attack_angle = 180
-
-            # 射击间隔检查
-            shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
-            state = self.get_state_dict(env, agent_id)
-
-            # 射击条件
-            shoot_flag = (
-                    agent.is_alive and
-                    self._shoot_action.get(agent_id, False) and
-                    self._remaining_missiles.get(agent_id, 0) > 0 and
-                    attack_angle <= 120 and  # 65度
-                    25000 <= distance <= 60000 and  # 窗口25-60km
-                    shoot_interval >= self.min_attack_interval-20 and
-                    (state.get("radar_lock", False) or distance < 60000) and
-                    self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision", "target_allocation"] and
-                    abs(state["enemy_angle_off"]) < 150  # 150度
-            )
-            #强制发射
-            if (not shoot_flag and
-                    agent.is_alive and
-                    self._remaining_missiles.get(agent_id, 0) > 0 and
-                    25000 <= distance <= 55000 and  # 缩小强制发射距离范围
-                    shoot_interval >= 15 and  # 增加强制发射间隔
-                    attack_angle <= 150):  # 增加角度限制
-                shoot_flag = True
-                logging.info(
-                    f"Agent {agent_id} FORCED missile launch at distance={distance:.0f}m, angle={attack_angle:.1f}deg")
-            if shoot_flag:
-                # 创建导弹
-                new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
-                missile = MissileSimulator.create(
-                    parent=agent,
-                    target=target,
-                    uid=new_missile_uid
-                )
-                env.add_temp_simulator(missile)
-
-                self._remaining_missiles[agent_id] -= 1
-                self._last_shoot_time[agent_id] = env.current_step
-
-                logging.info(f"Agent {agent_id} launched missile: target={target.uid}, "
-                             f"distance={distance:.1f}m, angle={attack_angle:.1f}deg, "
-                             f"remaining={self._remaining_missiles[agent_id]}")
-
-                # 记录射击事件
-                self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
-
-            # 记录其他战术动作
-            if self._last_action.get(agent_id, [0, 0])[0] != 0:
-                template_id = self._last_action[agent_id][0]
-                if agent_id in self.tactical_templates:
-                    state_dict = self.get_state_dict(env, agent_id)
-                    tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state_dict)
-                    maneuver_name = tactical_action.get("maneuver", f"Template_{template_id}")
-                    self._maneuver_history.append((agent_id, maneuver_name, env.current_step))
-
-        # 获取观测
-        obs = {agent_id: self.get_obs(env, agent_id) for agent_id in env.agents.keys()}
-
-        # 构建共享观测
-        all_obs = np.stack([obs[agent_id] for agent_id in sorted(env.agents.keys())], axis=0)
-        share_obs = np.tile(all_obs.flatten(), (len(env.agents.keys()), 1))
-        share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(sorted(env.agents.keys()))}
-
-        # 计算奖励
-        rewards = {}
-        dones = {}
-        infos = {}
-
-        for agent_id in env.agents.keys():
-            reward_sum = 0.0
-            reward_details = {}
-            state_dict = self.get_state_dict(env, agent_id)
-
-            # 计算各个奖励组件
-            for func in self.reward_functions:
+            # 更新所有智能体的作战阶段
+            for agent_id in env.agents.keys():
                 try:
-                    if isinstance(func, (TacticalRewardNew,RadarLockRewardNew,MissileHitRewardNew)):
-                        reward_info = func.get_reward(self, env, agent_id, state_dict)
-                    else:
-                        reward_info = func.get_reward(self, env, agent_id)
-
-                    if isinstance(reward_info, (tuple, list)) and len(reward_info) > 0:
-                        reward_value = reward_info[0]
-                    else:
-                        reward_value = reward_info if isinstance(reward_info, (int, float)) else 0.0
-
-                    reward_details[func.__class__.__name__] = reward_value
-                    reward_sum += reward_value
+                    self.update_combat_phase(env, agent_id)
+                    if agent_id in self.tactical_templates:
+                        state = self.get_state_dict(env, agent_id)
+                        self.tactical_templates[agent_id].update_phase(state)
                 except Exception as e:
-                    logging.error(f"Error calculating reward for {func.__class__.__name__}: {e}")
-                    reward_details[func.__class__.__name__] = 0.0
+                    logging.warning(f"Error updating combat phase for {agent_id}: {e}")
+                    continue
 
+            # 目标分配
+            allocation_agents = [aid for aid in env.agents.keys()
+                                 if self.current_phases.get(aid) == "target_allocation"]
+            if allocation_agents:
+                self.allocate_targets(env)
 
-            # 缩放奖励
-            original_reward = np.clip(reward_sum, -10.0, 10.0)
-            # scaled_reward = self.reward_scaler.scale(original_reward)
-            scaled_reward = np.clip(original_reward, -10.0, 10.0)  # 直接使用原始奖励
-            rewards[agent_id] = np.array([scaled_reward])
-            self.rewards[agent_id] = scaled_reward
-            # rewards[agent_id] =  np.clip(reward_sum, -10, 10)
+            # 修复的导弹发射逻辑
+            for agent_id, agent in env.agents.items():
+                if not agent.is_alive:
+                    continue
 
-            # 检查终止条件
-            done, info = self.get_termination(env, agent_id, {})
-            dones[agent_id] = [done]
+                target_list = self._target_allocation.get(agent_id, agent.enemies)
+                if not target_list:
+                    continue
 
-            # 构建详细信息字典
-            infos[agent_id] = self.get_tactical_state(agent_id)
-            infos[agent_id]["reward_details"] = reward_details
-            infos[agent_id]["current_phase"] = self.current_phases.get(agent_id, "contact_guidance")
-            infos[agent_id]["step_count"] = self.step_count
+                # 找到最近的存活目标
+                alive_targets = [t for t in target_list if t.is_alive]
+                if not alive_targets:
+                    continue
 
-            # 定期详细日志输出
-            if env.current_step % 250 == 0:
-                logging.info(
-                    f"Step {env.current_step} - Agent {agent_id}: "
-                    f"Reward={reward_sum:.3f}, Phase={self.current_phases.get(agent_id)}, "
-                    f"Action={self._last_action.get(agent_id, [0, 0])}, "
-                    f"EnemyDistance={state_dict['enemy_distance']:.1f}m, "
-                    f"AttackAngle={state_dict['enemy_angle_off']:.1f}deg, "
-                    f"RadarLock={state_dict['radar_lock']}, "
-                    f"MissileLaunched={state_dict['missile_launched']}, "
-                    f"MissileHit={state_dict['missile_hit']}, "
-                    f"RemainingMissiles={self._remaining_missiles.get(agent_id, 0)}, "
-                    f"Altitude={state_dict['current_altitude']:.1f}m, "
-                    f"RewardDetails={reward_details}"
+                target = min(alive_targets,
+                             key=lambda t: np.linalg.norm(t.get_position() - agent.get_position()))
+                distance = np.linalg.norm(target.get_position() - agent.get_position())
+
+                # 计算攻击角度
+                target_vec = target.get_position() - agent.get_position()
+                heading = agent.get_velocity()
+                if np.linalg.norm(heading) > 0 and np.linalg.norm(target_vec) > 0:
+                    attack_angle = np.rad2deg(np.arccos(np.clip(
+                        np.dot(target_vec, heading) / (np.linalg.norm(target_vec) * np.linalg.norm(heading)),
+                        -1, 1)))
+                else:
+                    attack_angle = 180
+
+                # 射击间隔检查
+                shoot_interval = env.current_step - self._last_shoot_time.get(agent_id, -self.min_attack_interval)
+                state = self.get_state_dict(env, agent_id)
+
+                # 射击条件
+                shoot_flag = (
+                        agent.is_alive and
+                        self._shoot_action.get(agent_id, False) and
+                        self._remaining_missiles.get(agent_id, 0) > 0 and
+                        attack_angle <= 120 and  # 65度
+                        25000 <= distance <= 60000 and  # 窗口25-60km
+                        shoot_interval >= self.min_attack_interval - 20 and
+                        (state.get("radar_lock", False) or distance < 60000) and
+                        self.current_phases.get(agent_id) in ["missile_launch", "tactical_decision",
+                                                              "target_allocation"] and
+                        abs(state["enemy_angle_off"]) < 150  # 150度
                 )
+                # 强制发射
+                if (not shoot_flag and
+                        agent.is_alive and
+                        self._remaining_missiles.get(agent_id, 0) > 0 and
+                        25000 <= distance <= 55000 and  # 缩小强制发射距离范围
+                        shoot_interval >= 15 and  # 增加强制发射间隔
+                        attack_angle <= 150):  # 增加角度限制
+                    shoot_flag = True
+                    logging.info(
+                        f"Agent {agent_id} FORCED missile launch at distance={distance:.0f}m, angle={attack_angle:.1f}deg")
+                if shoot_flag:
+                    # 创建导弹
+                    new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
+                    missile = MissileSimulator.create(
+                        parent=agent,
+                        target=target,
+                        uid=new_missile_uid
+                    )
+                    env.add_temp_simulator(missile)
 
-        return obs, share_obs, rewards, dones, infos
+                    self._remaining_missiles[agent_id] -= 1
+                    self._last_shoot_time[agent_id] = env.current_step
+
+                    logging.info(f"Agent {agent_id} launched missile: target={target.uid}, "
+                                 f"distance={distance:.1f}m, angle={attack_angle:.1f}deg, "
+                                 f"remaining={self._remaining_missiles[agent_id]}")
+
+                    # 记录射击事件
+                    self._maneuver_history.append((agent_id, "missile_launch", env.current_step))
+
+                # 记录其他战术动作
+                if self._last_action.get(agent_id, [0, 0])[0] != 0:
+                    template_id = self._last_action[agent_id][0]
+                    if agent_id in self.tactical_templates:
+                        state_dict = self.get_state_dict(env, agent_id)
+                        tactical_action = self.tactical_templates[agent_id].get_tactical_action(template_id, state_dict)
+                        maneuver_name = tactical_action.get("maneuver", f"Template_{template_id}")
+                        self._maneuver_history.append((agent_id, maneuver_name, env.current_step))
+
+            # 获取观测
+            obs = {agent_id: self.get_obs(env, agent_id) for agent_id in env.agents.keys()}
+
+            # 构建共享观测
+            all_obs = np.stack([obs[agent_id] for agent_id in sorted(env.agents.keys())], axis=0)
+            share_obs = np.tile(all_obs.flatten(), (len(env.agents.keys()), 1))
+            share_obs = {agent_id: share_obs[i] for i, agent_id in enumerate(sorted(env.agents.keys()))}
+
+            # 计算奖励
+            rewards = {}
+            dones = {}
+            infos = {}
+
+            for agent_id in env.agents.keys():
+                reward_sum = 0.0
+                reward_details = {}
+                state_dict = self.get_state_dict(env, agent_id)
+
+                # 计算各个奖励组件
+                for func in self.reward_functions:
+                    try:
+                        if isinstance(func, (TacticalRewardNew, RadarLockRewardNew, MissileHitRewardNew)):
+                            reward_info = func.get_reward(self, env, agent_id, state_dict)
+                        else:
+                            reward_info = func.get_reward(self, env, agent_id)
+
+                        if isinstance(reward_info, (tuple, list)) and len(reward_info) > 0:
+                            reward_value = reward_info[0]
+                        else:
+                            reward_value = reward_info if isinstance(reward_info, (int, float)) else 0.0
+
+                        reward_details[func.__class__.__name__] = reward_value
+                        reward_sum += reward_value
+                    except Exception as e:
+                        logging.error(f"Error calculating reward for {func.__class__.__name__}: {e}")
+                        reward_details[func.__class__.__name__] = 0.0
+
+                # 缩放奖励
+                original_reward = np.clip(reward_sum, -10.0, 10.0)
+                scaled_reward = np.clip(original_reward, -10.0, 10.0)  # 直接使用原始奖励
+                rewards[agent_id] = np.array([scaled_reward])
+                self.rewards[agent_id] = scaled_reward
+
+                # 检查终止条件
+                done, info = self.get_termination(env, agent_id, {})
+                dones[agent_id] = [done]
+
+                # 构建详细信息字典
+                infos[agent_id] = self.get_tactical_state(agent_id)
+                infos[agent_id]["reward_details"] = reward_details
+                infos[agent_id]["current_phase"] = self.current_phases.get(agent_id, "contact_guidance")
+                infos[agent_id]["step_count"] = self.step_count
+
+                # 定期详细日志输出
+                if env.current_step % 250 == 0:
+                    logging.info(
+                        f"Step {env.current_step} - Agent {agent_id}: "
+                        f"Reward={reward_sum:.3f}, Phase={self.current_phases.get(agent_id)}, "
+                        f"Action={self._last_action.get(agent_id, [0, 0])}, "
+                        f"EnemyDistance={state_dict['enemy_distance']:.1f}m, "
+                        f"AttackAngle={state_dict['enemy_angle_off']:.1f}deg, "
+                        f"RadarLock={state_dict['radar_lock']}, "
+                        f"MissileLaunched={state_dict['missile_launched']}, "
+                        f"MissileHit={state_dict['missile_hit']}, "
+                        f"RemainingMissiles={self._remaining_missiles.get(agent_id, 0)}, "
+                        f"Altitude={state_dict['current_altitude']:.1f}m, "
+                        f"RewardDetails={reward_details}"
+                    )
+
+            return obs, share_obs, rewards, dones, infos
+
+        except Exception as e:
+            logging.error(f"Critical error in MultipleCombatTask.step: {e}")
+            import traceback
+            logging.error(f"Traceback: {traceback.format_exc()}")
+
+            # 返回默认值避免返回None
+            obs = {agent_id: np.zeros(32) for agent_id in env.agents.keys()}
+            share_obs = obs.copy()
+            rewards = {agent_id: np.array([0.0]) for agent_id in env.agents.keys()}
+            dones = {agent_id: [False] for agent_id in env.agents.keys()}
+            infos = {agent_id: {} for agent_id in env.agents.keys()}
+            return obs, share_obs, rewards, dones, infos
