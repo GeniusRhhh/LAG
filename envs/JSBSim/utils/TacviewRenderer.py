@@ -51,7 +51,9 @@ class TacviewRenderer:
             with open(target_filepath, mode='a', encoding='utf-8-sig') as f:
                 f.writelines(data)
                 f.flush()
-            logging.info(f"Wrote {len(data)} lines to {target_filepath} at step {env.current_step}")
+            # 减少日志频率 - 每50步打印一次
+            if env.current_step % 50 == 0:
+                logging.debug(f"Wrote {len(data)} lines to {target_filepath} at step {env.current_step}")
         elif mode == "real_time" and tacview:
             tacview.send_data_to_client("".join(data))
 

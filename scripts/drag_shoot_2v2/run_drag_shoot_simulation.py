@@ -518,6 +518,93 @@ def check_termination(env) -> bool:
 
     return False
 
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
+    """记录仿真数据到CSV格式"""
+    # 记录飞机轨迹数据
+    for agent_id, aircraft in env._jsbsims.items():
+        if aircraft.is_alive:
+            pos = aircraft.get_position()
+            heading = np.rad2deg(aircraft.get_property_value(c.attitude_psi_rad))
+            velocity = aircraft.get_property_value(c.velocities_v_down_fps) * 0.3048  # fps to m/s
+
+            trajectory_data.append({
+                'Time_s': current_time,
+                'Agent_ID': agent_id,
+                'Type': 'F-16',
+                'X_m': pos[0],
+                'Y_m': pos[1],
+                'Z_m': pos[2],
+                'Heading_deg': heading,
+                'Altitude_m': pos[2],
+                'Velocity_m_s': velocity
+            })
+
+    # 记录雷达状态数据
+    if hasattr(env.task, 'radar_states'):
+        for agent_id, radar_state in env.task.radar_states.items():
+            if env._jsbsims[agent_id].is_alive:
+                # 找到目标
+                target_id = None
+                target_distance = 0.0
+                for enemy_id, enemy in env._jsbsims.items():
+                    if ((agent_id.startswith('A') and enemy_id.startswith('B')) or
+                        (agent_id.startswith('B') and enemy_id.startswith('A'))) and enemy.is_alive:
+                        target_id = enemy_id
+                        pos1 = env._jsbsims[agent_id].get_position()
+                        pos2 = enemy.get_position()
+                        target_distance = np.linalg.norm(pos1 - pos2) / 1000.0  # km
+                        break
+
+                if target_id:
+                    radar_data.append({
+                        'Time_s': current_time,
+                        'Agent_ID': agent_id,
+                        'Radar_Type': 'AN/APG-68(V)9',
+                        'Status': radar_state,
+                        'Target_ID': target_id,
+                        'Target_Distance_km': target_distance
+                    })
+
+    # 记录导弹状态数据
+    if hasattr(env, '_missile_records'):
+        for missile_id, missile_info in env._missile_records.items():
+            missile_data.append({
+                'Time_s': current_time,
+                'Missile_ID': missile_id,
+                'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                'Type': missile_info.get('type', 'AIM-120C-7'),
+                'Status': missile_info.get('status', 'LAUNCHED'),
+                'X_m': 0,  # 简化处理
+                'Y_m': 0,
+                'Z_m': 6096,
+                'Velocity_m_s': 1360.0,
+                'Target_ID': missile_info.get('target', 'Unknown')
+            })
+
+def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data):
+    """保存CSV数据文件"""
+    import pandas as pd
+
+    # 保存轨迹数据
+    if trajectory_data:
+        trajectory_df = pd.DataFrame(trajectory_data)
+        trajectory_file = os.path.join(output_dir, f"trajectory_{timestamp}.csv")
+        trajectory_df.to_csv(trajectory_file, index=False)
+        print(f"轨迹数据已保存: {trajectory_file}")
+
+    # 保存雷达数据
+    if radar_data:
+        radar_df = pd.DataFrame(radar_data)
+        radar_file = os.path.join(output_dir, f"radar_status_{timestamp}.csv")
+        radar_df.to_csv(radar_file, index=False)
+        print(f"雷达数据已保存: {radar_file}")
+
+    # 保存导弹数据
+    if missile_data:
+        missile_df = pd.DataFrame(missile_data)
+        missile_file = os.path.join(output_dir, f"missile_status_{timestamp}.csv")
+        missile_df.to_csv(missile_file, index=False)
+        print(f"导弹数据已保存: {missile_file}")
 
 def setup_logging(output_dir: str) -> str:
     """设置日志系统"""
@@ -581,7 +668,7 @@ def run_simulation():
         return False
     
     # 设置输出目录
-    output_dir = "air_combat_results"
+    output_dir = os.path.join(os.path.dirname(__file__), "air_combat_results")
     log_file = setup_logging(output_dir)
     
     print_banner()
@@ -632,9 +719,14 @@ def run_simulation():
         
         start_time = time.time()
 
-        # 准备ACMI文件路径
+        # 准备ACMI文件路径和数据记录
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         acmi_filepath = os.path.join(output_dir, f"air_combat_2v2_{timestamp}.acmi")
+
+        # 初始化CSV数据记录
+        trajectory_data = []
+        radar_data = []
+        missile_data = []
 
         # 仿真循环
         step_count = 0
@@ -655,6 +747,9 @@ def run_simulation():
                 env.render(mode="txt", filepath=acmi_filepath)
             except Exception as e:
                 logging.warning(f"Failed to render step {step_count}: {e}")
+
+            # 记录数据
+            record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data)
 
             # 打印状态
             print_status(env)
@@ -689,7 +784,7 @@ def run_simulation():
             final_distance = np.linalg.norm(pos1 - pos2) / 1000.0
 
         alive_aircraft = sum(1 for a in env._jsbsims.values() if a.is_alive)
-        active_missiles = len([m for m in env._tempsims.values() if m.is_alive])
+        active_missiles = len(getattr(env, '_missile_records', {}))
         print("最终状态:")
         print(f"  仿真时间: {current_time:.1f}秒")
         print(f"  总步数: {env.current_step}")
@@ -710,14 +805,12 @@ def run_simulation():
                   f"剩余导弹{aircraft.num_missiles}")
         print()
         
-        # 保存数据
-        print("保存仿真数据...")
-        env.save_data(output_dir)
-
-        # ACMI文件已在仿真过程中生成
+        # 保存CSV数据
+        save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data)
 
         # ACMI文件已在每步生成
         print(f"ACMI文件已生成: {acmi_filepath}")
+        print("CSV数据文件已保存")
 
         print("=" * 80)
         print("仿真成功完成!")
