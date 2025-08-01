@@ -14,6 +14,8 @@ import numpy as np
 from datetime import datetime
 
 # 添加项目根目录到路径
+from envs.JSBSim.core.simulatior import MissileSimulator
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.insert(0, project_root)
@@ -501,21 +503,26 @@ def launch_missile(env, agent_id: str, target, current_time: float):
 
 
 def check_termination(env) -> bool:
-    """检查终止条件"""
+    """检查终止条件 - 只有双方全灭才终止"""
     # 检查是否有飞机存活
     alive_aircraft = [a for a in env._jsbsims.values() if a.is_alive]
     if len(alive_aircraft) == 0:
         logging.info("All aircraft destroyed - terminating")
         return True
 
-    # 检查是否只有一方存活
-    red_alive = any(a.is_alive for aid, a in env._jsbsims.items() if aid.startswith('A'))
-    blue_alive = any(a.is_alive for aid, a in env._jsbsims.items() if aid.startswith('B'))
+    # 检查双方存活情况 - 只有当一方全灭时才终止
+    red_alive = [aid for aid, a in env._jsbsims.items() if aid.startswith('A') and a.is_alive]
+    blue_alive = [aid for aid, a in env._jsbsims.items() if aid.startswith('B') and a.is_alive]
 
-    if not red_alive or not blue_alive:
-        logging.info("One side eliminated - terminating")
+    # 只有当一方全灭时才终止
+    if len(red_alive) == 0:
+        logging.info("Red team eliminated - terminating")
+        return True
+    elif len(blue_alive) == 0:
+        logging.info("Blue team eliminated - terminating")
         return True
 
+    # 继续仿真 - 不因为单架飞机被击落而终止
     return False
 
 def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
@@ -661,8 +668,8 @@ def run_simulation():
     # 配置文件名称 - 不需要路径和后缀
     config_name = "drag_shoot_tactical"
     
-    # 检查配置文件是否存在
-    config_file_path = os.path.join(project_root, 'envs', 'JSBSim', 'configs', f'{config_name}.yaml')
+    # 检查配置文件是否存在 - 使用本地configs目录
+    config_file_path = os.path.join(current_dir, 'configs', f'{config_name}.yaml')
     if not os.path.exists(config_file_path):
         print(f"❌ 配置文件不存在: {config_file_path}")
         return False
@@ -691,6 +698,9 @@ def run_simulation():
 
         # 使用现有的配置文件
         env = MultipleCombatEnv(config_name)
+
+        # 强制设置1500步
+        env.max_steps = 1500
 
         # 替换任务为拖曳射击任务
         env.task = DragShootTacticalTask(env.config)
@@ -754,16 +764,14 @@ def run_simulation():
             # 打印状态
             print_status(env)
             
-            # 检查终止条件
-            if (isinstance(dones, dict) and any(dones.values())) or \
-               (isinstance(dones, np.ndarray) and np.any(dones)) or \
-               check_termination(env):
+            # 检查终止条件 - 只使用我们自定义的终止逻辑，忽略环境的dones
+            if check_termination(env):
                 print(f"\n仿真终止于步数 {step_count}")
                 break
                 
-            # 检查飞机存活状态
+            # 检查飞机存活状态 - 减少冗余输出
             alive_count = sum(1 for aircraft in env.agents.values() if aircraft.is_alive)
-            if alive_count < len(env.agents):
+            if alive_count < len(env.agents) and step_count % 50 == 0:  # 每50步输出一次
                 print(f"\n飞机被击落，存活数量: {alive_count}")
         
         end_time = time.time()

@@ -12,6 +12,63 @@ from envs.JSBSim.tasks.multiplecombat_task import MultipleCombatTask
 from envs.JSBSim.model.baseline_actor import BaselineActor
 from envs.JSBSim.utils.utils import get_root_dir
 from envs.JSBSim.core.catalog import Catalog as c
+from envs.JSBSim.termination_conditions.termination_condition_base import BaseTerminationCondition
+
+
+class DragShootTermination(BaseTerminationCondition):
+    """拖曳射击专用终止条件 - 只有双方全灭才终止"""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.altitude_limit = getattr(config, 'altitude_limit', 1000)  # 1000米
+        self.max_steps = getattr(config, 'max_steps', 2500)
+
+    def get_termination(self, task, env, agent_id, info={}):
+        """
+        自定义终止条件：
+        1. 高度过低
+        2. 时间限制
+        3. 极端状态
+        4. 过载
+        5. 双方全灭（不是单架飞机被击落）
+        """
+        # 检查高度过低
+        current_alt = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        if current_alt <= self.altitude_limit:
+            self.log(f"{agent_id} altitude too low: {current_alt:.1f}m")
+            return True, False, info
+
+        # 检查时间限制
+        if env.current_step >= self.max_steps:
+            self.log(f"Time limit reached: {env.current_step} steps")
+            return True, False, info
+
+        # 检查极端状态
+        if env.agents[agent_id].get_property_value(c.detect_extreme_state):
+            self.log(f"{agent_id} extreme state detected")
+            return True, False, info
+
+        # 检查过载状态
+        if (abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_x_norm)) > 15.0 or
+            abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_y_norm)) > 15.0 or
+            abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_z_norm) + 1) > 15.0):
+            self.log(f"{agent_id} overload detected")
+            return True, False, info
+
+        # 检查双方存活情况 - 只有当一方全灭时才终止
+        red_alive = [aid for aid in ["A0100", "A0200"] if aid in env.agents and env.agents[aid].is_alive]
+        blue_alive = [aid for aid in ["B0100", "B0200"] if aid in env.agents and env.agents[aid].is_alive]
+
+        # 只有当一方全灭时才终止
+        if len(red_alive) == 0:
+            self.log("Red team eliminated")
+            return True, True, {"termination_reason": "red_eliminated", "winner": "blue"}
+        elif len(blue_alive) == 0:
+            self.log("Blue team eliminated")
+            return True, True, {"termination_reason": "blue_eliminated", "winner": "red"}
+
+        # 继续仿真 - 不因为单架飞机被击落而终止
+        return False, False, info
 
 
 class TacticalPhase(Enum):
@@ -30,22 +87,24 @@ class DragShootTacticalTask(MultipleCombatTask):
         """初始化拖曳射击任务 - 学习pure_maneuver_task的模式"""
         super().__init__(config)
 
-        # 重写终止条件 - 移除SafeReturn，使用自定义终止逻辑
-        from envs.JSBSim.termination_conditions import ExtremeState, LowAltitude, Overload, Timeout
+        # 使用自定义终止条件 - 完全替换父类的终止条件
         self.termination_conditions = [
-            ExtremeState(self.config),
-            Overload(self.config),
-            LowAltitude(self.config),
-            Timeout(self.config),
+            DragShootTermination(self.config),
         ]
 
-        # 拖曳射击特定的战术距离 - 修正阈值确保正确的阶段转换
+        # 拖曳射击特定的战术距离 - 长机和僚机时间线差异
         self.tactical_distances = {
             'NLT_MELD_min': 81000,   # 81km
             'MELD_MTR_min': 50000,   # 50km - 扩大范围确保进入MTR_TR阶段
             'MTR_TR_min': 40000,     # 40km - 调整为40km
-            'TR_DOR_min': 19600,     # 19.6km
+            'TR_DOR_min': 35000,     # 35km - 由于距离在增加，调整阈值确保能进入DOR_DR阶段
             'DOR_DR_min': 14500,     # 14.5km
+        }
+
+        # 僚机时间线滞后设置（掩护长机离开）
+        self.wingman_delay = {
+            'TR_DOR_delay': 8000,    # 僚机TR_DOR阶段滞后8km
+            'DOR_DR_delay': 10000,   # DOR_DR阶段滞后10km，确保长机先完成short_skate
         }
 
         # 当前战术阶段
@@ -58,6 +117,10 @@ class DragShootTacticalTask(MultipleCombatTask):
         # 初始状态记录 - 学习pure_maneuver_task
         self.initial_heading = {}
         self.initial_altitude = {}
+
+        # short_skate机动状态跟踪
+        self.short_skate_states = {}
+        self.short_skate_start_time = {}
 
         # baseline模型 - 学习pure_maneuver_task的模式
         self.my_lowlevel_policy = BaselineActor()
@@ -92,6 +155,53 @@ class DragShootTacticalTask(MultipleCombatTask):
         self._load_baseline_models()
 
         logging.info("DragShootTacticalTask initialized")
+
+    def get_termination(self, env, agent_id, info={}):
+        """
+        完全重写终止条件 - 绕过父类的termination_conditions列表
+        只有双方全灭、高度过低、或达到时间限制才终止
+        """
+        # 检查高度过低
+        current_alt = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        if current_alt <= 1000:  # 1000米以下
+            logging.info(f"{agent_id} altitude too low: {current_alt:.1f}m - terminating")
+            return True, {"termination_reason": "low_altitude"}
+
+        # 检查时间限制
+        if env.current_step >= 2500:  # 最大步数
+            logging.info(f"Time limit reached: {env.current_step} steps - terminating")
+            return True, {"termination_reason": "timeout"}
+
+        # 检查极端状态
+        if env.agents[agent_id].get_property_value(c.detect_extreme_state):
+            logging.info(f"{agent_id} extreme state detected - terminating")
+            return True, {"termination_reason": "extreme_state"}
+
+        # 检查过载状态
+        if (abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_x_norm)) > 15.0 or
+            abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_y_norm)) > 15.0 or
+            abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_z_norm) + 1) > 15.0):
+            logging.info(f"{agent_id} overload detected - terminating")
+            return True, {"termination_reason": "overload"}
+
+        # 检查双方存活情况 - 只有当一方全灭时才终止
+        red_alive = [aid for aid in ["A0100", "A0200"] if aid in env.agents and env.agents[aid].is_alive]
+        blue_alive = [aid for aid in ["B0100", "B0200"] if aid in env.agents and env.agents[aid].is_alive]
+
+        # 添加调试日志
+        if env.current_step % 50 == 0:  # 每50步输出一次状态
+            logging.info(f"TERMINATION CHECK - Step {env.current_step}: Red alive: {red_alive}, Blue alive: {blue_alive}")
+
+        # 只有当一方全灭时才终止
+        if len(red_alive) == 0:
+            logging.info("Red team eliminated - terminating")
+            return True, {"termination_reason": "red_eliminated", "winner": "blue"}
+        elif len(blue_alive) == 0:
+            logging.info("Blue team eliminated - terminating")
+            return True, {"termination_reason": "blue_eliminated", "winner": "red"}
+
+        # 继续仿真 - 不因为单架飞机被击落而终止
+        return False, info
 
     def _load_baseline_models(self):
         """加载baseline模型 - 完全学习pure_maneuver_task的实现"""
@@ -293,16 +403,16 @@ class DragShootTacticalTask(MultipleCombatTask):
         # 获取主要对抗双方
         leader_red = env._jsbsims.get("A0100")
         leader_blue = env._jsbsims.get("B0100")
-        
+
         if not leader_red or not leader_blue or not leader_red.is_alive or not leader_blue.is_alive:
             return
-        
+
         # 计算距离
         distance = self._calculate_distance(leader_red, leader_blue)
-        
+
         # 确定当前阶段
         new_phase = self._get_phase_by_distance(distance)
-        
+
         if new_phase != self.current_phase:
             current_time = env.current_step * env.time_interval
             logging.info(f"Phase transition: {self.current_phase.value} -> {new_phase.value} "
@@ -373,9 +483,55 @@ class DragShootTacticalTask(MultipleCombatTask):
             return np.array([3, 4, 3])
     
     def _get_enemy_action(self, env, agent_id: str):
-        """敌方战术动作 - 平稳飞行"""
-        # 敌方始终平稳飞行 (航向0°)
-        return np.array([3, 4, 3])  # 保持高度、航向、速度
+        """敌方战术动作 - CAP任务short_skate返航逻辑"""
+        # 检查是否应该返航
+        should_return = False
+
+        # 条件1：队友被击落
+        if agent_id == "B0200":
+            if "B0100" not in env.agents or not env.agents["B0100"].is_alive:
+                should_return = True
+        elif agent_id == "B0100":
+            if "B0200" not in env.agents or not env.agents["B0200"].is_alive:
+                should_return = True
+
+        # 条件2：距离过近（进入危险区域）
+        current_pos = np.array([
+            env.agents[agent_id].get_property_value(c.position_long_gc_deg),
+            env.agents[agent_id].get_property_value(c.position_lat_gc_deg)
+        ])
+
+        # 计算与我方的最近距离
+        min_distance = float('inf')
+        for friendly_id in ["A0100", "A0200"]:
+            if friendly_id in env.agents and env.agents[friendly_id].is_alive:
+                friendly_pos = np.array([
+                    env.agents[friendly_id].get_property_value(c.position_long_gc_deg),
+                    env.agents[friendly_id].get_property_value(c.position_lat_gc_deg)
+                ])
+                distance = np.linalg.norm((current_pos - friendly_pos) * 111000)  # 转换为米
+                min_distance = min(min_distance, distance)
+
+        # 条件3：进入DOR_DR阶段，与我方同步返航
+        if self.current_phase == TacticalPhase.DOR_DR:
+            should_return = True
+
+        # 如果距离小于30km，返航
+        if min_distance < 30000:
+            should_return = True
+
+        if should_return:
+            # 执行short_skate返航机动
+            current_time = env.current_step * env.time_interval
+            action = self._execute_short_skate(env, agent_id, current_time)
+            # 转换为敌方动作格式 - 确保正确的动作空间转换
+            alt_action = max(0, min(6, action[0] - 4))  # 高度动作：7->3, 范围[0,6]
+            hdg_action = max(0, min(8, action[1] - 4))  # 航向动作：8->4, 范围[0,8]
+            vel_action = max(0, min(4, action[2]))      # 速度动作：保持原值, 范围[0,4]
+            return np.array([alt_action, hdg_action, vel_action])
+        else:
+            # 正常CAP巡逻：平稳飞行 (航向0°)
+            return np.array([3, 4, 3])  # 保持高度、航向、速度
     
     def _get_tactical_command_indices(self, env, agent_id: str):
         """生成战术指令索引 - 基于拖曳射击逻辑"""
@@ -407,16 +563,13 @@ class DragShootTacticalTask(MultipleCombatTask):
                 return 7, 8, 3  # 保持高度、直飞、保持速度
 
         elif self.current_phase == TacticalPhase.TR_DOR:
-            # 左侧short_skate: 航向从0°向左转45°，即变为315°
-            target_heading = 315.0  # 左转45°到315°
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3   # 左转
+            # 长机在TR_DOR阶段：发射导弹后执行左侧short_skate机动
+            if self.missile_launched.get(agent_id, False):
+                # 已发射导弹，执行完整的short_skate机动
+                current_time = env.current_step * env.time_interval
+                return self._execute_short_skate(env, agent_id, current_time)
             else:
-                # 已完成左转，开始返航（转向0°）
+                # 未发射导弹，继续平稳飞行等待发射时机
                 target_heading = 0.0
                 heading_diff = self._normalize_angle_diff(target_heading - current_heading)
                 if abs(heading_diff) > 5.0:
@@ -428,16 +581,9 @@ class DragShootTacticalTask(MultipleCombatTask):
                     return 7, 8, 3  # 保持航向
 
         elif self.current_phase == TacticalPhase.DOR_DR:
-            # 返航 - 保持航向0°
-            target_heading = 0.0
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3   # 左转
-            else:
-                return 7, 8, 3  # 保持航向
+            # DOR_DR阶段：长机执行short_skate机动
+            current_time = env.current_step * env.time_interval
+            return self._execute_short_skate(env, agent_id, current_time)
         else:
             return 7, 8, 3
 
@@ -482,38 +628,34 @@ class DragShootTacticalTask(MultipleCombatTask):
                 return 7, 8, 3  # 保持航向
 
         elif self.current_phase == TacticalPhase.TR_DOR:
-            # 僚机在TR_DOR阶段：在41km发射导弹，继续平稳飞行
-            # 平稳飞行 - 保持航向0°
-            target_heading = 0.0
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3   # 左转
-            else:
-                return 7, 8, 3  # 保持航向
-
-        elif self.current_phase == TacticalPhase.DOR_DR:
-            # 僚机左侧short_skate后返航: 航向从0°向左转45°，即变为315°
-            target_heading = 315.0  # 左转45°到315°
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3   # 左转
-            else:
-                # 已完成左转，开始返航（转向0°）
-                target_heading = 0.0
+            # 僚机在TR_DOR阶段：发射导弹后做小角度左侧crank
+            if not self.missile_launched.get(agent_id, False):
+                # 未发射导弹，执行左侧小crank指向敌机（小角度左转约10°）
+                target_heading = 350.0  # 从0°左转10°到350°，小角度crank
                 heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                if abs(heading_diff) > 5.0:
+                if abs(heading_diff) > 2.0:  # 更小的容差，精确控制
+                    if heading_diff > 0:
+                        return 7, 10, 3  # 右转
+                    else:
+                        return 7, 6, 3   # 左转
+                else:
+                    return 7, 8, 3  # 保持航向，等待发射时机
+            else:
+                # 已发射导弹，继续做小角度左侧crank（不是short_skate）
+                target_heading = 340.0  # 继续左转到340°，保持小角度crank
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 2.0:
                     if heading_diff > 0:
                         return 7, 10, 3  # 右转
                     else:
                         return 7, 6, 3   # 左转
                 else:
                     return 7, 8, 3  # 保持航向
+
+        elif self.current_phase == TacticalPhase.DOR_DR:
+            # DOR_DR阶段：僚机执行完整的左侧short_skate机动
+            current_time = env.current_step * env.time_interval
+            return self._execute_short_skate(env, agent_id, current_time)
         else:
             return 7, 8, 3
 
@@ -524,6 +666,115 @@ class DragShootTacticalTask(MultipleCombatTask):
         while angle_diff < -180:
             angle_diff += 360
         return angle_diff
+
+    def _init_short_skate(self, agent_id, current_time):
+        """初始化short_skate机动状态"""
+        self.short_skate_states[agent_id] = {
+            "phase": "crank",  # crank -> turn_cold -> escape
+            "phase_start_time": current_time,
+            "total_start_time": current_time,
+            "crank_angle": -40.0 if agent_id.startswith('A') else 40.0,  # 我方左侧，敌方右侧
+            "turn_cold_angle": -100.0 if agent_id.startswith('A') else 100.0,  # 我方左侧，敌方右侧
+            "initial_heading": None
+        }
+        self.short_skate_start_time[agent_id] = current_time
+
+    def _execute_short_skate(self, env, agent_id, current_time):
+        """执行short_skate机动 - 参考pure_maneuvers实现"""
+        if agent_id not in self.short_skate_states:
+            self._init_short_skate(agent_id, current_time)
+
+        state = self.short_skate_states[agent_id]
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+
+        if state["initial_heading"] is None:
+            state["initial_heading"] = current_heading
+
+        phase_time = current_time - state["phase_start_time"]
+
+        # 阶段1：Crank机动 - 左侧40度 (12秒)
+        if state["phase"] == "crank":
+            if phase_time < 12.0:
+                target_heading = state["initial_heading"] + state["crank_angle"]
+                target_heading = target_heading % 360
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3  # 左转或右转
+                else:
+                    return 7, 8, 3  # 保持航向
+            else:
+                # 进入turn_cold阶段
+                state["phase"] = "turn_cold"
+                state["phase_start_time"] = current_time
+                state["turn_cold_start_heading"] = current_heading
+
+        # 阶段2：Turn Cold - 快速掉头100度 (25秒)
+        elif state["phase"] == "turn_cold":
+            if phase_time < 25.0:
+                target_heading = state["turn_cold_start_heading"] + state["turn_cold_angle"]
+                target_heading = target_heading % 360
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3  # 快速转弯
+                else:
+                    return 7, 8, 3  # 保持航向
+            else:
+                # 进入escape阶段
+                state["phase"] = "escape"
+                state["phase_start_time"] = current_time
+
+        # 阶段3：加速逃离 (20秒)
+        elif state["phase"] == "escape":
+            if phase_time < 20.0:
+                return 7, 8, 5  # 保持航向，加速
+            else:
+                # 完成short_skate，返航到初始航向的反方向
+                if agent_id.startswith('A'):  # 我方：初始0（南向），返回180°（南向）
+                    target_heading = 180.0  # 我方返回南向
+                elif agent_id.startswith('B'):  # 敌方：初始180°（北向），返回0°（北向）
+                    target_heading = 0.0  # 敌方返回北向
+                else:
+                    target_heading = 180.0
+
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3
+                else:
+                    return 7, 8, 3
+
+        return 7, 8, 3  # 默认保持航向
+
+    def _get_min_distance_to_enemy(self, env, agent_id: str):
+        """获取到最近敌机的距离"""
+        if not env.agents[agent_id].is_alive:
+            return float('inf')
+
+        my_pos = np.array([
+            env.agents[agent_id].get_property_value(c.position_long_gc_deg),
+            env.agents[agent_id].get_property_value(c.position_lat_gc_deg),
+            env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        ])
+
+        min_distance = float('inf')
+        for enemy_id in env.agents:
+            if enemy_id.startswith('A') and agent_id.startswith('A'):
+                continue  # 同队
+            if enemy_id.startswith('B') and agent_id.startswith('B'):
+                continue  # 同队
+            if not env.agents[enemy_id].is_alive:
+                continue
+
+            enemy_pos = np.array([
+                env.agents[enemy_id].get_property_value(c.position_long_gc_deg),
+                env.agents[enemy_id].get_property_value(c.position_lat_gc_deg),
+                env.agents[enemy_id].get_property_value(c.position_h_sl_m)
+            ])
+
+            # 计算距离（简化为欧几里得距离）
+            distance = np.linalg.norm(my_pos - enemy_pos) * 111000  # 转换为米
+            min_distance = min(min_distance, distance)
+
+        return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
         """敌方战术指令索引 - 朝南接敌"""
@@ -596,15 +847,17 @@ class DragShootTacticalTask(MultipleCombatTask):
         if agent_id == "A0100":  # 己方长机45km发射
             should_launch = (self.current_phase == TacticalPhase.MTR_TR and
                            44000 <= distance <= 47000 and not self.missile_launched.get(agent_id, False))
-        elif agent_id == "A0200":  # 己方僚机41km发射
+        elif agent_id == "A0200":  # 己方僚机滞后发射（体现时间线滞后）
+            # 僚机发射距离更近，体现滞后时间线
+            wingman_launch_min = 40000 - self.wingman_delay['TR_DOR_delay']  # 32km
+            wingman_launch_max = 43000 - self.wingman_delay['TR_DOR_delay']  # 35km
             should_launch = (self.current_phase == TacticalPhase.TR_DOR and
-                           40000 <= distance <= 43000 and not self.missile_launched.get(agent_id, False))
-        elif agent_id == "B0100":  # 敌方长机45km发射
-            should_launch = (self.current_phase == TacticalPhase.MTR_TR and
-                           44000 <= distance <= 47000 and not self.missile_launched.get(agent_id, False))
-        elif agent_id == "B0200":  # 敌方僚机41km发射
-            should_launch = (self.current_phase == TacticalPhase.TR_DOR and
-                           40000 <= distance <= 43000 and not self.missile_launched.get(agent_id, False))
+                           wingman_launch_min <= distance <= wingman_launch_max and
+                           not self.missile_launched.get(agent_id, False))
+        elif agent_id == "B0100":  # 敌方长机 - 暂时禁用导弹发射
+            should_launch = False  # 禁用敌方导弹，观察我方完整机动流程
+        elif agent_id == "B0200":  # 敌方僚机 - 暂时禁用导弹发射
+            should_launch = False  # 禁用敌方导弹，观察我方完整机动流程
 
         # 敌方第二轮发射 (19.6km) - 需要重置发射状态
         if agent_id.startswith('B') and self.current_phase == TacticalPhase.DOR_DR:
@@ -768,48 +1021,7 @@ class DragShootTacticalTask(MultipleCombatTask):
         except:
             return "未知机动"
 
-    def get_termination(self, env, agent_id, info={}):
-        """
-        完全重写终止条件 - 只有双方全灭、高度过低、或达到时间限制才终止
-        不调用父类的termination_conditions列表
-        """
-        # 检查高度过低
-        current_alt = env._jsbsims[agent_id].get_property_value(c.position_h_sl_m)
-        if current_alt <= 1000:  # 1000米以下
-            logging.info(f"{agent_id} altitude too low: {current_alt:.1f}m - terminating")
-            return True, {"termination_reason": "low_altitude"}
 
-        # 检查时间限制
-        if env.current_step >= env.max_steps:
-            logging.info(f"Time limit reached: {env.current_step} steps - terminating")
-            return True, {"termination_reason": "timeout"}
-
-        # 检查极端状态
-        if env._jsbsims[agent_id].get_property_value(c.detect_extreme_state):
-            logging.info(f"{agent_id} extreme state detected - terminating")
-            return True, {"termination_reason": "extreme_state"}
-
-        # 检查过载状态 - 使用正确的属性名
-        if (abs(env._jsbsims[agent_id].get_property_value(c.accelerations_n_pilot_x_norm)) > 15.0 or
-            abs(env._jsbsims[agent_id].get_property_value(c.accelerations_n_pilot_y_norm)) > 15.0 or
-            abs(env._jsbsims[agent_id].get_property_value(c.accelerations_n_pilot_z_norm) + 1) > 15.0):
-            logging.info(f"{agent_id} overload detected - terminating")
-            return True, {"termination_reason": "overload"}
-
-        # 检查双方存活情况 - 只有当一方全灭时才终止
-        red_alive = [aid for aid in ["A0100", "A0200"] if env._jsbsims[aid].is_alive]
-        blue_alive = [aid for aid in ["B0100", "B0200"] if env._jsbsims[aid].is_alive]
-
-        # 只有当一方全灭时才终止
-        if len(red_alive) == 0:
-            logging.info("Red team eliminated - terminating")
-            return True, {"termination_reason": "red_eliminated", "winner": "blue"}
-        elif len(blue_alive) == 0:
-            logging.info("Blue team eliminated - terminating")
-            return True, {"termination_reason": "blue_eliminated", "winner": "red"}
-
-        # 继续仿真 - 不因为单架飞机被击落而终止
-        return False, info
 
     def _update_radar_state(self, env, agent_id: str, current_time: float):
         """更新雷达状态 - 基于拖曳射击战术需求"""

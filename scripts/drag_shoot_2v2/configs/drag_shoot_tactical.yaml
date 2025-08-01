@@ -101,7 +101,7 @@ tactical_distances: {
   mar_range: 19600,             # 最小规避距离19.6km (必需)
   wez_range: 45000,             # 武器交战区45km
   rmax: 60000,                  # 最大射程60km
-  rmin: 5000,                   # 最小射程5km
+  rmin: 500,                    # 最小射程500m（符合AIM-120C-7标准）
 
   # 雷达控制距离
   track_range: 81000,           # 跟踪距离81km
