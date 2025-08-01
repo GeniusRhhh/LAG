@@ -729,9 +729,9 @@ class DragShootTacticalTask(MultipleCombatTask):
                 return 7, 8, 5  # 保持航向，加速
             else:
                 # 完成short_skate，返航到初始航向的反方向
-                if agent_id.startswith('A'):  # 我方：初始0（南向），返回180°（南向）
+                if agent_id.startswith('A'):  # 我方：初始180°（南向），返回180°（南向）
                     target_heading = 180.0  # 我方返回南向
-                elif agent_id.startswith('B'):  # 敌方：初始180°（北向），返回0°（北向）
+                elif agent_id.startswith('B'):  # 敌方：初始0°（北向），返回0°（北向）
                     target_heading = 0.0  # 敌方返回北向
                 else:
                     target_heading = 180.0
@@ -777,19 +777,40 @@ class DragShootTacticalTask(MultipleCombatTask):
         return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
-        """敌方战术指令索引 - 朝南接敌"""
-        current_heading = np.rad2deg(env._jsbsims[agent_id].get_property_value(c.attitude_psi_rad))
+        """敌方战术指令索引 - 朝南接敌，特定条件下执行short_skate"""
+        current_time = env.current_step * env.time_interval
 
-        # 敌方朝南接敌（180°）
-        target_heading = 180.0
-        heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-        if abs(heading_diff) > 5.0:
-            if heading_diff > 0:
-                return 7, 10, 3  # 右转
-            else:
-                return 7, 6, 3   # 左转
+        # 检查是否应该执行short_skate
+        should_return = False
+
+        # 条件1：队友被击落
+        if agent_id == "B0200":
+            if "B0100" not in env.agents or not env.agents["B0100"].is_alive:
+                should_return = True
+        elif agent_id == "B0100":
+            if "B0200" not in env.agents or not env.agents["B0200"].is_alive:
+                should_return = True
+
+        # 条件2：DOR_DR阶段
+        if self.current_phase == TacticalPhase.DOR_DR:
+            should_return = True
+
+        if should_return:
+            # 执行short_skate
+            action = self._execute_short_skate(env, agent_id, current_time)
+            return int(action[0]), int(action[1]), int(action[2])
         else:
-            return 7, 8, 3  # 保持航向
+            # 正常朝南接敌
+            current_heading = np.rad2deg(env._jsbsims[agent_id].get_property_value(c.attitude_psi_rad))
+            target_heading = 180.0
+            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+            if abs(heading_diff) > 5.0:
+                if heading_diff > 0:
+                    return 7, 10, 3  # 右转
+                else:
+                    return 7, 6, 3  # 左转
+            else:
+                return 7, 8, 3  # 保持航向
 
     def reset(self, env):
         """重置任务状态 - 学习pure_maneuver_task的reset模式"""
