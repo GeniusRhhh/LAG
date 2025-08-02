@@ -240,6 +240,28 @@ class BasicManeuvers:
             return "HIGH_G_TURN_COMPLETE", final_heading, None, None, initial_roll
 
     @staticmethod
+    def enter_inverted_flight(time_sec: float, initial_heading: float, duration: float = 5.0):
+        """进入倒飞状态"""
+
+        if time_sec <= duration:
+            progress = time_sec / duration
+            smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
+
+            # 逐渐进入倒飞状态（135度滚转）
+            target_roll = 135.0 * smooth_progress
+
+            # 保持航向
+            current_heading = initial_heading
+
+            # 轻微的高度调整
+            altitude_offset = 50.0 * math.sin(progress * math.pi)
+
+            return "ENTERING_INVERTED", current_heading, altitude_offset, None, target_roll
+        else:
+            # 倒飞状态准备完成
+            return "INVERTED_FLIGHT_READY", initial_heading, 0.0, None, 135.0
+
+    @staticmethod
     def vertical_loop(time_sec: float, initial_heading: float, loop_type: str = "full",
                       g_force: float = 6.0, initial_roll: float = 0.0):
         """垂直回旋 - 在当前滚转姿态下进行垂直机动"""
@@ -293,20 +315,35 @@ class BasicManeuvers:
 
     @staticmethod
     def adaptive_crank(time_sec: float, initial_heading: float, crank_angle: float = 45.0,
-                      turn_rate: float = 4.0, enemy_heading: float = 180.0):
-        """自适应Crank机动 - 根据敌机方向选择Crank方向"""
+                       turn_rate: float = 4.0, enemy_heading: float = 180.0):
+        """自适应Crank机动 - 超大角度超长时间摆动规避导弹"""
+
         # 计算到敌机的角度差
         angle_to_enemy = normalize_heading(enemy_heading - initial_heading)
 
-        # 选择Crank方向：选择较短的转弯路径
-        if angle_to_enemy <= 180.0:
-            # 敌机在右侧，向右Crank
-            crank_direction = 1.0
-        else:
-            # 敌机在左侧，向左Crank
-            crank_direction = -1.0
+        # 大幅增大Crank角度和时间
+        base_crank_angle = 120.0  # 从90度增加到120度！
 
-        actual_crank_angle = crank_angle * crank_direction
+        # 根据时间进行超大角度超长时间摆动
+        if time_sec < 25.0:
+            # 前25秒：向右超大角度Crank
+            crank_direction = 1.0  # 向右摆动
+            actual_crank_angle = base_crank_angle * crank_direction
+        elif time_sec < 50.0:
+            # 25-50秒：向左超大角度Crank
+            crank_direction = -1.0  # 向左摆动
+            actual_crank_angle = base_crank_angle * crank_direction
+        elif time_sec < 75.0:
+            # 50-75秒：再次向右超大角度Crank
+            crank_direction = 1.0  # 向右摆动
+            actual_crank_angle = base_crank_angle * crank_direction
+        elif time_sec < 100.0:
+            # 75-100秒：最后一次向左超大角度Crank
+            crank_direction = -1.0  # 向左摆动
+            actual_crank_angle = base_crank_angle * crank_direction
+        else:
+            # 100秒后：回到追击方向
+            actual_crank_angle = 0.0
 
         # 执行转弯
         turn_duration = abs(actual_crank_angle) / turn_rate
@@ -317,40 +354,70 @@ class BasicManeuvers:
             current_heading = normalize_heading(initial_heading + current_turn)
             return "ADAPTIVE_CRANKING", current_heading, None, None, None
         else:
-            final_heading = normalize_heading(initial_heading + actual_crank_angle)
-            return "ADAPTIVE_CRANK_COMPLETE", final_heading, None, None, None
+            # 摆动完成，回到追击方向
+            return "ADAPTIVE_CRANK_COMPLETE", initial_heading, None, None, None
+
+    @staticmethod
+    def continuous_enemy_tracking(time_sec: float, initial_heading: float,
+                                  enemy_heading: float = 180.0, tracking_radius: float = 25.0,
+                                  distance_to_enemy: float = 50000.0):
+        """持续跟踪敌机 - 根据实际距离判断BVR/WVR阶段"""
+
+        # 计算当前与敌机的相对角度
+        angle_to_enemy = normalize_heading(enemy_heading - initial_heading)
+
+        # 根据实际距离判断阶段
+        if distance_to_enemy > 25000.0:  # BVR阶段：距离大于25km
+            # BVR阶段：保持追击方向，超大角度摆动
+            base_heading = 0.0  # 基本追击方向（朝北）
+            swing = 80.0 * math.sin(time_sec * 0.2)  # 超大摆动幅度
+            target_heading = base_heading + swing
+        elif distance_to_enemy > 15000.0:  # 中距离阶段：25-15km
+            # 中距离阶段：开始准备接近
+            base_heading = 0.0
+            swing = 40.0 * math.sin(time_sec * 0.3)  # 中等摆动幅度
+            target_heading = base_heading + swing
+        else:  # WVR阶段：距离小于15km
+            # WVR阶段：朝敌方相同方向飞行
+            # 敌方在180度，我们也朝180度飞行（紧追敌方）
+            target_heading = 180.0
+
+        target_heading = normalize_heading(target_heading)
+
+        return "CONTINUOUS_TRACKING", target_heading, None, None, None
 
     @staticmethod
     def adaptive_turn_to_enemy(time_sec: float, initial_heading: float, turn_rate: float = 5.0,
-                              enemy_heading: float = 180.0):
-        """自适应转向敌机 - 根据敌机方向选择最短路径转向"""
+                               enemy_heading: float = 180.0):
+        """自适应转向敌机 - WVR阶段激进追击敌方"""
+
+        # WVR阶段：朝敌方相同方向飞行
+        # 敌方在180度，我们也朝180度飞行（紧追敌方）
+        target_heading = 180.0
+
         # 计算需要转向的角度
-        angle_to_enemy = normalize_heading(enemy_heading - initial_heading)
+        angle_diff = normalize_heading(target_heading - initial_heading)
 
         # 选择最短转弯路径
-        if angle_to_enemy > 180.0:
-            turn_angle = angle_to_enemy - 360.0  # 向左转
+        if angle_diff > 180.0:
+            turn_angle = angle_diff - 360.0  # 向左转
         else:
-            turn_angle = angle_to_enemy  # 向右转
+            turn_angle = angle_diff  # 向右转
 
         # 执行转弯
         turn_duration = abs(turn_angle) / turn_rate
 
         if time_sec <= turn_duration:
             progress = time_sec / turn_duration
-            current_turn = turn_angle * progress
+            # 使用更激进的进度曲线，加快转向
+            smooth_progress = progress ** 1.5  # 更激进的转向
+            current_turn = turn_angle * smooth_progress
             current_heading = normalize_heading(initial_heading + current_turn)
             return "ADAPTIVE_TURNING", current_heading, None, None, None
         else:
-            # 转向完成，正对敌机
-            return "ADAPTIVE_TURN_COMPLETE", enemy_heading, None, None, None
+            # 转向完成，正对敌方方向
+            return "ADAPTIVE_TURN_COMPLETE", target_heading, None, None, None
 
-    @staticmethod
-    def sliceback_vertical_loop(time_sec: float, initial_heading: float, loop_type: str = "half",
-                               g_force: float = 6.0, inverted: bool = True):
-        """Sliceback专用垂直回旋 - 直接设置为倒飞状态进行拉回"""
-        # 直接调用vertical_loop，但设置为倒飞状态
-        return BasicManeuvers.vertical_loop(time_sec, initial_heading, loop_type, g_force, 135.0)
 
 @dataclass
 class ManeuverStep:
@@ -449,41 +516,53 @@ class CompositeManeuverExecutor:
         ]
 
         # 5. Banzai机动：发射后决策战术（Launch & Decide）
-        # 在MAR外发射，然后Crank，敌机仍存活则交汇格斗
+        # 在CompositeManeuverExecutor的_setup_predefined_maneuvers中修改
         self.maneuver_definitions["banzai_tactical"] = [
-            # 阶段1：保持航向准备发射
-            ManeuverStep("maintain_heading_flight", {}, 8.0),  # 保持8秒准备发射
+            # 阶段1：准备发射 - 保持追击方向
+            ManeuverStep("maintain_heading_flight", {}, 10.0),  # 增加到10秒
 
-            # 阶段2：发射后Crank机动 - 根据敌机方向选择Crank方向
+            # 阶段2：发射后超大角度超长时间Crank - 规避导弹
             ManeuverStep("adaptive_crank", {
-                "crank_angle": 45.0,  # Crank角度45度（方向自适应）
-                "turn_rate": 4.0      # 标准转弯率
-            }, 18.0),  # Crank转弯阶段
+                "crank_angle": 120.0,  # 增大到120度！
+                "turn_rate": 3.0,  # 降低转向速度，给更多时间
+                "enemy_heading": 180.0
+            }, 120.0),  # 大幅延长Crank时间到120秒！
 
-            # 阶段3：保持Crank态势观察敌机
-            ManeuverStep("maintain_heading_flight", {}, 12.0),  # 保持Crank角度12秒
+            # 阶段3：BVR/WVR过渡阶段 - 根据实际距离动态调整
+            ManeuverStep("continuous_enemy_tracking", {
+                "enemy_heading": 180.0,
+                "tracking_radius": 40.0,  # 增大跟踪半径
+                "distance_to_enemy": 40000.0  # 实际距离参数
+            }, 80.0),  # 延长跟踪时间到80秒
 
-            # 阶段4：决策阶段 - 转向迎敌准备格斗
+            # 阶段4：WVR阶段 - 激进追击敌方
             ManeuverStep("adaptive_turn_to_enemy", {
-                "turn_rate": 5.0  # 较快转弯准备格斗
-            }, 30.0),  # 转向迎敌阶段，增加时间确保完成转弯
+                "turn_rate": 10.0,  # 加快转向速度
+                "enemy_heading": 180.0
+            }, 40.0),  # 延长追击时间
 
-            # 阶段5：保持迎敌航向准备交汇格斗
-            ManeuverStep("maintain_heading_flight", {}, 15.0)  # 保持迎敌航向
+            # 阶段5：保持追击航向
+            ManeuverStep("maintain_heading_flight", {}, 50.0)  # 延长保持时间
         ]
 
-        # 6. Sliceback机动：直接使用vertical_loop实现倒飞拉回
-        # 简化设计，只保留有效的机动
+        # 6. Sliceback机动：使用vertical_loop完成倒飞拉回
         self.maneuver_definitions["sliceback_tactical"] = [
-            # 直接使用vertical_loop，设置为倒飞状态
-            ManeuverStep("sliceback_vertical_loop", {
+            # 阶段1：直接使用vertical_loop从倒飞状态开始
+            ManeuverStep("vertical_loop", {
                 "loop_type": "half",  # 半回旋（180度垂直）
-                "g_force": 6.0,       # 高G力6G
-                "inverted": True      # 标记为倒飞拉回
-            }, 15.0),  # 倒飞拉回阶段
+                "g_force": 6.0,  # 高G力6G
+                "initial_roll": 135.0  # 从倒飞状态开始
+            }, 12.0),  # vertical_loop的half模式需要12秒
 
-            # 恢复平飞
-            ManeuverStep("maintain_heading_flight", {}, 10.0)  # 恢复平飞
+            ManeuverStep("diagonal_flight", {
+                "heading_change": -180.0,  # 从180度转向0度
+                "altitude_change": 1000.0,  # 升高1000米回到初始高度
+                "duration": 15.0,  # 缩短到15秒，更快速
+                "min_altitude": 3000.0  # 最小安全高度
+            }, 15.0),
+
+            # 阶段4：保持最终航向
+            ManeuverStep("maintain_heading_flight", {}, 10.0)
         ]
 
     def update_maneuver_params(self, maneuver_name: str, custom_params: Dict[str, Any]):
@@ -744,7 +823,7 @@ class CompositeManeuverExecutor:
                     state["current_roll"] = result[4]
             return result
         elif current_step.name == "vertical_loop":
-            # 获取当前的滚转角状态（来自前一个机动）
+            # 获取当前的滚转角状态
             current_roll = state.get("current_roll", 0.0)
 
             result = self.basic_maneuvers.vertical_loop(
@@ -818,30 +897,35 @@ class CompositeManeuverExecutor:
                 state["final_altitude"],
                 current_step.duration
             )
-        elif current_step.name == "enter_inverted_flight":
-            result = self.basic_maneuvers.enter_inverted_flight(
+        elif current_step.name == "diagonal_flight":
+            result = self.basic_maneuvers.diagonal_flight(
                 step_time,
                 state["step_initial_heading"],
-                current_step.params.get("duration", 5.0)
+                state["step_initial_altitude"],
+                current_step.params.get("duration", 10.0),
+                current_step.params.get("heading_change", 30.0),
+                current_step.params.get("altitude_change", 500.0),
+                current_step.params.get("min_altitude", 3000.0)
             )
             # 更新最终状态
-            if result[0] in ["ENTERING_INVERTED", "INVERTED_FLIGHT_READY"]:
+            if result[0] in ["DIAGONAL_FLIGHT", "DIAGONAL_FLIGHT_COMPLETE"]:
                 state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
-                # 保存滚转角状态
-                if len(result) > 4 and result[4] is not None:
-                    state["current_roll"] = result[4]
-                    logging.debug(f"进入倒飞状态，保存滚转角: {result[4]:.1f}°")
+                state["final_altitude"] = result[2] if result[2] is not None else state["final_altitude"]
             return result
-        elif current_step.name == "sliceback_vertical_loop":
-            result = self.basic_maneuvers.sliceback_vertical_loop(
+        elif current_step.name == "continuous_enemy_tracking":
+            # 获取当前距离（这里需要从环境获取）
+            # 简化处理：根据时间模拟距离变化
+            simulated_distance = 50000.0 - (step_time * 500.0)  # 每秒减少500米
+            simulated_distance = max(simulated_distance, 5000.0)  # 最小5km
+
+            result = self.basic_maneuvers.continuous_enemy_tracking(
                 step_time,
                 state["step_initial_heading"],
-                current_step.params.get("loop_type", "half"),
-                current_step.params.get("g_force", 6.0),
-                current_step.params.get("inverted", True)
-            )
+                current_step.params.get("enemy_heading", 180.0),
+                current_step.params.get("tracking_radius", 25.0),
+                simulated_distance ) # 传递距离参数
             # 更新最终状态
-            if result[0] in ["VERTICAL_LOOPING", "VERTICAL_LOOP_COMPLETE"]:
+            if result[0] in ["VERTICAL_LOOPING", "VERTICAL_LOOP_COMPLETE","CONTINUOUS_TRACKING"]:
                 state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
             return result
         else:

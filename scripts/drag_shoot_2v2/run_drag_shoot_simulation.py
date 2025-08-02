@@ -700,7 +700,7 @@ def run_simulation():
         env = MultipleCombatEnv(config_name)
 
         # 强制设置1500步
-        env.max_steps = 1500
+        env.max_steps = 1100
 
         # 替换任务为拖曳射击任务
         env.task = DragShootTacticalTask(env.config)

@@ -587,11 +587,36 @@ class DragShootTacticalTask(MultipleCombatTask):
         else:
             return 7, 8, 3
 
+    def _get_wingman_phase_by_distance(self, distance: float) -> TacticalPhase:
+        """僚机独立的战术阶段判断 - 体现时间线滞后"""
+        # 僚机使用滞后距离判断阶段（延迟 = 距离减少，更近才执行）
+        if distance > self.tactical_distances['NLT_MELD_min']:
+            return TacticalPhase.NLT_MELD
+        elif distance > self.tactical_distances['MELD_MTR_min']:
+            return TacticalPhase.MELD_MTR
+        elif distance > self.tactical_distances['MTR_TR_min']:
+            return TacticalPhase.MTR_TR
+        elif distance > (self.tactical_distances['TR_DOR_min'] - self.wingman_delay['TR_DOR_delay']):
+            return TacticalPhase.TR_DOR  # 35km - 8km = 27km
+        elif distance > (self.tactical_distances['DOR_DR_min'] - self.wingman_delay['DOR_DR_delay']):
+            return TacticalPhase.DOR_DR  # 14.5km - 10km = 4.5km
+        else:
+            return TacticalPhase.DOR_DR
+
     def _get_wingman_command_indices(self, env, agent_id: str):
         """僚机战术指令索引 - 基于拖曳射击战术"""
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
 
-        if self.current_phase == TacticalPhase.NLT_MELD:
+        # 计算僚机与敌机的距离
+        leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
+        if leader_blue and leader_blue.is_alive:
+            distance = self._calculate_distance(env.agents[agent_id], leader_blue)
+            # 使用僚机独立的阶段判断
+            wingman_phase = self._get_wingman_phase_by_distance(distance)
+        else:
+            wingman_phase = self.current_phase  # 如果无法计算距离，使用全局阶段
+
+        if wingman_phase == TacticalPhase.NLT_MELD:
             # 右侧crank: 航向从0°调整至30°（右偏30°）
             target_heading = 30.0
             heading_diff = self._normalize_angle_diff(target_heading - current_heading)
@@ -599,11 +624,11 @@ class DragShootTacticalTask(MultipleCombatTask):
                 if heading_diff > 0:
                     return 7, 10, 3  # 右转
                 else:
-                    return 7, 6, 3   # 左转
+                    return 7, 6, 3  # 左转
             else:
                 return 7, 8, 3  # 保持航向
 
-        elif self.current_phase == TacticalPhase.MELD_MTR:
+        elif wingman_phase == TacticalPhase.MELD_MTR:
             # 左侧crank: 航向从30°调整回0°（左转30°）
             target_heading = 0.0
             heading_diff = self._normalize_angle_diff(target_heading - current_heading)
@@ -611,11 +636,11 @@ class DragShootTacticalTask(MultipleCombatTask):
                 if heading_diff > 0:
                     return 7, 10, 3  # 右转
                 else:
-                    return 7, 6, 3   # 左转
+                    return 7, 6, 3  # 左转
             else:
                 return 7, 8, 3  # 保持航向
 
-        elif self.current_phase == TacticalPhase.MTR_TR:
+        elif wingman_phase == TacticalPhase.MTR_TR:
             # 平稳飞行 - 保持航向0°
             target_heading = 0.0
             heading_diff = self._normalize_angle_diff(target_heading - current_heading)
@@ -623,13 +648,17 @@ class DragShootTacticalTask(MultipleCombatTask):
                 if heading_diff > 0:
                     return 7, 10, 3  # 右转
                 else:
-                    return 7, 6, 3   # 左转
+                    return 7, 6, 3  # 左转
             else:
                 return 7, 8, 3  # 保持航向
 
-        elif self.current_phase == TacticalPhase.TR_DOR:
-            # 僚机在TR_DOR阶段：发射导弹后做小角度左侧crank
-            if not self.missile_launched.get(agent_id, False):
+        elif wingman_phase == TacticalPhase.TR_DOR:
+            # 僚机在TR_DOR阶段：发射导弹后执行左侧short_skate机动（参考长机逻辑）
+            if self.missile_launched.get(agent_id, False):
+                # 已发射导弹，执行完整的short_skate机动
+                current_time = env.current_step * env.time_interval
+                return self._execute_short_skate(env, agent_id, current_time)
+            else:
                 # 未发射导弹，执行左侧小crank指向敌机（小角度左转约10°）
                 target_heading = 350.0  # 从0°左转10°到350°，小角度crank
                 heading_diff = self._normalize_angle_diff(target_heading - current_heading)
@@ -637,22 +666,11 @@ class DragShootTacticalTask(MultipleCombatTask):
                     if heading_diff > 0:
                         return 7, 10, 3  # 右转
                     else:
-                        return 7, 6, 3   # 左转
+                        return 7, 6, 3  # 左转
                 else:
                     return 7, 8, 3  # 保持航向，等待发射时机
-            else:
-                # 已发射导弹，继续做小角度左侧crank（不是short_skate）
-                target_heading = 340.0  # 继续左转到340°，保持小角度crank
-                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                if abs(heading_diff) > 2.0:
-                    if heading_diff > 0:
-                        return 7, 10, 3  # 右转
-                    else:
-                        return 7, 6, 3   # 左转
-                else:
-                    return 7, 8, 3  # 保持航向
 
-        elif self.current_phase == TacticalPhase.DOR_DR:
+        elif wingman_phase == TacticalPhase.DOR_DR:
             # DOR_DR阶段：僚机执行完整的左侧short_skate机动
             current_time = env.current_step * env.time_interval
             return self._execute_short_skate(env, agent_id, current_time)
@@ -692,9 +710,19 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         phase_time = current_time - state["phase_start_time"]
 
-        # 阶段1：Crank机动 - 左侧40度 (12秒)
+        # 修复：僚机short_skate时间延长，体现掩护长机的战术意图
+        if agent_id == "A0200":  # 僚机
+            crank_duration = 18.0  # 延长到18秒（原来是12秒）
+            turn_cold_duration = 30.0  # 延长到35秒（原来是25秒）
+            escape_duration = 22.0  # 延长到25秒（原来是20秒）
+        else:
+            crank_duration = 6.0
+            turn_cold_duration = 15.0
+            escape_duration = 15.0
+
+        # 阶段1：Crank机动 - 左侧40度
         if state["phase"] == "crank":
-            if phase_time < 12.0:
+            if phase_time < crank_duration:
                 target_heading = state["initial_heading"] + state["crank_angle"]
                 target_heading = target_heading % 360
                 heading_diff = self._normalize_angle_diff(target_heading - current_heading)
@@ -708,9 +736,9 @@ class DragShootTacticalTask(MultipleCombatTask):
                 state["phase_start_time"] = current_time
                 state["turn_cold_start_heading"] = current_heading
 
-        # 阶段2：Turn Cold - 快速掉头100度 (25秒)
+        # 阶段2：Turn Cold - 快速掉头100度
         elif state["phase"] == "turn_cold":
-            if phase_time < 25.0:
+            if phase_time < turn_cold_duration:
                 target_heading = state["turn_cold_start_heading"] + state["turn_cold_angle"]
                 target_heading = target_heading % 360
                 heading_diff = self._normalize_angle_diff(target_heading - current_heading)
@@ -723,9 +751,9 @@ class DragShootTacticalTask(MultipleCombatTask):
                 state["phase"] = "escape"
                 state["phase_start_time"] = current_time
 
-        # 阶段3：加速逃离 (20秒)
+        # 阶段3：加速逃离
         elif state["phase"] == "escape":
-            if phase_time < 20.0:
+            if phase_time < escape_duration:
                 return 7, 8, 5  # 保持航向，加速
             else:
                 # 完成short_skate，返航到初始航向的反方向
@@ -856,25 +884,33 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         distance = self._calculate_distance(env.agents[agent_id], target)
 
-        # 详细调试信息
-        if env.current_step % 50 == 0:  # 每10秒打印一次
-            logging.info(f"MISSILE CHECK: {agent_id} -> target distance={distance/1000:.1f}km, "
-                        f"phase={self.current_phase.value}, missiles={env.agents[agent_id].num_missiles}, "
-                        f"launched={self.missile_launched.get(agent_id, False)}")
-
         # 根据拖曳射击战术确定发射条件
         should_launch = False
 
         if agent_id == "A0100":  # 己方长机45km发射
             should_launch = (self.current_phase == TacticalPhase.MTR_TR and
-                           44000 <= distance <= 47000 and not self.missile_launched.get(agent_id, False))
+                             44000 <= distance <= 47000 and not self.missile_launched.get(agent_id, False))
         elif agent_id == "A0200":  # 己方僚机滞后发射（体现时间线滞后）
+            # 修复：使用僚机自己的阶段判断
+            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
+            if leader_blue and leader_blue.is_alive:
+                wingman_distance = self._calculate_distance(env.agents[agent_id], leader_blue)
+                wingman_phase = self._get_wingman_phase_by_distance(wingman_distance)
+            else:
+                wingman_phase = self.current_phase
+
             # 僚机发射距离更近，体现滞后时间线
             wingman_launch_min = 40000 - self.wingman_delay['TR_DOR_delay']  # 32km
             wingman_launch_max = 43000 - self.wingman_delay['TR_DOR_delay']  # 35km
-            should_launch = (self.current_phase == TacticalPhase.TR_DOR and
-                           wingman_launch_min <= distance <= wingman_launch_max and
-                           not self.missile_launched.get(agent_id, False))
+
+            # 添加速度检查，确保发射时飞机速度正常
+            aircraft_speed = np.linalg.norm(env.agents[agent_id].get_velocity())
+            speed_ok = aircraft_speed > 200  # 确保速度大于200m/s
+
+            should_launch = (wingman_phase == TacticalPhase.TR_DOR and
+                             wingman_launch_min <= distance <= wingman_launch_max and
+                             speed_ok and  # 添加速度检查
+                             not self.missile_launched.get(agent_id, False))
         elif agent_id == "B0100":  # 敌方长机 - 暂时禁用导弹发射
             should_launch = False  # 禁用敌方导弹，观察我方完整机动流程
         elif agent_id == "B0200":  # 敌方僚机 - 暂时禁用导弹发射

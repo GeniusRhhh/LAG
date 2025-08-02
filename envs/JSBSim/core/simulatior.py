@@ -320,7 +320,7 @@ class AircraftSimulator(BaseSimulator):
             Catalog.ic_lat_geod_deg: 60.0,
             Catalog.ic_h_sl_ft: 20000,
             Catalog.ic_psi_true_deg: 0.0,
-            Catalog.ic_u_fps: 800.0,
+            Catalog.ic_u_fps: 1200.0,
             Catalog.ic_v_fps: 0.0,
             Catalog.ic_w_fps: 0.0,
             Catalog.ic_p_rad_sec: 0.0,
