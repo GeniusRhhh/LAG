@@ -550,6 +550,11 @@ class DragShootTacticalTask(MultipleCombatTask):
         """长机战术指令索引 - 基于拖曳射击战术"""
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
 
+        # 条件1：已经开始short_skate机动（防止中断）
+        if agent_id in self.short_skate_states:
+            current_time = env.current_step * env.time_interval
+            return self._execute_short_skate(env, agent_id, current_time)
+
         if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
             # 平稳飞行 - 朝北接敌（0°）
             target_heading = 0.0
@@ -558,7 +563,7 @@ class DragShootTacticalTask(MultipleCombatTask):
                 if heading_diff > 0:
                     return 7, 10, 3  # 保持高度、右转、保持速度
                 else:
-                    return 7, 6, 3   # 保持高度、左转、保持速度
+                    return 7, 6, 3  # 保持高度、左转、保持速度
             else:
                 return 7, 8, 3  # 保持高度、直飞、保持速度
 
@@ -576,7 +581,7 @@ class DragShootTacticalTask(MultipleCombatTask):
                     if heading_diff > 0:
                         return 7, 10, 3  # 右转
                     else:
-                        return 7, 6, 3   # 左转
+                        return 7, 6, 3  # 左转
                 else:
                     return 7, 8, 3  # 保持航向
 
@@ -606,6 +611,11 @@ class DragShootTacticalTask(MultipleCombatTask):
     def _get_wingman_command_indices(self, env, agent_id: str):
         """僚机战术指令索引 - 基于拖曳射击战术"""
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+
+        # 条件1：已经开始short_skate机动（防止中断）
+        if agent_id in self.short_skate_states:
+            current_time = env.current_step * env.time_interval
+            return self._execute_short_skate(env, agent_id, current_time)
 
         # 计算僚机与敌机的距离
         leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
@@ -757,9 +767,9 @@ class DragShootTacticalTask(MultipleCombatTask):
                 return 7, 8, 5  # 保持航向，加速
             else:
                 # 完成short_skate，返航到初始航向的反方向
-                if agent_id.startswith('A'):  # 我方：初始180°（南向），返回180°（南向）
+                if agent_id.startswith('A'):  # 我方：初始0°（南向），返回180°（南向）
                     target_heading = 180.0  # 我方返回南向
-                elif agent_id.startswith('B'):  # 敌方：初始0°（北向），返回0°（北向）
+                elif agent_id.startswith('B'):  # 敌方：初始180°（北向），返回0°（北向）
                     target_heading = 0.0  # 敌方返回北向
                 else:
                     target_heading = 180.0
@@ -823,11 +833,17 @@ class DragShootTacticalTask(MultipleCombatTask):
         if self.current_phase == TacticalPhase.DOR_DR:
             should_return = True
 
+        # 条件3：已经开始short_skate机动（防止中断）- 只对敌方有效
+        if agent_id.startswith('B') and agent_id in self.short_skate_states:
+            should_return = True
+
         if should_return:
+            # logging.info(f"{agent_id} executing short_skate return")
             # 执行short_skate
             action = self._execute_short_skate(env, agent_id, current_time)
             return int(action[0]), int(action[1]), int(action[2])
         else:
+            # logging.info(f"{agent_id} continuing normal flight")
             # 正常朝南接敌
             current_heading = np.rad2deg(env._jsbsims[agent_id].get_property_value(c.attitude_psi_rad))
             target_heading = 180.0
@@ -929,6 +945,26 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         if should_launch:
             self._launch_missile(env, agent_id, target, current_time)
+        # if agent_id == "A0100" and self.current_phase == TacticalPhase.MTR_TR:
+        #     # 长机在MTR_TR阶段时，设置导弹已发射状态
+        #     self.missile_launched[agent_id] = True
+        #     return
+        # elif agent_id == "A0200":
+        #     # 僚机在TR_DOR阶段时，设置导弹已发射状态
+        #     leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
+        #     if leader_blue and leader_blue.is_alive:
+        #         wingman_distance = self._calculate_distance(env.agents[agent_id], leader_blue)
+        #         wingman_phase = self._get_wingman_phase_by_distance(wingman_distance)
+        #         if wingman_phase == TacticalPhase.TR_DOR:
+        #             self.missile_launched[agent_id] = True
+        #     return
+        # elif agent_id.startswith('B') and self.current_phase == TacticalPhase.DOR_DR:
+        #     # 敌方在DOR_DR阶段时，设置导弹已发射状态
+        #     self.missile_launched[agent_id] = True
+        #     return
+        #
+        #     # 其他情况不发射导弹
+        # return
 
     def _find_target(self, env, agent_id: str):
         """找到目标"""
@@ -964,6 +1000,21 @@ class DragShootTacticalTask(MultipleCombatTask):
 
             # 添加到环境的临时模拟器
             env.add_temp_simulator(missile)
+
+            # 初始化导弹记录系统
+            if not hasattr(env, '_missile_records'):
+                env._missile_records = {}
+            
+            # 记录导弹信息
+            env._missile_records[missile_uid] = {
+                'launcher': agent_id,
+                'target': target.uid,
+                'type': 'AIM-120C-7',
+                'status': 'LAUNCHED',
+                'launch_time': current_time,
+                'launch_position': aircraft.get_position().copy(),
+                'launch_velocity': aircraft.get_velocity().copy()
+            }
 
             # 更新状态
             aircraft.num_missiles -= 1
