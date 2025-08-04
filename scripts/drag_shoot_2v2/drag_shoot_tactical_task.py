@@ -103,8 +103,8 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         # 僚机时间线滞后设置（掩护长机离开）
         self.wingman_delay = {
-            'TR_DOR_delay': 8000,    # 僚机TR_DOR阶段滞后8km
-            'DOR_DR_delay': 10000,   # DOR_DR阶段滞后10km，确保长机先完成short_skate
+            'TR_DOR_delay': 4000,    # 僚机TR_DOR阶段滞后8km
+            'DOR_DR_delay': 8000,   # DOR_DR阶段滞后10km，确保长机先完成short_skate
         }
 
         # 当前战术阶段
@@ -899,6 +899,8 @@ class DragShootTacticalTask(MultipleCombatTask):
             return
 
         distance = self._calculate_distance(env.agents[agent_id], target)
+        # 新增：检查目标是否即将被击落
+        target_under_threat = self._check_target_under_threat(env, target, current_time)
 
         # 根据拖曳射击战术确定发射条件
         should_launch = False
@@ -917,16 +919,21 @@ class DragShootTacticalTask(MultipleCombatTask):
 
             # 僚机发射距离更近，体现滞后时间线
             wingman_launch_min = 40000 - self.wingman_delay['TR_DOR_delay']  # 32km
-            wingman_launch_max = 43000 - self.wingman_delay['TR_DOR_delay']  # 35km
+            wingman_launch_max = 45000 - self.wingman_delay['TR_DOR_delay']  # 35km
 
             # 添加速度检查，确保发射时飞机速度正常
             aircraft_speed = np.linalg.norm(env.agents[agent_id].get_velocity())
-            speed_ok = aircraft_speed > 200  # 确保速度大于200m/s
+            speed_ok = aircraft_speed > 150  # 确保速度大于200m/s
+            # 新增：避免向即将被击落的目标发射
+            if target_under_threat:
+                logging.info(f"A0200: 目标{target.uid}即将被击落，取消发射")
+                should_launch = False
+            else:
+                should_launch = (wingman_phase == TacticalPhase.TR_DOR and
+                                 wingman_launch_min <= distance <= wingman_launch_max and
+                                 speed_ok and
+                                 not self.missile_launched.get(agent_id, False))
 
-            should_launch = (wingman_phase == TacticalPhase.TR_DOR and
-                             wingman_launch_min <= distance <= wingman_launch_max and
-                             speed_ok and  # 添加速度检查
-                             not self.missile_launched.get(agent_id, False))
         elif agent_id == "B0100":  # 敌方长机 - 暂时禁用导弹发射
             should_launch = False  # 禁用敌方导弹，观察我方完整机动流程
         elif agent_id == "B0200":  # 敌方僚机 - 暂时禁用导弹发射
@@ -945,27 +952,26 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         if should_launch:
             self._launch_missile(env, agent_id, target, current_time)
-        # if agent_id == "A0100" and self.current_phase == TacticalPhase.MTR_TR:
-        #     # 长机在MTR_TR阶段时，设置导弹已发射状态
-        #     self.missile_launched[agent_id] = True
-        #     return
-        # elif agent_id == "A0200":
-        #     # 僚机在TR_DOR阶段时，设置导弹已发射状态
-        #     leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-        #     if leader_blue and leader_blue.is_alive:
-        #         wingman_distance = self._calculate_distance(env.agents[agent_id], leader_blue)
-        #         wingman_phase = self._get_wingman_phase_by_distance(wingman_distance)
-        #         if wingman_phase == TacticalPhase.TR_DOR:
-        #             self.missile_launched[agent_id] = True
-        #     return
-        # elif agent_id.startswith('B') and self.current_phase == TacticalPhase.DOR_DR:
-        #     # 敌方在DOR_DR阶段时，设置导弹已发射状态
-        #     self.missile_launched[agent_id] = True
-        #     return
-        #
-        #     # 其他情况不发射导弹
-        # return
 
+    def _check_target_under_threat(self, env, target, current_time):
+        """检查目标是否即将被击落"""
+        target_id = target.uid
+
+        # 检查是否有导弹正在攻击该目标
+        for missile_id, missile in env._tempsims.items():
+            if hasattr(missile, 'target_aircraft') and missile.target_aircraft:
+                if missile.target_aircraft.uid == target_id:
+                    # 计算导弹到目标的距离
+                    missile_pos = missile.get_position()
+                    target_pos = target.get_position()
+                    missile_distance = np.linalg.norm(missile_pos - target_pos)
+
+                    # 如果导弹距离目标小于15km且速度正常，认为目标即将被击落
+                    if missile_distance < 15000 and np.linalg.norm(missile.get_velocity()) > 500:
+                        logging.info(f"目标{target_id}即将被导弹{missile_id}击落，距离{missile_distance / 1000:.1f}km")
+                        return True
+
+        return False
     def _find_target(self, env, agent_id: str):
         """找到目标"""
         for enemy_id, enemy in env.agents.items():

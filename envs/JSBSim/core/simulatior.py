@@ -577,24 +577,24 @@ class MissileSimulator(BaseSimulator):
         self.print_interval = 10  # 每10秒打印一次
         # AIM-120C7 导弹参数
         self._g = 9.81  # 重力加速度
-        self._t_max = 60  # 导弹最大飞行时间
-        self._t_boost = 8  # 助推时间 (AIM-120C7典型值)
+        self._t_max = 120  # 导弹最大飞行时间 (增加到120秒)
+        self._t_boost = 12  # 助推时间 (增加助推时间以获得更高速度)
         self._t_terminal = 15  # 末段制导开始时间(距离目标)
-        self._Isp = 280  # 比冲 (AIM-120C7典型值)
+        self._Isp = 450  # 比冲 (大幅提升到更真实的AIM-120C值)
         self._Length = 3.66  # 长度
         self._Diameter = 0.178  # 直径
         self._cD = 0.35  # 阻力系数
         self._m0 = 152  # 初始质量 kg
-        self._dm = 8  # 质量损失率 kg/s
+        self._dm = 6  # 质量损失率 kg/s (增加推力)
         self._K = 4  # 比例导引系数
         self._nyz_max = 35  # 最大过载 (AIM-120C7典型值)
         self._Rc = 40  # 爆炸半径 m (减小以提高精度要求)
-        self._v_min = 200  # 最小速度 m/s
+        self._v_min = 150  # 最小速度 m/s (降低最小速度限制)
 
         # 制导参数
         self._phase = MissileSimulator.BOOST_PHASE
         self._intercept_point = np.zeros(3)  # 预测拦截点
-        self._terminal_distance = 8000  # 末段制导启动距离
+        self._terminal_distance = 8000  # 末段制导启动距离 (调整到6km)
 
         self._phase_changed = False
 
@@ -672,6 +672,16 @@ class MissileSimulator(BaseSimulator):
         self._phase = MissileSimulator.BOOST_PHASE
         self._phase_changed = False
 
+        # 速度补偿：如果发射速度过低，给予一定的初始速度补偿
+        current_velocity = np.linalg.norm(self._velocity)
+        if current_velocity < 300:  # 如果发射速度低于300m/s
+            # 计算需要的速度补偿，确保导弹有足够的初始速度
+            velocity_boost = 400 - current_velocity  # 补偿到400m/s
+            # 在发射方向上增加速度
+            velocity_direction = self._velocity / current_velocity if current_velocity > 0 else np.array([1, 0, 0])
+            self._velocity[:] += velocity_direction * velocity_boost
+            print(f" {self.model} {self.uid} velocity compensated: {current_velocity:.1f} -> {np.linalg.norm(self._velocity):.1f}m/s")
+
         print(
             f" {self.model} {self.uid} launched: v={np.linalg.norm(self._velocity):.1f}m/s, alt={self._geodetic[2]:.0f}m")
 
@@ -746,7 +756,7 @@ class MissileSimulator(BaseSimulator):
         # 距离持续增大(发散检测)
         if len(self._distance_increment) >= self._distance_increment.maxlen:
             diverging_count = sum(self._distance_increment)
-            if diverging_count >= self._distance_increment.maxlen * 0.8:  # 80%的时间在远离
+            if diverging_count >= self._distance_increment.maxlen * 0.6:  # 降低到60%的时间在远离
                 return True
 
         return False
@@ -764,7 +774,7 @@ class MissileSimulator(BaseSimulator):
             return "target_dead"
         elif len(self._distance_increment) >= self._distance_increment.maxlen:
             diverging_count = sum(self._distance_increment)
-            if diverging_count >= self._distance_increment.maxlen * 0.8:
+            if diverging_count >= self._distance_increment.maxlen * 0.6:
                 return "diverging"
         return "unknown"
 
@@ -780,7 +790,7 @@ class MissileSimulator(BaseSimulator):
             return self._terminal_guidance(), distance
 
     def _boost_guidance(self):
-        """助推段制导 - 简单的初始指向"""
+        """助推段制导 - 改进的初始指向和能量管理"""
         # 计算目标方向
         target_pos = self.target_aircraft.get_position()
         missile_pos = self.get_position()
@@ -809,12 +819,28 @@ class MissileSimulator(BaseSimulator):
         elif yaw_error < -np.pi:
             yaw_error += 2 * np.pi
 
-        # 简单的比例控制
-        k_p = 5.0  # 比例增益
-        ny = k_p * yaw_error
-        nz = k_p * pitch_error + 1.0  # 保持高度的基本升力
+        # 改进的比例控制，考虑能量管理和速度状态
+        current_velocity = np.linalg.norm(self.get_velocity())
+        
+        # 根据速度调整控制参数
+        if current_velocity < 400:  # 低速时使用更温和的控制
+            k_p = 2.0  # 降低比例增益
+            k_d = 0.3  # 降低微分增益
+            max_overload = self._nyz_max * 0.5  # 限制过载
+        else:
+            k_p = 4.0  # 正常比例增益
+            k_d = 0.5  # 正常微分增益
+            max_overload = self._nyz_max * 0.8  # 正常过载限制
+        
+        # 计算角速度误差
+        pitch_rate_error = 0 - self._dtheta  # 期望角速度为0
+        yaw_rate_error = 0 - self._dphi
+        
+        ny = k_p * yaw_error + k_d * yaw_rate_error
+        nz = k_p * pitch_error + k_d * pitch_rate_error + np.cos(current_pitch)  # 保持升力平衡
 
-        return np.clip([ny, nz], -self._nyz_max, self._nyz_max)
+        # 限制过载，避免过度机动
+        return np.clip([ny, nz], -max_overload, max_overload)
 
     def _midcourse_guidance(self):
         """中段制导 - 预测拦截制导"""
@@ -888,11 +914,18 @@ class MissileSimulator(BaseSimulator):
         ny = self.K * v_m / self._g * np.cos(theta_m) * dbeta
         nz = self.K * v_m / self._g * deps + np.cos(theta_m)
 
+        # 添加制导噪声模拟
+        guidance_noise = 0.1  # 制导噪声系数
+        noise_ny = np.random.normal(0, guidance_noise)
+        noise_nz = np.random.normal(0, guidance_noise)
+        
+        ny += noise_ny
+        nz += noise_nz
+
         return np.clip([ny, nz], -self._nyz_max, self._nyz_max)
 
     def _calculate_intercept_point(self):
-        """计算预测拦截点"""
-        # 简化的拦截点预测算法
+        """计算预测拦截点 - 改进算法考虑目标机动性"""
         missile_pos = self.get_position()
         missile_vel = self.get_velocity()
         target_pos = self.target_aircraft.get_position()
@@ -902,23 +935,30 @@ class MissileSimulator(BaseSimulator):
         rel_pos = target_pos - missile_pos
         rel_vel = target_vel - missile_vel
 
-        # 预测时间(简化计算)
+        # 预测时间计算
         missile_speed = np.linalg.norm(missile_vel)
-        if missile_speed < 1:
+        target_speed = np.linalg.norm(target_vel)
+        
+        if missile_speed < 1 or target_speed < 1:
             return target_pos
 
-        # 使用当前距离除以平均速度作为粗略预测时间
+        # 计算接近速度
+        closing_velocity = np.dot(rel_pos, rel_vel) / np.linalg.norm(rel_pos)
+        
+        # 考虑目标机动性的预测时间
         distance = np.linalg.norm(rel_pos)
-        avg_speed = (missile_speed + np.linalg.norm(target_vel)) / 2
-        if avg_speed < 1:
-            return target_pos
+        
+        # 如果目标在远离，使用更保守的预测
+        if closing_velocity < 0:
+            t_intercept = distance / (missile_speed * 0.8)  # 假设目标会机动
+        else:
+            # 目标在接近，使用更乐观的预测
+            t_intercept = distance / (missile_speed + target_speed * 0.5)
 
-        t_intercept = distance / avg_speed
+        # 限制预测时间范围
+        t_intercept = np.clip(t_intercept, 2.0, 45.0)  # 2-45秒范围
 
-        # 限制预测时间
-        t_intercept = min(t_intercept, 30.0)  # 最大预测30秒
-
-        # 计算预测拦截点
+        # 计算预测拦截点，考虑目标可能的机动
         intercept_point = target_pos + target_vel * t_intercept
 
         return intercept_point
