@@ -743,7 +743,8 @@ class DragShootTacticalTask(MultipleCombatTask):
             "total_start_time": current_time,
             "crank_angle": -40.0 if agent_id.startswith('A') else 40.0,  # 我方左侧，敌方右侧
             "turn_cold_angle": -100.0 if agent_id.startswith('A') else 100.0,  # 我方左侧，敌方右侧
-            "initial_heading": None
+            "initial_heading": None,
+            "initial_altitude": None  # 添加初始高度字段
         }
         self.short_skate_start_time[agent_id] = current_time
 
@@ -975,9 +976,10 @@ class DragShootTacticalTask(MultipleCombatTask):
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         else:
             # 保持初始高度
-            altitude_diff = initial_altitude - current_altitude
-            if abs(altitude_diff) > 10.0:  # 只有偏离较大时才纠正
-                altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+            if initial_altitude is not None:
+                altitude_diff = initial_altitude - current_altitude
+                if abs(altitude_diff) > 10.0:  # 只有偏离较大时才纠正
+                    altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         
         # 航向控制 - 这是关键！
         if target_heading is not None:
