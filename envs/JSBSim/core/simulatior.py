@@ -575,26 +575,28 @@ class MissileSimulator(BaseSimulator):
         self.target_aircraft = None  # type: AircraftSimulator
         self.render_explosion = False
         self.print_interval = 10  # 每10秒打印一次
-        # AIM-120C7 导弹参数
+        # 导弹参数
         self._g = 9.81  # 重力加速度
-        self._t_max = 120  # 导弹最大飞行时间 (增加到120秒)
-        self._t_boost = 12  # 助推时间 (增加助推时间以获得更高速度)
+        self._t_max = 120  # 导弹最大飞行时间
+        self._t_boost = 8.0  # 助推时间
         self._t_terminal = 15  # 末段制导开始时间(距离目标)
-        self._Isp = 450  # 比冲 (大幅提升到更真实的AIM-120C值)
+        self._Isp = 265  # 比冲
         self._Length = 3.66  # 长度
         self._Diameter = 0.178  # 直径
-        self._cD = 0.35  # 阻力系数
-        self._m0 = 152  # 初始质量 kg
-        self._dm = 6  # 质量损失率 kg/s (增加推力)
+        self._cD = 0.25  # 阻力系数
+        self._m0 = 161.5  # 初始质量 kg
+        self._fuel_mass = 50.0  # 燃料质量 kg
+        self._dm = self._fuel_mass / self._t_boost  # 质量损失率 kg/s
+        self._thrust = 16672  # 推力 N
         self._K = 4  # 比例导引系数
-        self._nyz_max = 35  # 最大过载 (AIM-120C7典型值)
-        self._Rc = 40  # 爆炸半径 m (减小以提高精度要求)
-        self._v_min = 150  # 最小速度 m/s (降低最小速度限制)
+        self._nyz_max = 40  # 最大过载
+        self._Rc = 40  # 爆炸半径 m
+        self._v_min = 200  # 最小速度 m/s
 
         # 制导参数
         self._phase = MissileSimulator.BOOST_PHASE
         self._intercept_point = np.zeros(3)  # 预测拦截点
-        self._terminal_distance = 8000  # 末段制导启动距离 (调整到6km)
+        self._terminal_distance = 12000  # 末段制导启动距离 (调整到6km)
 
         self._phase_changed = False
 
@@ -616,7 +618,13 @@ class MissileSimulator(BaseSimulator):
 
     @property
     def Isp(self):
-        return self._Isp if self._t < self._t_boost else 0
+        """真实AIM-120C7单脉冲发动机比冲模型"""
+        if self._t < self._t_boost:
+            # 单脉冲发动机：恒定比冲
+            return self._Isp
+        else:
+            # 燃料耗尽：无推力
+            return 0
 
     @property
     def K(self):
@@ -753,10 +761,12 @@ class MissileSimulator(BaseSimulator):
         if not self.target_aircraft.is_alive:
             return True
 
-        # 距离持续增大(发散检测)
+        # 距离持续增大(发散检测) - 更宽松的条件
         if len(self._distance_increment) >= self._distance_increment.maxlen:
             diverging_count = sum(self._distance_increment)
-            if diverging_count >= self._distance_increment.maxlen * 0.6:  # 降低到60%的时间在远离
+            # 只有在80%的时间都在远离且距离超过50km时才判定发散
+            if (diverging_count >= self._distance_increment.maxlen * 0.8 and
+                distance > 50000):
                 return True
 
         return False
@@ -973,8 +983,8 @@ class MissileSimulator(BaseSimulator):
         v = np.linalg.norm(self.get_velocity())
         theta, phi = self.get_rpy()[1:]
 
-        # 推力和阻力
-        T = self._g * self.Isp * self._dm if self._t < self._t_boost else 0
+        # 推力和阻力 - 真实AIM-120C7推力模型
+        T = self._thrust if self._t < self._t_boost else 0
         D = 0.5 * self._cD * self.S * self.rho * v ** 2
 
         # 轴向过载
@@ -1007,9 +1017,10 @@ class MissileSimulator(BaseSimulator):
         ])
         self._posture[:] = np.array([0, theta, phi])
 
-        # 更新质量
+        # 更新质量 - 真实AIM-120C7单脉冲发动机模型
         if self._t < self._t_boost:
-            self._m = max(self._m - self.dt * self._dm, self._m0 * 0.3)  # 保留30%质量
+            # 单脉冲发动机：恒定燃烧率
+            self._m = max(self._m - self.dt * self._dm, self._m0 - self._fuel_mass)
 
     def log(self):
         if self.is_alive:

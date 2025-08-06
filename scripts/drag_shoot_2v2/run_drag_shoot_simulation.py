@@ -547,6 +547,7 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
         if aircraft.is_alive:
             pos = aircraft.get_position()
             heading = np.rad2deg(aircraft.get_property_value(c.attitude_psi_rad))
+            pitch = np.rad2deg(aircraft.get_property_value(c.attitude_pitch_rad))
             velocity_vector = aircraft.get_velocity()
             velocity = np.linalg.norm(velocity_vector)
             trajectory_data.append({
@@ -557,7 +558,7 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                 'Y_m': pos[1],
                 'Z_m': pos[2],
                 'Heading_deg': heading,
-                'Altitude_m': pos[2],
+                'Pitch_deg': pitch,
                 'Velocity_m_s': velocity
             })
 

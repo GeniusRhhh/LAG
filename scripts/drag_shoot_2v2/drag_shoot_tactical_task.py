@@ -968,7 +968,7 @@ class DragShootTacticalTask(MultipleCombatTask):
 
                     # 如果导弹距离目标小于15km且速度正常，认为目标即将被击落
                     if missile_distance < 15000 and np.linalg.norm(missile.get_velocity()) > 500:
-                        logging.info(f"目标{target_id}即将被导弹{missile_id}击落，距离{missile_distance / 1000:.1f}km")
+                        # logging.info(f"目标{target_id}即将被导弹{missile_id}击落，距离{missile_distance / 1000:.1f}km")
                         return True
 
         return False
