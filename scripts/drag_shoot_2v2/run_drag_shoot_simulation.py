@@ -588,7 +588,52 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                         'Target_Distance_km': target_distance
                     })
 
-    # 记录导弹状态数据
+    # 记录敌方雷达状态数据
+    if hasattr(env.task, 'enemy_radar_states'):
+        for agent_id, radar_state in env.task.enemy_radar_states.items():
+            if env._jsbsims[agent_id].is_alive:
+                # 找到目标
+                target_id = None
+                target_distance = 0.0
+                for enemy_id, enemy in env._jsbsims.items():
+                    if ((agent_id.startswith('B') and enemy_id.startswith('A'))) and enemy.is_alive:
+                        target_id = enemy_id
+                        pos1 = env._jsbsims[agent_id].get_position()
+                        pos2 = enemy.get_position()
+                        target_distance = np.linalg.norm(pos1 - pos2) / 1000.0  # km
+                        break
+
+                if target_id:
+                    radar_info = env.task.enemy_radar_data.get(agent_id, {})
+                    radar_data.append({
+                        'Time_s': current_time,
+                        'Agent_ID': agent_id,
+                        'Radar_Type': 'N001VE',  # SU-27雷达型号
+                        'Status': radar_state,
+                        'Target_ID': target_id,
+                        'Target_Distance_km': target_distance,
+                        'SNR_dB': radar_info.get('snr', 0.0),
+                        'Doppler_Shift_m_s': radar_info.get('doppler_shift', 0.0),
+                        'Lock_Quality': radar_info.get('lock_quality', 0.0),
+                        'Beam_Angle_deg': radar_info.get('beam_angle', 0.0),
+                        'Side': 'Enemy'
+                    })
+
+    # 记录敌方导弹状态数据
+    if hasattr(env.task, 'enemy_missiles'):
+        for agent_id, missile_count in env.task.enemy_missiles.items():
+            if env._jsbsims[agent_id].is_alive:
+                missile_data.append({
+                    'Time_s': current_time,
+                    'Agent_ID': agent_id,
+                    'Missile_Type': 'R-27ER',
+                    'Remaining_Count': missile_count,
+                    'Launched': env.task.enemy_missile_launched.get(agent_id, False),
+                    'Side': 'Enemy',
+                    'Data_Type': 'Status'  # 标记为状态数据
+                })
+
+    # 记录导弹轨迹数据
     if hasattr(env, '_missile_records'):
         for missile_id, missile_info in env._missile_records.items():
             # 检查导弹是否在当前时间步内发射
@@ -632,7 +677,8 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                             'Z_m': missile_pos[2],
                             'Velocity_m_s': missile_velocity,
                             'Target_ID': missile_info.get('target', 'Unknown'),
-                            'Distance_to_Target_km': hit_distance / 1000.0  # 使用击中距离
+                            'Distance_to_Target_km': hit_distance / 1000.0,  # 使用击中距离
+                            'Data_Type': 'Trajectory'  # 标记为轨迹数据
                         })
                         
                         # 标记导弹为已销毁
@@ -651,63 +697,8 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                             'Z_m': missile_pos[2],
                             'Velocity_m_s': missile_velocity,
                             'Target_ID': missile_info.get('target', 'Unknown'),
-                            'Distance_to_Target_km': target_distance
-                        })
-                else:
-                    # 导弹已失效或被击落
-                    if missile_info.get('status') != 'DESTROYED':
-                        missile_info['status'] = 'DESTROYED'
-                        missile_info['destroy_time'] = current_time
-                    
-                    # 记录最后已知位置
-                    last_pos = missile_info.get('current_position', missile_info['launch_position'])
-                    last_distance = missile_info.get('last_distance', 0.0)
-                    
-                    # 检查是否需要记录击中数据
-                    hit_info = {}
-                    should_record_hit = False
-                    
-                    if missile_sim is not None:
-                        hit_info = missile_sim.get_hit_info()
-                        should_record_hit = missile_sim.should_record_hit_data()
-                    
-                    # 确定状态：如果是击中，记录为HIT；否则为DESTROYED
-                    status = 'HIT' if (hit_info.get('is_hit') and should_record_hit) else 'DESTROYED'
-                    
-                    # 如果是击中记录，使用击中时的数据
-                    if status == 'HIT':
-                        hit_time = hit_info.get('hit_time', current_time)
-                        hit_distance = hit_info.get('hit_distance', last_distance)
-                        if missile_sim is not None:
-                            missile_sim.mark_hit_recorded()  # 标记已记录
-                        
-                        missile_data.append({
-                            'Time_s': current_time,  # 使用当前时间
-                            'Missile_ID': missile_id,
-                            'Launcher_ID': missile_info.get('launcher', 'Unknown'),
-                            'Type': missile_info.get('type', 'AIM-120C-7'),
-                            'Status': 'HIT',  # 状态为HIT
-                            'X_m': last_pos[0],
-                            'Y_m': last_pos[1],
-                            'Z_m': last_pos[2],
-                            'Velocity_m_s': 0.0,
-                            'Target_ID': missile_info.get('target', 'Unknown'),
-                            'Distance_to_Target_km': hit_distance / 1000.0  # 使用击中距离
-                        })
-                    else:
-                        # 正常记录销毁状态
-                        missile_data.append({
-                            'Time_s': current_time,
-                            'Missile_ID': missile_id,
-                            'Launcher_ID': missile_info.get('launcher', 'Unknown'),
-                            'Type': missile_info.get('type', 'AIM-120C-7'),
-                            'Status': 'DESTROYED',
-                            'X_m': last_pos[0],
-                            'Y_m': last_pos[1],
-                            'Z_m': last_pos[2],
-                            'Velocity_m_s': 0.0,
-                            'Target_ID': missile_info.get('target', 'Unknown'),
-                            'Distance_to_Target_km': 0.0  # 销毁后距离设为0
+                            'Distance_to_Target_km': target_distance,
+                            'Data_Type': 'Trajectory'  # 标记为轨迹数据
                         })
 
 def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data):
@@ -731,68 +722,107 @@ def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_da
     # 保存导弹数据
     if missile_data:
         missile_df = pd.DataFrame(missile_data)
-        missile_file = os.path.join(output_dir, f"missile_status_{timestamp}.csv")
-        missile_df.to_csv(missile_file, index=False)
-        print(f"导弹数据已保存: {missile_file}")
         
-        # 生成导弹轨迹分析数据
-        generate_missile_trajectory_analysis(missile_df, output_dir, timestamp)
+        # 分离状态数据和轨迹数据
+        status_df = missile_df[missile_df.get('Data_Type', '') == 'Status']
+        trajectory_df = missile_df[missile_df.get('Data_Type', '') == 'Trajectory']
+        
+        # 保存导弹状态数据
+        if not status_df.empty:
+            status_file = os.path.join(output_dir, f"missile_status_{timestamp}.csv")
+            status_df.to_csv(status_file, index=False)
+            print(f"导弹状态数据已保存: {status_file}")
+        
+        # 保存导弹轨迹数据
+        if not trajectory_df.empty:
+            trajectory_file = os.path.join(output_dir, f"missile_trajectory_{timestamp}.csv")
+            trajectory_df.to_csv(trajectory_file, index=False)
+            print(f"导弹轨迹数据已保存: {trajectory_file}")
+            
+            # 生成导弹轨迹分析数据
+            generate_missile_trajectory_analysis(trajectory_df, output_dir, timestamp)
+        else:
+            print("没有导弹轨迹数据，跳过轨迹分析")
+    else:
+        print("没有导弹数据")
 
 
 def generate_missile_trajectory_analysis(missile_df, output_dir, timestamp):
     """生成导弹轨迹分析数据"""
     if missile_df.empty:
+        print("没有导弹数据，跳过轨迹分析")
+        return
+
+    # 只处理轨迹数据，过滤掉状态数据
+    trajectory_df = missile_df[missile_df.get('Data_Type', '') == 'Trajectory']
+    if trajectory_df.empty:
+        print("没有导弹轨迹数据，跳过轨迹分析")
+        return
+
+    # 检查是否有必要的列
+    required_columns = ['Missile_ID', 'Launcher_ID', 'Target_ID', 'Time_s', 'Velocity_m_s', 'X_m', 'Y_m', 'Z_m', 'Status']
+    missing_columns = [col for col in required_columns if col not in trajectory_df.columns]
+    if missing_columns:
+        print(f"导弹轨迹数据缺少必要列: {missing_columns}，跳过轨迹分析")
         return
 
     missile_analysis = []
 
     # 按导弹ID分组分析
-    for missile_id in missile_df['Missile_ID'].unique():
-        missile_traj = missile_df[missile_df['Missile_ID'] == missile_id]
+    for missile_id in trajectory_df['Missile_ID'].unique():
+        missile_traj = trajectory_df[trajectory_df['Missile_ID'] == missile_id]
+        
+        # 检查导弹轨迹是否为空
+        if missile_traj.empty:
+            continue
 
-        # 获取基本信息
-        launcher_id = missile_traj['Launcher_ID'].iloc[0]
-        target_id = missile_traj['Target_ID'].iloc[0]
+        try:
+            # 获取基本信息
+            launcher_id = missile_traj['Launcher_ID'].iloc[0]
+            target_id = missile_traj['Target_ID'].iloc[0]
 
-        # 获取发射和销毁时间
-        launch_time = missile_traj['Time_s'].iloc[0]
-        destroy_time = missile_traj['Time_s'].iloc[-1]
-        flight_duration = destroy_time - launch_time
+            # 获取发射和销毁时间
+            launch_time = missile_traj['Time_s'].iloc[0]
+            destroy_time = missile_traj['Time_s'].iloc[-1]
+            flight_duration = destroy_time - launch_time
 
-        # 计算速度统计
-        velocities = missile_traj['Velocity_m_s'].values
-        max_velocity = velocities.max()
-        avg_velocity = velocities.mean()
+            # 计算速度统计
+            velocities = missile_traj['Velocity_m_s'].values
+            max_velocity = velocities.max()
+            avg_velocity = velocities.mean()
 
-        # 计算总飞行距离
-        positions = missile_traj[['X_m', 'Y_m', 'Z_m']].values
-        total_distance = 0.0
-        for i in range(1, len(positions)):
-            total_distance += np.linalg.norm(positions[i] - positions[i - 1])
+            # 计算总飞行距离
+            positions = missile_traj[['X_m', 'Y_m', 'Z_m']].values
+            total_distance = 0.0
+            for i in range(1, len(positions)):
+                total_distance += np.linalg.norm(positions[i] - positions[i - 1])
 
-        # 获取最终状态
-        final_status = missile_traj['Status'].iloc[-1]
+            # 获取最终状态
+            final_status = missile_traj['Status'].iloc[-1]
 
-        # 计算最小距离到目标 - 只考虑导弹活跃状态的记录
-        active_missile_traj = missile_traj[missile_traj['Status'] == 'ACTIVE']
-        if len(active_missile_traj) > 0:
-            min_distance_to_target = active_missile_traj['Distance_to_Target_km'].min()
-        else:
-            min_distance_to_target = 0.0
+            # 计算最小距离到目标 - 只考虑导弹活跃状态的记录
+            active_missile_traj = missile_traj[missile_traj['Status'] == 'ACTIVE']
+            if len(active_missile_traj) > 0:
+                min_distance_to_target = active_missile_traj['Distance_to_Target_km'].min()
+            else:
+                min_distance_to_target = 0.0
 
-        missile_analysis.append({
-            'Missile_ID': missile_id,
-            'Launcher_ID': launcher_id,
-            'Target_ID': target_id,
-            'Launch_Time_s': launch_time,
-            'Destroy_Time_s': destroy_time,
-            'Flight_Duration_s': flight_duration,
-            'Max_Velocity_m_s': max_velocity,
-            'Avg_Velocity_m_s': avg_velocity,
-            'Total_Distance_km': total_distance / 1000.0,
-            'Min_Distance_to_Target_km': min_distance_to_target,
-            'Final_Status': final_status
-        })
+            missile_analysis.append({
+                'Missile_ID': missile_id,
+                'Launcher_ID': launcher_id,
+                'Target_ID': target_id,
+                'Launch_Time_s': launch_time,
+                'Destroy_Time_s': destroy_time,
+                'Flight_Duration_s': flight_duration,
+                'Max_Velocity_m_s': max_velocity,
+                'Avg_Velocity_m_s': avg_velocity,
+                'Total_Distance_km': total_distance / 1000.0,
+                'Min_Distance_to_Target_km': min_distance_to_target,
+                'Final_Status': final_status
+            })
+        except Exception as e:
+            print(f"处理导弹 {missile_id} 轨迹时出错: {e}")
+            continue
 
     # 保存导弹轨迹分析
     if missile_analysis:
@@ -803,6 +833,8 @@ def generate_missile_trajectory_analysis(missile_df, output_dir, timestamp):
 
         # 生成导弹轨迹摘要报告
         generate_missile_summary_report(analysis_df, output_dir, timestamp)
+    else:
+        print("没有有效的导弹轨迹数据可分析")
 
 def generate_missile_summary_report(analysis_df, output_dir, timestamp):
     """生成导弹轨迹摘要报告"""
