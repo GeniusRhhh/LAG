@@ -575,6 +575,12 @@ class MissileSimulator(BaseSimulator):
         self.target_aircraft = None  # type: AircraftSimulator
         self.render_explosion = False
         self.print_interval = 10  # 每10秒打印一次
+        
+        # 添加击中记录
+        self._hit_time = None  # 击中时刻
+        self._hit_distance = None  # 击中时距离
+        self._hit_recorded = False  # 是否已记录击中数据
+        
         # 导弹参数
         self._g = 9.81  # 重力加速度
         self._t_max = 120  # 导弹最大飞行时间
@@ -596,7 +602,7 @@ class MissileSimulator(BaseSimulator):
         # 制导参数
         self._phase = MissileSimulator.BOOST_PHASE
         self._intercept_point = np.zeros(3)  # 预测拦截点
-        self._terminal_distance = 12000  # 末段制导启动距离 (调整到6km)
+        self._terminal_distance = 12000  # 末段制导启动距离
 
         self._phase_changed = False
 
@@ -712,10 +718,14 @@ class MissileSimulator(BaseSimulator):
 
         # 命中判定
         if distance < self._Rc and self.target_aircraft.is_alive:
+            # 记录击中时刻和距离（只在第一次击中时记录）
+            if self._hit_time is None:
+                self._hit_time = self._t
+                self._hit_distance = distance
+                print(f" {self.model} {self.uid} HIT target at t={self._hit_time:.1f}s, dist={self._hit_distance:.1f}m")
+            
             self.__status = MissileSimulator.HIT
             self.target_aircraft.shotdown()
-            if self._t % self.print_interval < self.dt:  # 只在特定间隔打印
-                print(f" {self.model} {self.uid} HIT target at t={self._t:.1f}s, dist={distance:.1f}m")
         elif self._should_miss():
             self.__status = MissileSimulator.MISS
             miss_reason = self._get_miss_reason()
@@ -1040,3 +1050,20 @@ class MissileSimulator(BaseSimulator):
 
     def close(self):
         self.target_aircraft = None
+
+    def get_hit_info(self):
+        """获取击中信息"""
+        return {
+            'hit_time': self._hit_time,
+            'hit_distance': self._hit_distance,
+            'is_hit': self._hit_time is not None
+        }
+
+    def should_record_hit_data(self):
+        """判断是否应该记录击中数据"""
+        return (self._hit_time is not None and 
+                not self._hit_recorded)
+
+    def mark_hit_recorded(self):
+        """标记击中数据已记录"""
+        self._hit_recorded = True

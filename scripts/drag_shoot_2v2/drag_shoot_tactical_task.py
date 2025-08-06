@@ -7,12 +7,14 @@
 import logging
 import numpy as np
 import torch
+import math
 from enum import Enum
 from envs.JSBSim.tasks.multiplecombat_task import MultipleCombatTask
 from envs.JSBSim.model.baseline_actor import BaselineActor
 from envs.JSBSim.utils.utils import get_root_dir
 from envs.JSBSim.core.catalog import Catalog as c
 from envs.JSBSim.termination_conditions.termination_condition_base import BaseTerminationCondition
+from envs.JSBSim.tasks.pure_maneuvers import BasicManeuvers, CompositeManeuverExecutor, normalize_heading
 
 
 class DragShootTermination(BaseTerminationCondition):
@@ -125,6 +127,18 @@ class DragShootTacticalTask(MultipleCombatTask):
         # baseline模型 - 学习pure_maneuver_task的模式
         self.my_lowlevel_policy = BaselineActor()
         self._inner_rnn_states = {}
+
+        # 添加 pure_maneuvers 机动执行器
+        self.basic_maneuvers = BasicManeuvers()
+        self.composite_executor = CompositeManeuverExecutor()
+        
+        # 机动状态跟踪
+        self.active_maneuvers = {}  # 跟踪每个智能体的活跃机动
+        self.maneuver_start_times = {}  # 机动开始时间
+        
+        # 精确机动启用标志
+        self.enable_precise_maneuvers = True
+        logging.info("🎯 精确机动系统已启用 - 集成 pure_maneuvers 控制")
 
         # 指令数组 - 完全照抄pure_maneuver_task的定义
         self.norm_delta_altitude = np.array([
@@ -256,6 +270,14 @@ class DragShootTacticalTask(MultipleCombatTask):
             altitude_cmd_id, heading_cmd_id, velocity_cmd_id = self._get_tactical_command_indices(env, agent_id)
 
             # 使用baseline模型 - 完全学习pure_maneuver_task的_use_lowlevel_policy
+            # 检查是否需要精确滚转控制
+            if hasattr(self, 'active_maneuvers') and agent_id in self.active_maneuvers:
+                maneuver_data = self.active_maneuvers[agent_id]
+                if 'target_roll' in maneuver_data and abs(maneuver_data['target_roll']) > 2.0:
+                    return self._use_lowlevel_policy_with_roll(
+                        env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id, maneuver_data['target_roll']
+                    )
+            
             return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
 
         except Exception as e:
@@ -307,6 +329,72 @@ class DragShootTacticalTask(MultipleCombatTask):
             return norm_act
         except Exception as e:
             logging.error(f"低级策略错误: {e}")
+            return np.array([0.0, 0.0, 0.0, 0.7])
+
+    def _use_lowlevel_policy_with_roll(self, env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id, target_roll):
+        """使用低级策略网络，包含精确滚转控制"""
+        if self.my_lowlevel_policy is None:
+            return np.array([0.0, 0.0, 0.0, 0.7])
+
+        try:
+            # 基础网络处理（与原有相同）
+            raw_obs = self.get_obs(env, agent_id)
+            input_obs = np.zeros(12)
+
+            # 安全索引访问
+            altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
+            heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+            velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
+
+            input_obs[0] = self.norm_delta_altitude[altitude_cmd_id]
+            input_obs[1] = self.norm_delta_heading[heading_cmd_id]
+            input_obs[2] = self.norm_delta_velocity[velocity_cmd_id]
+            input_obs[3:12] = raw_obs[:9]
+            input_obs = np.nan_to_num(input_obs, nan=0.0)
+            input_obs = np.expand_dims(input_obs, axis=0)
+
+            if agent_id not in self._inner_rnn_states:
+                self._inner_rnn_states[agent_id] = np.zeros((1, 1, 128))
+
+            # 神经网络处理
+            _action, _rnn_states = self.my_lowlevel_policy(
+                torch.FloatTensor(input_obs),
+                torch.FloatTensor(self._inner_rnn_states[agent_id])
+            )
+            action_output = _action.detach().cpu().numpy().squeeze(0)
+            self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()
+
+            # 基础控制信号
+            norm_act = np.zeros(4)
+            norm_act[0] = action_output[0] / 20 - 1.
+            norm_act[1] = action_output[1] / 20 - 1.
+            norm_act[2] = action_output[2] / 20 - 1.
+            norm_act[3] = action_output[3] / 58 + 0.4
+
+            # 精确滚转控制 - 这是关键改进！
+            current_roll = env.agents[agent_id].get_property_value(c.attitude_phi_rad)
+            current_roll_deg = np.rad2deg(current_roll)
+            roll_error = target_roll - current_roll_deg
+            
+            if abs(roll_error) > 2.0:
+                # 精确的滚转控制
+                roll_cmd = np.clip(roll_error / 45.0, -1.0, 1.0)
+                norm_act[0] = roll_cmd  # 覆盖基础的副翼控制
+                
+                # 调试信息
+                if env.current_step % 50 == 0:
+                    logging.info(f"{agent_id} 精确滚转: 目标={target_roll:.1f}°, "
+                               f"当前={current_roll_deg:.1f}°, 误差={roll_error:.1f}°, 指令={roll_cmd:.2f}")
+
+            # 高度安全检查
+            current_alt = env.agents[agent_id].get_position()[2]
+            if current_alt < 1000:
+                norm_act[1] = max(norm_act[1], 0.0)
+                norm_act[3] = max(norm_act[3], 0.8)
+
+            return norm_act
+        except Exception as e:
+            logging.error(f"精确滚转控制错误: {e}")
             return np.array([0.0, 0.0, 0.0, 0.7])
 
     def _convert_altitude_to_index(self, altitude_cmd):
@@ -556,39 +644,23 @@ class DragShootTacticalTask(MultipleCombatTask):
             return self._execute_short_skate(env, agent_id, current_time)
 
         if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
-            # 平稳飞行 - 朝北接敌（0°）
-            target_heading = 0.0
-            if abs(current_heading - target_heading) > 5.0:  # 如果偏离超过5°，修正航向
-                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                if heading_diff > 0:
-                    return 7, 10, 3  # 保持高度、右转、保持速度
-                else:
-                    return 7, 6, 3  # 保持高度、左转、保持速度
-            else:
-                return 7, 8, 3  # 保持高度、直飞、保持速度
+            # 平稳飞行 - 朝北接敌（0°）- 使用精确航向保持
+            return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif self.current_phase == TacticalPhase.TR_DOR:
             # 长机在TR_DOR阶段：发射导弹后执行左侧short_skate机动
             if self.missile_launched.get(agent_id, False):
-                # 已发射导弹，执行完整的short_skate机动
+                # 已发射导弹，执行精确的short_skate机动
                 current_time = env.current_step * env.time_interval
-                return self._execute_short_skate(env, agent_id, current_time)
+                return self._execute_short_skate_precise(env, agent_id, current_time)
             else:
-                # 未发射导弹，继续平稳飞行等待发射时机
-                target_heading = 0.0
-                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                if abs(heading_diff) > 5.0:
-                    if heading_diff > 0:
-                        return 7, 10, 3  # 右转
-                    else:
-                        return 7, 6, 3  # 左转
-                else:
-                    return 7, 8, 3  # 保持航向
+                # 未发射导弹，继续精确的平稳飞行等待发射时机
+                return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif self.current_phase == TacticalPhase.DOR_DR:
-            # DOR_DR阶段：长机执行short_skate机动
+            # DOR_DR阶段：长机执行精确的short_skate机动
             current_time = env.current_step * env.time_interval
-            return self._execute_short_skate(env, agent_id, current_time)
+            return self._execute_short_skate_precise(env, agent_id, current_time)
         else:
             return 7, 8, 3
 
@@ -615,7 +687,7 @@ class DragShootTacticalTask(MultipleCombatTask):
         # 条件1：已经开始short_skate机动（防止中断）
         if agent_id in self.short_skate_states:
             current_time = env.current_step * env.time_interval
-            return self._execute_short_skate(env, agent_id, current_time)
+            return self._execute_short_skate_precise(env, agent_id, current_time)
 
         # 计算僚机与敌机的距离
         leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
@@ -627,63 +699,31 @@ class DragShootTacticalTask(MultipleCombatTask):
             wingman_phase = self.current_phase  # 如果无法计算距离，使用全局阶段
 
         if wingman_phase == TacticalPhase.NLT_MELD:
-            # 右侧crank: 航向从0°调整至30°（右偏30°）
-            target_heading = 30.0
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3  # 左转
-            else:
-                return 7, 8, 3  # 保持航向
+            # 右侧crank: 精确航向从0°调整至30°（右偏30°）
+            return self._maintain_heading_precise(env, agent_id, 30.0)
 
         elif wingman_phase == TacticalPhase.MELD_MTR:
-            # 左侧crank: 航向从30°调整回0°（左转30°）
-            target_heading = 0.0
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3  # 左转
-            else:
-                return 7, 8, 3  # 保持航向
+            # 左侧crank: 精确航向从30°调整回0°（左转30°）
+            return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif wingman_phase == TacticalPhase.MTR_TR:
-            # 平稳飞行 - 保持航向0°
-            target_heading = 0.0
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3  # 左转
-            else:
-                return 7, 8, 3  # 保持航向
+            # 平稳飞行 - 精确保持航向0°
+            return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif wingman_phase == TacticalPhase.TR_DOR:
             # 僚机在TR_DOR阶段：发射导弹后执行左侧short_skate机动（参考长机逻辑）
             if self.missile_launched.get(agent_id, False):
-                # 已发射导弹，执行完整的short_skate机动
+                # 已发射导弹，执行精确的short_skate机动
                 current_time = env.current_step * env.time_interval
-                return self._execute_short_skate(env, agent_id, current_time)
+                return self._execute_short_skate_precise(env, agent_id, current_time)
             else:
-                # 未发射导弹，执行左侧小crank指向敌机（小角度左转约10°）
-                target_heading = 350.0  # 从0°左转10°到350°，小角度crank
-                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                if abs(heading_diff) > 2.0:  # 更小的容差，精确控制
-                    if heading_diff > 0:
-                        return 7, 10, 3  # 右转
-                    else:
-                        return 7, 6, 3  # 左转
-                else:
-                    return 7, 8, 3  # 保持航向，等待发射时机
+                # 未发射导弹，执行精确的左侧小crank指向敌机（小角度左转约10°）
+                return self._maintain_heading_precise(env, agent_id, 350.0)
 
         elif wingman_phase == TacticalPhase.DOR_DR:
-            # DOR_DR阶段：僚机执行完整的左侧short_skate机动
+            # DOR_DR阶段：僚机执行精确的完整的左侧short_skate机动
             current_time = env.current_step * env.time_interval
-            return self._execute_short_skate(env, agent_id, current_time)
+            return self._execute_short_skate_precise(env, agent_id, current_time)
         else:
             return 7, 8, 3
 
@@ -782,6 +822,211 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         return 7, 8, 3  # 默认保持航向
 
+    def _execute_short_skate_precise(self, env, agent_id, current_time):
+        """执行精确的 Short Skate 机动 - 使用 pure_maneuvers"""
+        if agent_id not in self.short_skate_states:
+            self._init_short_skate(agent_id, current_time)
+
+        state = self.short_skate_states[agent_id]
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+
+        if state["initial_heading"] is None:
+            state["initial_heading"] = current_heading
+            state["initial_altitude"] = current_altitude
+
+        phase_time = current_time - state["phase_start_time"]
+
+        # 时间参数（保持原有的战术时序）
+        if agent_id == "A0200":  # 僚机
+            crank_duration = 18.0
+            turn_cold_duration = 30.0
+            escape_duration = 22.0
+        else:
+            crank_duration = 6.0
+            turn_cold_duration = 15.0
+            escape_duration = 15.0
+
+        # 阶段1：Crank机动 - 使用 pure_maneuvers 精确转弯
+        if state["phase"] == "crank":
+            if phase_time < crank_duration:
+                # 使用 BasicManeuvers.turn 进行精确的 Crank 转弯
+                turn_angle = state["crank_angle"]  # -40.0 或 40.0
+                turn_rate = 4.0  # 适中的转弯率
+                
+                result = self.basic_maneuvers.turn(
+                    phase_time,
+                    state["initial_heading"], 
+                    turn_angle,
+                    turn_rate
+                )
+                
+                phase, target_heading, target_altitude, velocity_offset, target_roll = result
+                
+                if phase is None:
+                    return 7, 8, 3  # 机动完成，保持状态
+                
+                # 存储精确控制数据
+                if target_roll is not None:
+                    self.active_maneuvers[agent_id] = {'target_roll': target_roll}
+                
+                # 转换为索引（保持与原系统兼容）
+                return self._convert_maneuver_result_to_indices(
+                    env, agent_id, target_heading, target_altitude, velocity_offset, target_roll,
+                    state["initial_heading"], state["initial_altitude"]
+                )
+            else:
+                # 进入 turn_cold 阶段
+                state["phase"] = "turn_cold"
+                state["phase_start_time"] = current_time
+                state["turn_cold_start_heading"] = current_heading
+
+        # 阶段2：Turn Cold - 精确的快速掉头
+        elif state["phase"] == "turn_cold":
+            if phase_time < turn_cold_duration:
+                # 使用 BasicManeuvers.turn 进行精确的快速转向
+                remaining_angle = state["turn_cold_angle"]  # -100.0 或 100.0
+                turn_rate = 6.0  # 更快的转弯率，体现 "快速脱离"
+                
+                result = self.basic_maneuvers.turn(
+                    phase_time,
+                    state["turn_cold_start_heading"],
+                    remaining_angle,
+                    turn_rate
+                )
+                
+                phase, target_heading, target_altitude, velocity_offset, target_roll = result
+                
+                if phase is None:
+                    return 7, 8, 3
+                
+                # 存储精确控制数据
+                if target_roll is not None:
+                    self.active_maneuvers[agent_id] = {'target_roll': target_roll}
+                
+                return self._convert_maneuver_result_to_indices(
+                    env, agent_id, target_heading, target_altitude, velocity_offset, target_roll,
+                    state["turn_cold_start_heading"], current_altitude
+                )
+            else:
+                # 进入逃离阶段
+                state["phase"] = "escape"
+                state["phase_start_time"] = current_time
+
+        # 阶段3：加速逃离 - 使用 pure_maneuvers 的加速机动
+        elif state["phase"] == "escape":
+            if phase_time < escape_duration:
+                # 使用 BasicManeuvers.accelerate_escape 进行精确的逃离
+                escape_heading = current_heading  # 保持当前航向
+                
+                result = self.basic_maneuvers.accelerate_escape(
+                    phase_time,
+                    escape_heading,
+                    escape_duration,
+                    50.0  # 加速50m/s
+                )
+                
+                phase, target_heading, target_altitude, velocity_offset, target_roll = result
+                
+                # 存储精确控制数据（如果有）
+                if target_roll is not None:
+                    self.active_maneuvers[agent_id] = {'target_roll': target_roll}
+                
+                return self._convert_maneuver_result_to_indices(
+                    env, agent_id, target_heading, target_altitude, velocity_offset, target_roll,
+                    escape_heading, current_altitude
+                )
+            else:
+                # Short Skate 完成，清除精确控制数据
+                if agent_id in self.active_maneuvers:
+                    del self.active_maneuvers[agent_id]
+                
+                # 返航
+                if agent_id.startswith('A'):
+                    target_heading = 180.0  # 我方返回南向
+                else:
+                    target_heading = 0.0    # 敌方返回北向
+                
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3
+                else:
+                    return 7, 8, 3
+
+        return 7, 8, 3  # 默认保持航向
+
+    def _convert_maneuver_result_to_indices(self, env, agent_id, target_heading, target_altitude, 
+                                           velocity_offset, target_roll, initial_heading, initial_altitude):
+        """将 pure_maneuvers 的结果转换为拖曳射击兼容的索引"""
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+        
+        # 默认索引
+        altitude_cmd_id = 7  # 保持高度
+        heading_cmd_id = 8   # 保持航向
+        velocity_cmd_id = 3  # 保持速度
+        
+        # 高度控制
+        if target_altitude is not None:
+            altitude_diff = target_altitude - current_altitude
+            if abs(altitude_diff) > 5.0:
+                altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+        else:
+            # 保持初始高度
+            altitude_diff = initial_altitude - current_altitude
+            if abs(altitude_diff) > 10.0:  # 只有偏离较大时才纠正
+                altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
+        
+        # 航向控制 - 这是关键！
+        if target_heading is not None:
+            heading_diff = target_heading - current_heading
+            while heading_diff > 180: heading_diff -= 360
+            while heading_diff < -180: heading_diff += 360
+            
+            # 使用更精确的控制阈值
+            if abs(heading_diff) > 1.0:  # 1度精度
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+        
+        # 速度控制
+        if velocity_offset is not None and abs(velocity_offset) > 2.0:
+            velocity_cmd_id = self._convert_velocity_to_index(velocity_offset)
+        
+        # 如果有滚转角要求，使用专门的滚转控制
+        if target_roll is not None and abs(target_roll) > 2.0:
+            # 使用精确滚转控制，但仍然返回索引值（不使用低级策略）
+            logging.debug(f"{agent_id} 精确滚转控制: 目标滚转角={target_roll:.1f}°")
+            # 这里只返回索引，滚转控制将在环境中通过 normalize_action 处理
+            return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
+        else:
+            # 返回索引值，保持与原有系统兼容
+            return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
+
+    def _maintain_heading_precise(self, env, agent_id, target_heading, duration=10.0):
+        """精确的航向保持"""
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        
+        # 计算航向差值
+        heading_diff = target_heading - current_heading
+        while heading_diff > 180: heading_diff -= 360
+        while heading_diff < -180: heading_diff += 360
+        
+        # 默认索引
+        altitude_cmd_id = 7  # 保持高度
+        heading_cmd_id = 8   # 保持航向
+        velocity_cmd_id = 3  # 保持速度
+        
+        # 精确航向控制
+        if abs(heading_diff) > 1.0:  # 1度精度
+            heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+            if env.current_step % 100 == 0:  # 减少日志频率
+                logging.debug(f"{agent_id} 精确航向: 目标={target_heading:.1f}°, "
+                             f"当前={current_heading:.1f}°, 差值={heading_diff:.1f}°")
+        
+        return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
+
     def _get_min_distance_to_enemy(self, env, agent_id: str):
         """获取到最近敌机的距离"""
         if not env.agents[agent_id].is_alive:
@@ -838,23 +1083,15 @@ class DragShootTacticalTask(MultipleCombatTask):
             should_return = True
 
         if should_return:
-            # logging.info(f"{agent_id} executing short_skate return")
-            # 执行short_skate
-            action = self._execute_short_skate(env, agent_id, current_time)
+            # logging.info(f"{agent_id} executing precise short_skate return")
+            # 执行精确的short_skate
+            action = self._execute_short_skate_precise(env, agent_id, current_time)
             return int(action[0]), int(action[1]), int(action[2])
         else:
-            # logging.info(f"{agent_id} continuing normal flight")
-            # 正常朝南接敌
-            current_heading = np.rad2deg(env._jsbsims[agent_id].get_property_value(c.attitude_psi_rad))
-            target_heading = 180.0
-            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-            if abs(heading_diff) > 5.0:
-                if heading_diff > 0:
-                    return 7, 10, 3  # 右转
-                else:
-                    return 7, 6, 3  # 左转
-            else:
-                return 7, 8, 3  # 保持航向
+            # logging.info(f"{agent_id} continuing precise normal flight")
+            # 正常朝南接敌 - 使用精确航向保持
+            action = self._maintain_heading_precise(env, agent_id, 180.0)
+            return int(action[0]), int(action[1]), int(action[2])
 
     def reset(self, env):
         """重置任务状态 - 学习pure_maneuver_task的reset模式"""

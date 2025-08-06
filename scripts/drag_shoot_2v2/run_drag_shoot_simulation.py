@@ -612,20 +612,47 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                     missile_info['status'] = 'ACTIVE'
                     missile_info['current_position'] = missile_pos.copy()
                     missile_info['current_velocity'] = missile_vel.copy()
+                    missile_info['last_distance'] = target_distance
                     
-                    missile_data.append({
-                        'Time_s': current_time,
-                        'Missile_ID': missile_id,
-                        'Launcher_ID': missile_info.get('launcher', 'Unknown'),
-                        'Type': missile_info.get('type', 'AIM-120C-7'),
-                        'Status': 'ACTIVE',
-                        'X_m': missile_pos[0],
-                        'Y_m': missile_pos[1],
-                        'Z_m': missile_pos[2],
-                        'Velocity_m_s': missile_velocity,
-                        'Target_ID': missile_info.get('target', 'Unknown'),
-                        'Distance_to_Target_km': target_distance
-                    })
+                    # 检查是否击中
+                    if missile_sim.is_success:
+                        # 记录击中状态
+                        hit_info = missile_sim.get_hit_info()
+                        hit_time = hit_info.get('hit_time', current_time)
+                        hit_distance = hit_info.get('hit_distance', target_distance * 1000.0)  # 转换为米
+                        
+                        missile_data.append({
+                            'Time_s': current_time,  # 使用当前时间
+                            'Missile_ID': missile_id,
+                            'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                            'Type': missile_info.get('type', 'AIM-120C-7'),
+                            'Status': 'HIT',  # 状态为HIT
+                            'X_m': missile_pos[0],
+                            'Y_m': missile_pos[1],
+                            'Z_m': missile_pos[2],
+                            'Velocity_m_s': missile_velocity,
+                            'Target_ID': missile_info.get('target', 'Unknown'),
+                            'Distance_to_Target_km': hit_distance / 1000.0  # 使用击中距离
+                        })
+                        
+                        # 标记导弹为已销毁
+                        missile_info['status'] = 'DESTROYED'
+                        missile_info['destroy_time'] = current_time
+                    else:
+                        # 正常记录活跃状态
+                        missile_data.append({
+                            'Time_s': current_time,
+                            'Missile_ID': missile_id,
+                            'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                            'Type': missile_info.get('type', 'AIM-120C-7'),
+                            'Status': 'ACTIVE',
+                            'X_m': missile_pos[0],
+                            'Y_m': missile_pos[1],
+                            'Z_m': missile_pos[2],
+                            'Velocity_m_s': missile_velocity,
+                            'Target_ID': missile_info.get('target', 'Unknown'),
+                            'Distance_to_Target_km': target_distance
+                        })
                 else:
                     # 导弹已失效或被击落
                     if missile_info.get('status') != 'DESTROYED':
@@ -634,20 +661,54 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                     
                     # 记录最后已知位置
                     last_pos = missile_info.get('current_position', missile_info['launch_position'])
-                    last_distance = missile_info.get('last_distance', 0.0)  # 保持最后计算的距离
-                    missile_data.append({
-                        'Time_s': current_time,
-                        'Missile_ID': missile_id,
-                        'Launcher_ID': missile_info.get('launcher', 'Unknown'),
-                        'Type': missile_info.get('type', 'AIM-120C-7'),
-                        'Status': 'DESTROYED',
-                        'X_m': last_pos[0],
-                        'Y_m': last_pos[1],
-                        'Z_m': last_pos[2],
-                        'Velocity_m_s': 0.0,
-                        'Target_ID': missile_info.get('target', 'Unknown'),
-                        'Distance_to_Target_km': last_distance
-                    })
+                    last_distance = missile_info.get('last_distance', 0.0)
+                    
+                    # 检查是否需要记录击中数据
+                    hit_info = {}
+                    should_record_hit = False
+                    
+                    if missile_sim is not None:
+                        hit_info = missile_sim.get_hit_info()
+                        should_record_hit = missile_sim.should_record_hit_data()
+                    
+                    # 确定状态：如果是击中，记录为HIT；否则为DESTROYED
+                    status = 'HIT' if (hit_info.get('is_hit') and should_record_hit) else 'DESTROYED'
+                    
+                    # 如果是击中记录，使用击中时的数据
+                    if status == 'HIT':
+                        hit_time = hit_info.get('hit_time', current_time)
+                        hit_distance = hit_info.get('hit_distance', last_distance)
+                        if missile_sim is not None:
+                            missile_sim.mark_hit_recorded()  # 标记已记录
+                        
+                        missile_data.append({
+                            'Time_s': current_time,  # 使用当前时间
+                            'Missile_ID': missile_id,
+                            'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                            'Type': missile_info.get('type', 'AIM-120C-7'),
+                            'Status': 'HIT',  # 状态为HIT
+                            'X_m': last_pos[0],
+                            'Y_m': last_pos[1],
+                            'Z_m': last_pos[2],
+                            'Velocity_m_s': 0.0,
+                            'Target_ID': missile_info.get('target', 'Unknown'),
+                            'Distance_to_Target_km': hit_distance / 1000.0  # 使用击中距离
+                        })
+                    else:
+                        # 正常记录销毁状态
+                        missile_data.append({
+                            'Time_s': current_time,
+                            'Missile_ID': missile_id,
+                            'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                            'Type': missile_info.get('type', 'AIM-120C-7'),
+                            'Status': 'DESTROYED',
+                            'X_m': last_pos[0],
+                            'Y_m': last_pos[1],
+                            'Z_m': last_pos[2],
+                            'Velocity_m_s': 0.0,
+                            'Target_ID': missile_info.get('target', 'Unknown'),
+                            'Distance_to_Target_km': 0.0  # 销毁后距离设为0
+                        })
 
 def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data):
     """保存CSV数据文件"""
