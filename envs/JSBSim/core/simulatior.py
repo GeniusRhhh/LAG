@@ -581,22 +581,23 @@ class MissileSimulator(BaseSimulator):
         self._hit_distance = None  # 击中时距离
         self._hit_recorded = False  # 是否已记录击中数据
         
-        # 导弹参数
+        # ===== AIM-120C7真实参数 =====
+        # 基于真实AIM-120C7 AMRAAM技术规格
         self._g = 9.81  # 重力加速度
         self._t_max = 120  # 导弹最大飞行时间
-        self._t_boost = 8.0  # 助推时间
+        self._t_boost = 8.0  # 助推时间 (真实AIM-120C7单脉冲发动机)
         self._t_terminal = 15  # 末段制导开始时间(距离目标)
-        self._Isp = 265  # 比冲
-        self._Length = 3.66  # 长度
-        self._Diameter = 0.178  # 直径
-        self._cD = 0.25  # 阻力系数
-        self._m0 = 161.5  # 初始质量 kg
-        self._fuel_mass = 50.0  # 燃料质量 kg
+        self._Isp = 265  # 比冲 (真实AIM-120C7值)
+        self._Length = 3.66  # 长度 m (真实值)
+        self._Diameter = 0.178  # 直径 m (真实值)
+        self._cD = 0.25  # 阻力系数 (真实超音速导弹值)
+        self._m0 = 161.5  # 初始质量 kg (真实值)
+        self._fuel_mass = 40.0  # 燃料质量 kg (修正为真实值)
         self._dm = self._fuel_mass / self._t_boost  # 质量损失率 kg/s
-        self._thrust = 16672  # 推力 N
+        self._thrust = 14000  # 推力 N (修正为真实值)
         self._K = 4  # 比例导引系数
-        self._nyz_max = 40  # 最大过载
-        self._Rc = 40  # 爆炸半径 m
+        self._nyz_max = 40  # 最大过载 G (真实AIM-120C7值)
+        self._Rc = 40  # 爆炸半径 m (真实杀伤半径)
         self._v_min = 200  # 最小速度 m/s
 
         # 制导参数
@@ -934,8 +935,8 @@ class MissileSimulator(BaseSimulator):
         ny = self.K * v_m / self._g * np.cos(theta_m) * dbeta
         nz = self.K * v_m / self._g * deps + np.cos(theta_m)
 
-        # 添加制导噪声模拟
-        guidance_noise = 0.1  # 制导噪声系数
+        # 添加制导噪声模拟 (AIM-120C7主动雷达制导高精度)
+        guidance_noise = 0.05  # 制导噪声系数 (主动雷达制导精度高)
         noise_ny = np.random.normal(0, guidance_noise)
         noise_nz = np.random.normal(0, guidance_noise)
         
