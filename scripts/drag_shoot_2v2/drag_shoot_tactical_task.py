@@ -1064,9 +1064,20 @@ class DragShootTacticalTask(MultipleCombatTask):
         return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
-        """敌方战术指令索引 - 朝南接敌，特定条件下执行short_skate"""
+        """敌方战术指令索引 - 使用智能AI系统"""
         current_time = env.current_step * env.time_interval
 
+        # 导入并使用新的敌方AI系统
+        try:
+            from enemy_tactical_ai import get_enemy_tactical_command
+            return get_enemy_tactical_command(env, agent_id, current_time)
+        except ImportError:
+            logging.warning("Enemy tactical AI not available, using fallback logic")
+            # 回退到原有逻辑
+            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+
+    def _get_enemy_command_indices_fallback(self, env, agent_id: str, current_time: float):
+        """敌方战术指令索引 - 回退逻辑"""
         # 检查是否应该执行short_skate
         should_return = False
 
@@ -1087,12 +1098,10 @@ class DragShootTacticalTask(MultipleCombatTask):
             should_return = True
 
         if should_return:
-            # logging.info(f"{agent_id} executing precise short_skate return")
             # 执行精确的short_skate
             action = self._execute_short_skate_precise(env, agent_id, current_time)
             return int(action[0]), int(action[1]), int(action[2])
         else:
-            # logging.info(f"{agent_id} continuing precise normal flight")
             # 正常朝南接敌 - 使用精确航向保持
             action = self._maintain_heading_precise(env, agent_id, 180.0)
             return int(action[0]), int(action[1]), int(action[2])
@@ -1175,42 +1184,17 @@ class DragShootTacticalTask(MultipleCombatTask):
                                  speed_ok and
                                  not self.missile_launched.get(agent_id, False))
 
-        elif agent_id == "B0100":  # 敌方长机 - 启用导弹发射
-            # 敌方长机在TR_DOR阶段发射，距离41-19.6km
-            should_launch = (self.current_phase == TacticalPhase.TR_DOR and
-                             41000 <= distance <= 45000 and 
-                             not self.missile_launched.get(agent_id, False))
-            
-            # 如果距离太远，尝试在更远的距离发射
-            if not should_launch and self.current_phase == TacticalPhase.TR_DOR and distance <= 50000:
-                logging.info(f"B0100尝试远距离发射: 距离={distance/1000:.1f}km")
-                should_launch = not self.missile_launched.get(agent_id, False)
+        elif agent_id == "B0100":  # 敌方长机 - 智能发射逻辑
+            # 使用敌方AI的发射判断
+            should_launch = self._enemy_should_launch_missile(env, agent_id, target, distance, current_time)
             
             # 更宽松的条件：在任何阶段，只要距离合适就发射
             if not should_launch and distance <= 60000 and not self.missile_launched.get(agent_id, False):
                 logging.info(f"B0100宽松条件发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
                 should_launch = True
-        elif agent_id == "B0200":  # 敌方僚机 - 启用导弹发射
-            # 敌方僚机在DOR_DR阶段发射，距离19.6-14.5km
-            should_launch = (self.current_phase == TacticalPhase.DOR_DR and
-                             19000 <= distance <= 22000 and 
-                             not self.missile_launched.get(agent_id, False))
-            
-            # 调试信息
-            if self.current_phase == TacticalPhase.DOR_DR and 19000 <= distance <= 22000:
-                logging.info(f"B0200发射条件检查: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km, 已发射={self.missile_launched.get(agent_id, False)}")
-            elif self.current_phase == TacticalPhase.DOR_DR:
-                logging.info(f"B0200距离不满足: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km, 需要19-22km")
-            
-            # 如果距离太远，尝试在更远的距离发射
-            if not should_launch and self.current_phase == TacticalPhase.DOR_DR and distance <= 40000:
-                logging.info(f"B0200尝试远距离发射: 距离={distance/1000:.1f}km")
-                should_launch = not self.missile_launched.get(agent_id, False)
-            
-            # 更宽松的条件：在任何阶段，只要距离合适就发射
-            if not should_launch and distance <= 50000 and not self.missile_launched.get(agent_id, False):
-                logging.info(f"B0200宽松条件发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
-                should_launch = True
+        elif agent_id == "B0200":  # 敌方僚机 - 智能发射逻辑
+            # 使用敌方AI的发射判断
+            should_launch = self._enemy_should_launch_missile(env, agent_id, target, distance, current_time)
 
         # 敌方第二轮发射逻辑 - 在DOR_DR阶段且距离较近时
         if agent_id.startswith('B') and self.current_phase == TacticalPhase.DOR_DR:
@@ -1227,6 +1211,50 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         if should_launch:
             self._launch_missile(env, agent_id, target, current_time)
+
+    def _enemy_should_launch_missile(self, env, agent_id: str, target, distance: float, current_time: float) -> bool:
+        """敌方智能导弹发射判断"""
+        # 基本条件检查
+        if self.missile_launched.get(agent_id, False):
+            return False
+
+        if env.agents[agent_id].num_missiles <= 0:
+            return False
+
+        # 使用敌方AI的威胁评估
+        try:
+            from enemy_tactical_ai import enemy_ai
+            threat_level = enemy_ai.evaluate_threat_level(env, agent_id)
+
+            # 基于威胁等级和距离决定发射
+            if threat_level.value >= 2:  # MEDIUM或更高威胁
+                # 在威胁下，更积极地发射
+                if 25000 <= distance <= 60000:
+                    logging.info(f"{agent_id} 威胁发射: 威胁等级={threat_level.name}, 距离={distance/1000:.1f}km")
+                    return True
+
+            # 正常发射条件
+            if agent_id == "B0100":
+                # 长机：在TR_DOR阶段或更早发射
+                if self.current_phase in [TacticalPhase.MTR_TR, TacticalPhase.TR_DOR]:
+                    if 35000 <= distance <= 55000:
+                        logging.info(f"{agent_id} 正常发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
+                        return True
+
+            elif agent_id == "B0200":
+                # 僚机：稍晚发射，距离更近
+                if self.current_phase in [TacticalPhase.TR_DOR, TacticalPhase.DOR_DR]:
+                    if 30000 <= distance <= 50000:
+                        logging.info(f"{agent_id} 正常发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
+                        return True
+
+            return False
+
+        except ImportError:
+            # 回退到简单逻辑
+            if 30000 <= distance <= 50000:
+                return True
+            return False
 
     def _check_target_under_threat(self, env, target, current_time):
         """检查目标是否即将被击落"""
@@ -1362,7 +1390,7 @@ class DragShootTacticalTask(MultipleCombatTask):
                         maneuver_desc = self._get_maneuver_description(cmd_indices)
                     else:
                         cmd_indices = self._get_enemy_command_indices(env, agent_id)
-                        maneuver_desc = "Enemy maneuver"
+                        maneuver_desc = self._get_enemy_maneuver_description(cmd_indices)
 
                     logging.info(f"✈️  {agent_id}: pos=({pos[0]/1000:.1f}, {pos[1]/1000:.1f}, {pos[2]/1000:.1f})km, "
                                f"hdg={heading:.1f}°, alt={altitude:.0f}m, vel={velocity:.1f}m/s, "
@@ -1418,6 +1446,36 @@ class DragShootTacticalTask(MultipleCombatTask):
             return f"{heading_desc}+{alt_desc}+{speed_desc}"
         except:
             return "未知机动"
+
+    def _get_enemy_maneuver_description(self, cmd_indices):
+        """获取敌方机动动作的描述"""
+        try:
+            alt_cmd, heading_cmd, speed_cmd = cmd_indices
+
+            # 敌方航向动作描述（更详细）
+            heading_map = {
+                0: "急左转", 2: "大幅左转", 4: "中等左转", 6: "轻微左转",
+                8: "直飞", 10: "轻微右转", 12: "中等右转", 14: "大幅右转", 16: "急右转"
+            }
+            heading_desc = heading_map.get(heading_cmd, f"转向({heading_cmd})")
+
+            # 敌方高度动作描述
+            alt_map = {
+                0: "急俯冲", 2: "大幅俯冲", 3: "俯冲", 4: "轻微俯冲", 5: "轻微俯冲",
+                6: "轻微爬升", 7: "保持高度", 8: "轻微爬升", 9: "爬升", 10: "大幅爬升"
+            }
+            alt_desc = alt_map.get(alt_cmd, f"高度({alt_cmd})")
+
+            # 敌方速度动作描述
+            speed_map = {
+                0: "大幅减速", 1: "减速", 2: "轻微减速", 3: "保持速度",
+                4: "加速", 5: "大幅加速", 6: "最大加速"
+            }
+            speed_desc = speed_map.get(speed_cmd, f"速度({speed_cmd})")
+
+            return f"敌方AI:{heading_desc}+{alt_desc}+{speed_desc}"
+        except:
+            return "敌方AI:未知机动"
 
 
 
