@@ -13,12 +13,13 @@ import time
 import numpy as np
 from datetime import datetime
 import pandas as pd
-# 添加项目根目录到路径
-from envs.JSBSim.core.simulatior import MissileSimulator
 
+# 添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.insert(0, project_root)
+
+from envs.JSBSim.core.simulatior import MissileSimulator
 
 from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
 from envs.JSBSim.core.catalog import Catalog as c
@@ -562,62 +563,11 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                 'Velocity_m_s': velocity
             })
 
-    # 记录雷达状态数据
-    if hasattr(env.task, 'radar_states'):
-        for agent_id, radar_state in env.task.radar_states.items():
-            if env._jsbsims[agent_id].is_alive:
-                # 找到目标
-                target_id = None
-                target_distance = 0.0
-                for enemy_id, enemy in env._jsbsims.items():
-                    if ((agent_id.startswith('A') and enemy_id.startswith('B')) or
-                        (agent_id.startswith('B') and enemy_id.startswith('A'))) and enemy.is_alive:
-                        target_id = enemy_id
-                        pos1 = env._jsbsims[agent_id].get_position()
-                        pos2 = enemy.get_position()
-                        target_distance = np.linalg.norm(pos1 - pos2) / 1000.0  # km
-                        break
+    # 使用雷达管理器记录雷达数据
+    from radar_manager import record_radar_data
+    radar_data.extend(record_radar_data(env, current_time))
 
-                if target_id:
-                    radar_data.append({
-                        'Time_s': current_time,
-                        'Agent_ID': agent_id,
-                        'Radar_Type': 'AN/APG-68(V)9',
-                        'Status': radar_state,
-                        'Target_ID': target_id,
-                        'Target_Distance_km': target_distance
-                    })
 
-    # 记录敌方雷达状态数据
-    if hasattr(env.task, 'enemy_radar_states'):
-        for agent_id, radar_state in env.task.enemy_radar_states.items():
-            if env._jsbsims[agent_id].is_alive:
-                # 找到目标
-                target_id = None
-                target_distance = 0.0
-                for enemy_id, enemy in env._jsbsims.items():
-                    if ((agent_id.startswith('B') and enemy_id.startswith('A'))) and enemy.is_alive:
-                        target_id = enemy_id
-                        pos1 = env._jsbsims[agent_id].get_position()
-                        pos2 = enemy.get_position()
-                        target_distance = np.linalg.norm(pos1 - pos2) / 1000.0  # km
-                        break
-
-                if target_id:
-                    radar_info = env.task.enemy_radar_data.get(agent_id, {})
-                    radar_data.append({
-                        'Time_s': current_time,
-                        'Agent_ID': agent_id,
-                        'Radar_Type': 'N001VE',  # SU-27雷达型号
-                        'Status': radar_state,
-                        'Target_ID': target_id,
-                        'Target_Distance_km': target_distance,
-                        'SNR_dB': radar_info.get('snr', 0.0),
-                        'Doppler_Shift_m_s': radar_info.get('doppler_shift', 0.0),
-                        'Lock_Quality': radar_info.get('lock_quality', 0.0),
-                        'Beam_Angle_deg': radar_info.get('beam_angle', 0.0),
-                        'Side': 'Enemy'
-                    })
 
     # 记录敌方导弹状态数据
     if hasattr(env.task, 'enemy_missiles'):
@@ -670,7 +620,7 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                             'Time_s': current_time,  # 使用当前时间
                             'Missile_ID': missile_id,
                             'Launcher_ID': missile_info.get('launcher', 'Unknown'),
-                            'Type': missile_info.get('type', 'AIM-120C-7'),
+                            'Type': missile_info.get('type', 'Unknown'),
                             'Status': 'HIT',  # 状态为HIT
                             'X_m': missile_pos[0],
                             'Y_m': missile_pos[1],
@@ -690,7 +640,7 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                             'Time_s': current_time,
                             'Missile_ID': missile_id,
                             'Launcher_ID': missile_info.get('launcher', 'Unknown'),
-                            'Type': missile_info.get('type', 'AIM-120C-7'),
+                            'Type': missile_info.get('type', 'Unknown'),
                             'Status': 'ACTIVE',
                             'X_m': missile_pos[0],
                             'Y_m': missile_pos[1],

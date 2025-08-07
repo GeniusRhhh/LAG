@@ -11,12 +11,10 @@ import math
 from enum import Enum
 from envs.JSBSim.tasks.multiplecombat_task import MultipleCombatTask
 from envs.JSBSim.model.baseline_actor import BaselineActor
-from envs.JSBSim.utils.utils import get_root_dir, get_AO_TA_R, LLA2NEU
+from envs.JSBSim.utils.utils import get_root_dir
 from envs.JSBSim.core.catalog import Catalog as c
 from envs.JSBSim.termination_conditions.termination_condition_base import BaseTerminationCondition
 from envs.JSBSim.tasks.pure_maneuvers import BasicManeuvers, CompositeManeuverExecutor, normalize_heading
-from envs.JSBSim.core.simulatior import MissileSimulator
-import os
 
 
 class DragShootTermination(BaseTerminationCondition):
@@ -115,19 +113,9 @@ class DragShootTacticalTask(MultipleCombatTask):
         self.current_phase = TacticalPhase.NLT_MELD
         self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
 
-        # 雷达状态管理
-        self.radar_states = {"A0100": "SEARCH", "A0200": "SEARCH", "B0100": "SEARCH", "B0200": "SEARCH"}
-
-        # 敌方雷达状态管理 - 增加基本功能
-        self.enemy_radar_states = {"B0100": "SEARCH", "B0200": "SEARCH"}
-        self.enemy_radar_data = {
-            "B0100": {"snr": 0.0, "doppler_shift": 0.0, "lock_quality": 0.0, "beam_angle": 0.0},
-            "B0200": {"snr": 0.0, "doppler_shift": 0.0, "lock_quality": 0.0, "beam_angle": 0.0}
-        }
-        
-        # 敌方导弹挂载 - 每架SU-27挂载2枚R-27ER
-        self.enemy_missiles = {"B0100": 2, "B0200": 2}
-        self.enemy_missile_launched = {"B0100": False, "B0200": False}
+        # 雷达状态管理 - 使用雷达管理器
+        from radar_manager import get_radar_manager
+        self.radar_manager = get_radar_manager()
 
         # 初始状态记录 - 学习pure_maneuver_task
         self.initial_heading = {}
@@ -267,14 +255,6 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         # 处理导弹发射
         self._handle_missile_launch(env, agent_id, current_time)
-
-        # 更新雷达状态
-        self._update_radar_state(env, agent_id, current_time)
-
-        # 更新敌方雷达状态
-        if agent_id.startswith('B'):
-            self._update_enemy_radar_state(env, agent_id, current_time)
-            self._handle_enemy_missile_launch(env, agent_id, current_time)
 
         return result
 
@@ -464,6 +444,10 @@ class DragShootTacticalTask(MultipleCombatTask):
         for agent_id in env._jsbsims.keys():
             if env._jsbsims[agent_id].is_alive:
                 self._handle_missile_launch(env, agent_id, current_time)
+
+        # 更新雷达状态
+        from radar_manager import update_all_radars
+        update_all_radars(env, current_time)
 
         # 详细状态信息 - 每5秒打印一次
         if env.current_step % 25 == 0:
@@ -1191,21 +1175,55 @@ class DragShootTacticalTask(MultipleCombatTask):
                                  speed_ok and
                                  not self.missile_launched.get(agent_id, False))
 
-        elif agent_id == "B0100":  # 敌方长机 - 暂时禁用导弹发射
-            should_launch = False  # 禁用敌方导弹，观察我方完整机动流程
-        elif agent_id == "B0200":  # 敌方僚机 - 暂时禁用导弹发射
-            should_launch = False  # 禁用敌方导弹，观察我方完整机动流程
+        elif agent_id == "B0100":  # 敌方长机 - 启用导弹发射
+            # 敌方长机在TR_DOR阶段发射，距离41-19.6km
+            should_launch = (self.current_phase == TacticalPhase.TR_DOR and
+                             41000 <= distance <= 45000 and 
+                             not self.missile_launched.get(agent_id, False))
+            
+            # 如果距离太远，尝试在更远的距离发射
+            if not should_launch and self.current_phase == TacticalPhase.TR_DOR and distance <= 50000:
+                logging.info(f"B0100尝试远距离发射: 距离={distance/1000:.1f}km")
+                should_launch = not self.missile_launched.get(agent_id, False)
+            
+            # 更宽松的条件：在任何阶段，只要距离合适就发射
+            if not should_launch and distance <= 60000 and not self.missile_launched.get(agent_id, False):
+                logging.info(f"B0100宽松条件发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
+                should_launch = True
+        elif agent_id == "B0200":  # 敌方僚机 - 启用导弹发射
+            # 敌方僚机在DOR_DR阶段发射，距离19.6-14.5km
+            should_launch = (self.current_phase == TacticalPhase.DOR_DR and
+                             19000 <= distance <= 22000 and 
+                             not self.missile_launched.get(agent_id, False))
+            
+            # 调试信息
+            if self.current_phase == TacticalPhase.DOR_DR and 19000 <= distance <= 22000:
+                logging.info(f"B0200发射条件检查: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km, 已发射={self.missile_launched.get(agent_id, False)}")
+            elif self.current_phase == TacticalPhase.DOR_DR:
+                logging.info(f"B0200距离不满足: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km, 需要19-22km")
+            
+            # 如果距离太远，尝试在更远的距离发射
+            if not should_launch and self.current_phase == TacticalPhase.DOR_DR and distance <= 40000:
+                logging.info(f"B0200尝试远距离发射: 距离={distance/1000:.1f}km")
+                should_launch = not self.missile_launched.get(agent_id, False)
+            
+            # 更宽松的条件：在任何阶段，只要距离合适就发射
+            if not should_launch and distance <= 50000 and not self.missile_launched.get(agent_id, False):
+                logging.info(f"B0200宽松条件发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
+                should_launch = True
 
-        # 敌方第二轮发射 (19.6km) - 需要重置发射状态
+        # 敌方第二轮发射逻辑 - 在DOR_DR阶段且距离较近时
         if agent_id.startswith('B') and self.current_phase == TacticalPhase.DOR_DR:
-            if 19000 <= distance <= 21000:
-                # 重置发射状态，允许第二轮发射
-                if not hasattr(self, 'second_launch_done'):
-                    self.second_launch_done = {}
-                if agent_id not in self.second_launch_done:
-                    self.second_launch_done[agent_id] = False
+            if 14000 <= distance <= 18000:  # 更近的距离进行第二轮发射
+                # 检查是否还有导弹
+                if env.agents[agent_id].num_missiles > 0:
+                    # 重置发射状态，允许第二轮发射
+                    if not hasattr(self, 'second_launch_done'):
+                        self.second_launch_done = {}
+                    if agent_id not in self.second_launch_done:
+                        self.second_launch_done[agent_id] = False
 
-                should_launch = should_launch or not self.second_launch_done.get(agent_id, False)
+                    should_launch = should_launch or not self.second_launch_done.get(agent_id, False)
 
         if should_launch:
             self._launch_missile(env, agent_id, target, current_time)
@@ -1242,10 +1260,8 @@ class DragShootTacticalTask(MultipleCombatTask):
                (agent_id1.startswith('B') and agent_id2.startswith('A'))
 
     def _launch_missile(self, env, agent_id: str, target, current_time: float):
-        """发射导弹 - 创建真实的导弹模拟器"""
+        """发射导弹 - 根据发射平台选择导弹类型"""
         try:
-            from envs.JSBSim.core.simulatior import MissileSimulator
-
             aircraft = env.agents[agent_id]
 
             # 创建导弹ID - 使用正确的格式 A0100 → A1001, A1002
@@ -1254,12 +1270,23 @@ class DragShootTacticalTask(MultipleCombatTask):
             base_id = agent_id[0] + agent_id[2:]  # A0100 → A100
             missile_uid = f"{base_id}{missile_count}"  # A100 → A1001
 
-            # 创建真实的导弹模拟器
-            missile = MissileSimulator.create(
-                parent=aircraft,
-                target=target,
-                uid=missile_uid
-            )
+            # 根据发射平台选择导弹类型
+            if agent_id.startswith('A'):  # 我方飞机 - 使用AIM-120C7
+                from envs.JSBSim.core.simulatior import MissileSimulator
+                missile = MissileSimulator.create(
+                    parent=aircraft,
+                    target=target,
+                    uid=missile_uid
+                )
+                missile_type = "AIM-120C-7"
+            else:  # 敌方飞机 - 使用R-27ER
+                from r27er_missile import R27ERMissileSimulator
+                missile = R27ERMissileSimulator.create(
+                    parent=aircraft,
+                    target=target,
+                    uid=missile_uid
+                )
+                missile_type = "R-27ER"
 
             # 添加到环境的临时模拟器
             env.add_temp_simulator(missile)
@@ -1272,7 +1299,7 @@ class DragShootTacticalTask(MultipleCombatTask):
             env._missile_records[missile_uid] = {
                 'launcher': agent_id,
                 'target': target.uid,
-                'type': 'AIM-120C-7',
+                'type': missile_type,
                 'status': 'LAUNCHED',
                 'launch_time': current_time,
                 'launch_position': aircraft.get_position().copy(),
@@ -1356,20 +1383,6 @@ class DragShootTacticalTask(MultipleCombatTask):
             launched_status = [f"{k}:{v}" for k, v in self.missile_launched.items()]
             logging.info(f"🎯 Launch status: {', '.join(launched_status)}")
 
-            # 敌方雷达状态
-            if hasattr(self, 'enemy_radar_states'):
-                for agent_id, radar_state in self.enemy_radar_states.items():
-                    if agent_id in env._jsbsims and env._jsbsims[agent_id].is_alive:
-                        radar_info = self.enemy_radar_data.get(agent_id, {})
-                        logging.info(f"📡 {agent_id} Radar: {radar_state}, "
-                                   f"SNR={radar_info.get('snr', 0):.1f}dB, "
-                                   f"Lock={radar_info.get('lock_quality', 0):.2f}")
-
-            # 敌方导弹状态
-            if hasattr(self, 'enemy_missiles'):
-                enemy_missile_status = [f"{k}:{v}" for k, v in self.enemy_missiles.items()]
-                logging.info(f"🚀 Enemy missiles: {', '.join(enemy_missile_status)}")
-
             logging.info(f"{'='*60}\n")
 
         except Exception as e:
@@ -1408,206 +1421,9 @@ class DragShootTacticalTask(MultipleCombatTask):
 
 
 
-    def _update_radar_state(self, env, agent_id: str, current_time: float):
-        """更新雷达状态 - 基于拖曳射击战术需求"""
-        if not env.agents[agent_id].is_alive:
-            return
-
-        # 找到最近的敌机
-        target = self._find_target(env, agent_id)
-        if not target:
-            self.radar_states[agent_id] = "SEARCH"
-            return
-
-        distance = self._calculate_distance(env.agents[agent_id], target)
-
-        # 根据距离和战术阶段确定雷达状态
-        if distance > 90000:  # 90km
-            self.radar_states[agent_id] = "SEARCH"
-        elif distance > 81000:  # 81km
-            self.radar_states[agent_id] = "SEARCH"
-        elif distance > 45000:  # 45km
-            self.radar_states[agent_id] = "TRACK"
-        else:  # < 45km
-            self.radar_states[agent_id] = "LOCK"
-
-        # 返航阶段重新搜索
-        if self.current_phase == TacticalPhase.DOR_DR and agent_id.startswith('A'):
-            self.radar_states[agent_id] = "SEARCH"
-
-    def _update_enemy_radar_state(self, env, agent_id: str, current_time: float):
-        """更新敌方SU-27雷达状态 - 增加基本功能"""
-        if not agent_id.startswith('B') or not env.agents[agent_id].is_alive:
-            return
-
-        # 找到最近的我方飞机
-        target = None
-        min_distance = float('inf')
-        target_angle_off = 0.0
-        
-        for my_id in ["A0100", "A0200"]:
-            if my_id in env.agents and env.agents[my_id].is_alive:
-                distance = self._calculate_distance(env.agents[agent_id], env.agents[my_id])
-                if distance < min_distance:
-                    min_distance = distance
-                    target = env.agents[my_id]
-                    
-                    # 计算角度偏移
-                    enemy_pos = env.agents[agent_id].get_position()
-                    enemy_vel = env.agents[agent_id].get_velocity()
-                    target_pos = target.get_position()
-                    
-                    if np.linalg.norm(enemy_vel) > 0:
-                        relative_vec = target_pos - enemy_pos
-                        angle = np.arccos(np.clip(
-                            np.dot(relative_vec, enemy_vel) / 
-                            (np.linalg.norm(relative_vec) * np.linalg.norm(enemy_vel)), -1, 1))
-                        target_angle_off = np.rad2deg(angle)
-        
-        if not target:
-            self.enemy_radar_states[agent_id] = "SEARCH"
-            self.enemy_radar_data[agent_id] = {"snr": 0.0, "doppler_shift": 0.0, "lock_quality": 0.0, "beam_angle": 0.0}
-            return
-
-        # SU-27雷达基本参数计算
-        enemy_altitude = env.agents[agent_id].get_position()[2]
-        target_altitude = target.get_position()[2]
-        target_velocity = np.linalg.norm(target.get_velocity())
-        
-        # 计算信噪比（简化模型）
-        # SU-27雷达信噪比比F-16稍低
-        base_snr = 15.0  # 基础信噪比
-        distance_factor = 1.0 / (1.0 + min_distance / 50000.0)  # 距离衰减
-        altitude_factor = 1.0 if enemy_altitude > 1000 else 0.7  # 低空衰减
-        angle_factor = 1.0 if abs(target_angle_off) < 60 else 0.8  # 角度衰减
-        
-        snr = base_snr * distance_factor * altitude_factor * angle_factor
-        
-        # 计算多普勒频移
-        relative_velocity = target_velocity - np.linalg.norm(env.agents[agent_id].get_velocity())
-        doppler_shift = relative_velocity * 0.1  # 简化多普勒计算
-        
-        # 计算锁定质量
-        lock_quality = 0.0
-        if min_distance <= 45000 and abs(target_angle_off) < 60:
-            lock_quality = 1.0 - (min_distance / 45000.0) * 0.3
-        
-        # 计算波束角度
-        beam_angle = target_angle_off
-        
-        # 更新雷达数据
-        self.enemy_radar_data[agent_id] = {
-            "snr": snr,
-            "doppler_shift": doppler_shift,
-            "lock_quality": lock_quality,
-            "beam_angle": beam_angle
-        }
-        
-        # 雷达状态判断（基于SNR和锁定质量）
-        if min_distance > 90000 or snr < 8.0:  # 90km或SNR过低
-            self.enemy_radar_states[agent_id] = "SEARCH"
-        elif min_distance > 70000 or snr < 10.0:  # 70km或SNR较低
-            self.enemy_radar_states[agent_id] = "SEARCH"
-        elif min_distance > 45000 or lock_quality < 0.5:  # 45km或锁定质量低
-            self.enemy_radar_states[agent_id] = "TRACK"
-        else:  # 近距离且锁定质量好
-            self.enemy_radar_states[agent_id] = "LOCK"
-
-    def _handle_enemy_missile_launch(self, env, agent_id: str, current_time: float):
-        """处理敌方R-27ER导弹发射"""
-        if not agent_id.startswith('B') or not env.agents[agent_id].is_alive:
-            return
-        
-        # 检查是否已发射
-        if self.enemy_missile_launched[agent_id]:
-            return
-        
-        # 检查剩余导弹
-        if self.enemy_missiles[agent_id] <= 0:
-            return
-        
-        # 找到最近的我方目标
-        target = None
-        min_distance = float('inf')
-        
-        for my_id in ["A0100", "A0200"]:
-            if my_id in env.agents and env.agents[my_id].is_alive:
-                distance = self._calculate_distance(env.agents[agent_id], env.agents[my_id])
-                if distance < min_distance:
-                    min_distance = distance
-                    target = env.agents[my_id]
-        
-        if not target:
-            return
-        
-        # R-27ER发射条件
-        radar_data = self.enemy_radar_data[agent_id]
-        should_launch = (
-            min_distance <= 100000 and  # 100km内
-            self.enemy_radar_states[agent_id] == "LOCK" and  # 雷达锁定
-            radar_data["snr"] > 10.0 and  # SNR足够
-            radar_data["lock_quality"] > 0.6 and  # 锁定质量好
-            self.enemy_missiles[agent_id] > 0  # 有剩余导弹
-        )
-        
-        if should_launch:
-            try:
-                # 创建R-27ER导弹（使用现有的MissileSimulator，但参数不同）
-                # 模仿我方导弹命名方式：B0100 → B1001, B1002
-                missile_count = 2 - self.enemy_missiles[agent_id] + 1  # 第1枚或第2枚导弹
-                base_id = agent_id[0] + agent_id[2:]  # B0100 → B100
-                missile_uid = f"{base_id}{missile_count}"  # B100 → B1001
-                
-                enemy_missile = MissileSimulator.create(
-                    parent=env.agents[agent_id],
-                    target=target,
-                    uid=missile_uid,
-                    missile_model="R-27ER"  # 使用不同的导弹模型
-                )
-                
-                # 修改导弹参数为R-27ER参数
-                enemy_missile._t_max = 150  # 最大飞行时间
-                enemy_missile._t_boost = 10.0  # 助推时间
-                enemy_missile._t_terminal = 20  # 末段制导开始时间
-                enemy_missile._Isp = 245  # 比冲
-                enemy_missile._Length = 4.08  # 长度
-                enemy_missile._Diameter = 0.23  # 直径
-                enemy_missile._cD = 0.28  # 阻力系数
-                enemy_missile._m0 = 253  # 初始质量
-                enemy_missile._fuel_mass = 65.0  # 燃料质量
-                enemy_missile._dm = enemy_missile._fuel_mass / enemy_missile._t_boost
-                enemy_missile._thrust = 15000  # 推力
-                enemy_missile._K = 3.5  # 比例导引系数
-                enemy_missile._nyz_max = 35  # 最大过载
-                enemy_missile._Rc = 35  # 爆炸半径
-                enemy_missile._v_min = 180  # 最小速度
-                enemy_missile._terminal_distance = 15000  # 末段制导启动距离
-                
-                # 添加到环境
-                env.add_temp_simulator(enemy_missile)
-                
-                # 初始化导弹记录系统（如果不存在）
-                if not hasattr(env, '_missile_records'):
-                    env._missile_records = {}
-                
-                # 记录敌方导弹信息
-                env._missile_records[missile_uid] = {
-                    'launcher': agent_id,
-                    'target': target.uid,
-                    'type': 'R-27ER',
-                    'status': 'LAUNCHED',
-                    'launch_time': current_time,
-                    'launch_position': env.agents[agent_id].get_position().copy(),
-                    'launch_velocity': env.agents[agent_id].get_velocity().copy()
-                }
-                
-                # 更新状态
-                self.enemy_missiles[agent_id] -= 1
-                self.enemy_missile_launched[agent_id] = True
-                
-                logging.info(f"*** 敌方R-27ER导弹发射 *** {agent_id} -> {target.uid}, "
-                            f"距离: {min_distance:.0f}m, SNR: {radar_data['snr']:.1f}dB, "
-                            f"导弹ID: {missile_uid}, 剩余导弹: {self.enemy_missiles[agent_id]}")
-                
-            except Exception as e:
-                logging.error(f"敌方导弹发射失败: {e}")
+    def get_radar_states(self):
+        """获取雷达状态 - 使用雷达管理器"""
+        from radar_manager import get_friendly_radar_states, get_enemy_radar_states
+        friendly_states = get_friendly_radar_states()
+        enemy_states = get_enemy_radar_states()
+        return {**friendly_states, **enemy_states}
