@@ -124,7 +124,16 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         # 当前战术阶段
         self.current_phase = TacticalPhase.NLT_MELD
-        self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
+
+        # 导弹发射冷却时间管理（替代一次性发射限制）
+        self.last_missile_launch_time = {"A0100": -999, "A0200": -999, "B0100": -999, "B0200": -999}
+
+        # 差异化冷却时间：友方前期积极发射，敌方保持原有节奏
+        self.friendly_missile_cooldown = 2.0   # 友方2秒冷却，支持快速连续发射
+        self.enemy_missile_cooldown = 10.0     # 敌方10秒冷却，保持原有逻辑
+
+        # 友方连续发射管理
+        self.friendly_burst_launch = {"A0100": 0, "A0200": 0}  # 记录连续发射次数
 
         # 雷达状态管理 - 使用雷达管理器
         from radar_manager import get_radar_manager
@@ -591,13 +600,15 @@ class DragShootTacticalTask(MultipleCombatTask):
             return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif self.current_phase == TacticalPhase.TR_DOR:
-            # 长机在TR_DOR阶段：发射导弹后执行左侧short_skate机动
-            if self.missile_launched.get(agent_id, False):
-                # 已发射导弹，执行精确的short_skate机动
-                current_time = env.current_step * env.time_interval
+            # 长机在TR_DOR阶段：检查是否应该执行short_skate机动
+            current_time = env.current_step * env.time_interval
+            # 如果已经发射过导弹且距离上次发射超过5秒，执行short_skate机动
+            last_launch = self.last_missile_launch_time.get(agent_id, -999)
+            if last_launch > 0 and (current_time - last_launch) > 5.0:
+                # 发射导弹后执行精确的short_skate机动
                 return self._execute_short_skate_precise(env, agent_id, current_time)
             else:
-                # 未发射导弹，继续精确的平稳飞行等待发射时机
+                # 继续精确的平稳飞行等待发射时机
                 return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif self.current_phase == TacticalPhase.DOR_DR:
@@ -654,10 +665,12 @@ class DragShootTacticalTask(MultipleCombatTask):
             return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif wingman_phase == TacticalPhase.TR_DOR:
-            # 僚机在TR_DOR阶段：发射导弹后执行左侧short_skate机动（参考长机逻辑）
-            if self.missile_launched.get(agent_id, False):
-                # 已发射导弹，执行精确的short_skate机动
-                current_time = env.current_step * env.time_interval
+            # 僚机在TR_DOR阶段：检查是否应该执行short_skate机动
+            current_time = env.current_step * env.time_interval
+            # 如果已经发射过导弹且距离上次发射超过5秒，执行short_skate机动
+            last_launch = self.last_missile_launch_time.get(agent_id, -999)
+            if last_launch > 0 and (current_time - last_launch) > 5.0:
+                # 发射导弹后执行精确的short_skate机动
                 return self._execute_short_skate_precise(env, agent_id, current_time)
             else:
                 # 未发射导弹，执行精确的左侧小crank指向敌机（小角度左转约10°）
@@ -1075,7 +1088,8 @@ class DragShootTacticalTask(MultipleCombatTask):
         """重置任务状态 - 学习pure_maneuver_task的reset模式"""
         super().reset(env)
         self.current_phase = TacticalPhase.NLT_MELD
-        self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
+        self.last_missile_launch_time = {"A0100": -999, "A0200": -999, "B0100": -999, "B0200": -999}
+        self.friendly_burst_launch = {"A0100": 0, "A0200": 0}
         self.initial_heading.clear()
         self.initial_altitude.clear()
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
@@ -1100,12 +1114,38 @@ class DragShootTacticalTask(MultipleCombatTask):
         return reward
 
     def _handle_missile_launch(self, env, agent_id: str, current_time: float):
-        """处理导弹发射 - 严格按照拖曳射击战术需求"""
+        """
+        处理导弹发射 - 友方前期积极发射策略
+
+        友方发射策略：
+        - MTR_TR和TR_DOR阶段：积极发射，2秒冷却，支持连续发射
+        - DOR_DR阶段（返航）：完全禁止发射
+        - 前期可一次性发射2枚导弹（距离40-48km时）
+
+        敌方发射策略：
+        - 保持原有逻辑：10秒冷却时间
+        - 不受返航限制影响
+        """
         if not env.agents[agent_id].is_alive:
             return
 
         # 检查导弹数量
         if env.agents[agent_id].num_missiles <= 0:
+            return
+
+        # 友方返航期间禁止发射导弹
+        if agent_id.startswith('A') and self.current_phase == TacticalPhase.DOR_DR:
+            logging.info(f"{agent_id} 返航期间禁止发射导弹")
+            return
+
+        # 差异化冷却时间检查
+        last_launch = self.last_missile_launch_time.get(agent_id, -999)
+        if agent_id.startswith('A'):  # 友方使用短冷却时间
+            cooldown = self.friendly_missile_cooldown
+        else:  # 敌方使用长冷却时间
+            cooldown = self.enemy_missile_cooldown
+
+        if current_time - last_launch < cooldown:
             return
 
         # 找到目标
@@ -1120,41 +1160,42 @@ class DragShootTacticalTask(MultipleCombatTask):
         # 根据拖曳射击战术确定发射条件
         should_launch = False
 
-        if agent_id == "A0100":  # 己方长机45km发射
-            should_launch = (self.current_phase == TacticalPhase.MTR_TR and
-                             44000 <= distance <= 47000 and not self.missile_launched.get(agent_id, False))
-        elif agent_id == "A0200":  # 己方僚机滞后发射（体现时间线滞后）
-            # 修复：使用僚机自己的阶段判断
-            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-            if leader_blue and leader_blue.is_alive:
-                wingman_distance = self._calculate_distance(env.agents[agent_id], leader_blue)
-                wingman_phase = self._get_wingman_phase_by_distance(wingman_distance)
-            else:
-                wingman_phase = self.current_phase
+        if agent_id == "A0100":  # 己方长机积极发射策略
+            # 扩展发射阶段：MTR_TR和TR_DOR阶段都可以发射
+            in_launch_phase = self.current_phase in [TacticalPhase.MTR_TR, TacticalPhase.TR_DOR]
+            # 扩展发射距离：40-50km范围内都可以发射
+            in_launch_range = 40000 <= distance <= 50000
 
-            # 僚机发射距离更近，体现滞后时间线
-            wingman_launch_min = 40000 - self.wingman_delay['TR_DOR_delay']  # 32km
-            wingman_launch_max = 45000 - self.wingman_delay['TR_DOR_delay']  # 35km
+            should_launch = in_launch_phase and in_launch_range
+
+            if should_launch:
+                logging.info(f"A0100长机发射条件满足: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
+        elif agent_id == "A0200":  # 己方僚机积极发射策略
+            # 扩展发射阶段：MTR_TR和TR_DOR阶段都可以发射
+            in_launch_phase = self.current_phase in [TacticalPhase.MTR_TR, TacticalPhase.TR_DOR]
+            # 僚机发射距离稍近一些：35-45km范围
+            in_launch_range = 35000 <= distance <= 45000
 
             # 添加速度检查，确保发射时飞机速度正常
             aircraft_speed = np.linalg.norm(env.agents[agent_id].get_velocity())
-            speed_ok = aircraft_speed > 150  # 确保速度大于200m/s
-            # 新增：避免向即将被击落的目标发射
+            speed_ok = aircraft_speed > 150
+
+            # 避免向即将被击落的目标发射
             if target_under_threat:
                 logging.info(f"A0200: 目标{target.uid}即将被击落，取消发射")
                 should_launch = False
             else:
-                should_launch = (wingman_phase == TacticalPhase.TR_DOR and
-                                 wingman_launch_min <= distance <= wingman_launch_max and
-                                 speed_ok and
-                                 not self.missile_launched.get(agent_id, False))
+                should_launch = in_launch_phase and in_launch_range and speed_ok
+
+                if should_launch:
+                    logging.info(f"A0200僚机发射条件满足: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
 
         elif agent_id == "B0100":  # 敌方长机 - 智能发射逻辑
             # 使用敌方AI的发射判断
             should_launch = self._enemy_should_launch_missile(env, agent_id, target, distance, current_time)
             
             # 更宽松的条件：在任何阶段，只要距离合适就发射
-            if not should_launch and distance <= 60000 and not self.missile_launched.get(agent_id, False):
+            if not should_launch and distance <= 60000:  # 移除missile_launched限制
                 logging.info(f"B0100宽松条件发射: 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km")
                 should_launch = True
         elif agent_id == "B0200":  # 敌方僚机 - 智能发射逻辑
@@ -1175,15 +1216,49 @@ class DragShootTacticalTask(MultipleCombatTask):
                     should_launch = should_launch or not self.second_launch_done.get(agent_id, False)
 
         if should_launch:
-            self._launch_missile(env, agent_id, target, current_time)
+            # 友方支持连续发射机制
+            if agent_id.startswith('A'):
+                self._launch_friendly_missiles(env, agent_id, target, current_time)
+            else:
+                self._launch_missile(env, agent_id, target, current_time)
+
+    def _launch_friendly_missiles(self, env, agent_id: str, target, current_time: float):
+        """友方连续发射机制 - 支持在合适条件下一次性发射多枚导弹"""
+        aircraft = env.agents[agent_id]
+        distance = self._calculate_distance(aircraft, target)
+
+        # 确定发射数量
+        missiles_to_launch = 1  # 默认发射1枚
+
+        # 在前期阶段且距离合适时，考虑发射2枚导弹
+        if (self.current_phase in [TacticalPhase.MTR_TR, TacticalPhase.TR_DOR] and
+            aircraft.num_missiles >= 2 and
+            40000 <= distance <= 48000):  # 最佳发射距离
+
+            # 检查是否已经进行过连续发射
+            burst_count = self.friendly_burst_launch.get(agent_id, 0)
+            if burst_count == 0:  # 第一次连续发射机会
+                missiles_to_launch = 2
+                self.friendly_burst_launch[agent_id] = 1
+                logging.info(f"{agent_id} 前期积极发射策略：一次性发射2枚导弹")
+
+        # 执行发射
+        for i in range(missiles_to_launch):
+            if aircraft.num_missiles > 0:
+                self._launch_missile(env, agent_id, target, current_time)
+                if i < missiles_to_launch - 1:  # 不是最后一枚导弹
+                    # 短暂延迟，模拟连续发射
+                    current_time += 0.5  # 0.5秒间隔
 
     def _enemy_should_launch_missile(self, env, agent_id: str, target, distance: float, current_time: float) -> bool:
         """敌方智能导弹发射判断"""
         # 基本条件检查
-        if self.missile_launched.get(agent_id, False):
+        if env.agents[agent_id].num_missiles <= 0:
             return False
 
-        if env.agents[agent_id].num_missiles <= 0:
+        # 敌方使用长冷却时间
+        last_launch = self.last_missile_launch_time.get(agent_id, -999)
+        if current_time - last_launch < self.enemy_missile_cooldown:
             return False
 
         # 使用敌方AI的威胁评估
@@ -1302,15 +1377,14 @@ class DragShootTacticalTask(MultipleCombatTask):
             # 更新状态
             aircraft.num_missiles -= 1
 
-            # 标记发射状态
+            # 更新发射时间记录（替代missile_launched机制）
+            self.last_missile_launch_time[agent_id] = current_time
+
+            # 保留第二轮发射标记（仅用于敌方特殊逻辑）
             if self.current_phase == TacticalPhase.DOR_DR and agent_id.startswith('B'):
-                # 第二轮发射
                 if not hasattr(self, 'second_launch_done'):
                     self.second_launch_done = {}
                 self.second_launch_done[agent_id] = True
-            else:
-                # 第一轮发射
-                self.missile_launched[agent_id] = True
 
             # 详细的导弹发射时间线日志
             distance_km = self._calculate_distance(aircraft, target)/1000
