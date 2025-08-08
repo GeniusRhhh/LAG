@@ -112,7 +112,7 @@ tactical_distances: {
 # 拖曳射击战术参数
 drag_shoot_tactics: {
   # 机动参数
-  crank_angle: 30.0,            # crank角度30度
+  crank_angle: 68.0,            # crank角度68度（优化编队间距至5.5海里）
   turn_rate: 8.0,               # 转弯率8度/秒
   short_skate_angle: 45.0,      # short_skate角度45度
   short_skate_duration: 5.0,    # short_skate持续时间5秒

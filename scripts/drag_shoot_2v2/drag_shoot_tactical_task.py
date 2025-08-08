@@ -453,6 +453,11 @@ class DragShootTacticalTask(MultipleCombatTask):
         if env.current_step % 25 == 0:
             self._print_detailed_status(env, current_time)
 
+        # 编队间距监控 - 专门监控30-90秒时间段（crank机动完成后到导弹发射前）
+        if (30.0 <= current_time <= 90.0 and
+            env.current_step % 15 == 0):  # 每3秒打印一次（15步 * 0.2秒/步 = 3秒）
+            self._print_formation_spacing(env, current_time)
+
         # 为每个智能体生成战术动作
         obs = {}
         share_obs = {}
@@ -573,7 +578,57 @@ class DragShootTacticalTask(MultipleCombatTask):
             return np.array([3, 4, 3])
     
     def _get_enemy_action(self, env, agent_id: str):
-        """敌方战术动作 - CAP任务short_skate返航逻辑"""
+        """敌方战术动作 - 使用增强AI系统"""
+        current_time = env.current_step * env.time_interval
+
+        # 使用增强的敌方AI系统获取指令索引
+        try:
+            import sys
+            import os
+            # 添加当前目录到Python路径
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+
+            from enemy_tactical_ai import get_enemy_tactical_command
+            altitude_cmd_id, heading_cmd_id, velocity_cmd_id = get_enemy_tactical_command(env, agent_id, current_time)
+
+            # 将指令索引转换为动作数组（兼容原有的动作空间）
+            # 原有动作空间似乎是[0-6, 0-8, 0-4]，需要映射到[0-14, 0-16, 0-6]
+
+            # 高度动作映射：[0-14] -> [0-6]
+            if altitude_cmd_id <= 6:
+                alt_action = altitude_cmd_id // 2  # 下降动作
+            elif altitude_cmd_id >= 8:
+                alt_action = min(6, 3 + (altitude_cmd_id - 7) // 2)  # 上升动作
+            else:
+                alt_action = 3  # 保持高度
+
+            # 航向动作映射：[0-16] -> [0-8]
+            if heading_cmd_id <= 7:
+                hdg_action = heading_cmd_id // 2  # 左转动作
+            elif heading_cmd_id >= 9:
+                hdg_action = min(8, 4 + (heading_cmd_id - 8) // 2)  # 右转动作
+            else:
+                hdg_action = 4  # 保持航向
+
+            # 速度动作映射：[0-6] -> [0-4]
+            vel_action = min(4, velocity_cmd_id * 4 // 6)
+
+            logging.debug(f"{agent_id} AI指令: [{altitude_cmd_id},{heading_cmd_id},{velocity_cmd_id}] -> 动作: [{alt_action},{hdg_action},{vel_action}]")
+
+            return np.array([alt_action, hdg_action, vel_action])
+
+        except ImportError:
+            logging.warning("Enemy tactical AI not available, using fallback logic")
+            # 回退到简化逻辑
+            return self._get_enemy_action_fallback(env, agent_id)
+        except Exception as e:
+            logging.error(f"{agent_id} 敌方AI执行错误: {e}")
+            return self._get_enemy_action_fallback(env, agent_id)
+
+    def _get_enemy_action_fallback(self, env, agent_id: str):
+        """敌方动作回退逻辑"""
         # 检查是否应该返航
         should_return = False
 
@@ -701,11 +756,11 @@ class DragShootTacticalTask(MultipleCombatTask):
             wingman_phase = self.current_phase  # 如果无法计算距离，使用全局阶段
 
         if wingman_phase == TacticalPhase.NLT_MELD:
-            # 右侧crank: 精确航向从0°调整至30°（右偏30°）
-            return self._maintain_heading_precise(env, agent_id, 30.0)
+            # 右侧crank: 精确航向从0°调整至68°（右偏68°）- 优化编队间距至5.5海里
+            return self._maintain_heading_precise(env, agent_id, 68.0)
 
         elif wingman_phase == TacticalPhase.MELD_MTR:
-            # 左侧crank: 精确航向从30°调整回0°（左转30°）
+            # 左侧crank: 精确航向从68°调整回0°（左转68°）- 回归编队
             return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif wingman_phase == TacticalPhase.MTR_TR:
@@ -1008,27 +1063,36 @@ class DragShootTacticalTask(MultipleCombatTask):
             return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
 
     def _maintain_heading_precise(self, env, agent_id, target_heading, duration=10.0):
-        """精确的航向保持"""
+        """精确的航向保持 - 优化长机航向控制精度"""
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
         current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
-        
+
         # 计算航向差值
         heading_diff = target_heading - current_heading
         while heading_diff > 180: heading_diff -= 360
         while heading_diff < -180: heading_diff += 360
-        
+
         # 默认索引
         altitude_cmd_id = 7  # 保持高度
         heading_cmd_id = 8   # 保持航向
         velocity_cmd_id = 3  # 保持速度
-        
-        # 精确航向控制
-        if abs(heading_diff) > 1.0:  # 1度精度
-            heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
-            if env.current_step % 100 == 0:  # 减少日志频率
-                logging.debug(f"{agent_id} 精确航向: 目标={target_heading:.1f}°, "
-                             f"当前={current_heading:.1f}°, 差值={heading_diff:.1f}°")
-        
+
+        # 针对长机A0100的超精确航向控制（目标0°）
+        if agent_id == "A0100" and target_heading == 0.0:
+            # 超精确控制：0.5度精度，确保长机保持正北向
+            if abs(heading_diff) > 0.5:
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+                if env.current_step % 50 == 0:  # 增加日志频率用于调试
+                    logging.debug(f"{agent_id} 超精确航向控制: 目标={target_heading:.1f}°, "
+                                 f"当前={current_heading:.1f}°, 差值={heading_diff:.1f}°")
+        else:
+            # 其他飞机的标准精确控制：1度精度
+            if abs(heading_diff) > 1.0:
+                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+                if env.current_step % 100 == 0:  # 减少日志频率
+                    logging.debug(f"{agent_id} 精确航向: 目标={target_heading:.1f}°, "
+                                 f"当前={current_heading:.1f}°, 差值={heading_diff:.1f}°")
+
         return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
 
     def _get_min_distance_to_enemy(self, env, agent_id: str):
@@ -1069,10 +1133,25 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         # 导入并使用新的敌方AI系统
         try:
+            import sys
+            import os
+            # 添加当前目录到Python路径
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+
             from enemy_tactical_ai import get_enemy_tactical_command
-            return get_enemy_tactical_command(env, agent_id, current_time)
-        except ImportError:
-            logging.warning("Enemy tactical AI not available, using fallback logic")
+            commands = get_enemy_tactical_command(env, agent_id, current_time)
+            logging.info(f"✅ {agent_id} 增强AI指令: {commands}")
+            return commands
+        except ImportError as e:
+            logging.warning(f"❌ Enemy tactical AI import failed: {e}, using fallback logic")
+            # 回退到原有逻辑
+            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+        except Exception as e:
+            logging.error(f"❌ {agent_id} 增强AI执行错误: {e}, using fallback logic")
+            import traceback
+            logging.error(f"详细错误信息: {traceback.format_exc()}")
             # 回退到原有逻辑
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
@@ -1347,9 +1426,57 @@ class DragShootTacticalTask(MultipleCombatTask):
                 # 第一轮发射
                 self.missile_launched[agent_id] = True
 
+            # 详细的导弹发射时间线日志
+            distance_km = self._calculate_distance(aircraft, target)/1000
             logging.info(f"🚀 MISSILE LAUNCH: {agent_id} -> {target.uid} at t={current_time:.1f}s, "
-                        f"distance={self._calculate_distance(aircraft, target)/1000:.1f}km, "
-                        f"missile_id={missile_uid}, remaining_missiles={aircraft.num_missiles}")
+                        f"distance={distance_km:.1f}km, missile_id={missile_uid}, remaining_missiles={aircraft.num_missiles}")
+
+            # 记录发射时间用于协调分析
+            if not hasattr(self, 'missile_launch_timeline'):
+                self.missile_launch_timeline = {}
+            self.missile_launch_timeline[agent_id] = {
+                'launch_time': current_time,
+                'phase': self.current_phase.value,
+                'distance': distance_km,
+                'target': target.uid,
+                'missile_type': missile_type
+            }
+
+            # 分析发射协调
+            logging.info(f"📊 导弹发射时间线分析:")
+            if agent_id == "A0100":
+                logging.info(f"   长机A0100发射: {current_time:.1f}s, 阶段={self.current_phase.value}, 距离={distance_km:.1f}km")
+            elif agent_id == "A0200":
+                logging.info(f"   僚机A0200发射: {current_time:.1f}s, 阶段={self.current_phase.value}, 距离={distance_km:.1f}km")
+                # 检查与长机的发射时间差
+                if "A0100" in self.missile_launch_timeline:
+                    leader_launch = self.missile_launch_timeline["A0100"]
+                    time_diff = current_time - leader_launch['launch_time']
+                    phase_diff = f"{leader_launch['phase']} -> {self.current_phase.value}"
+                    logging.info(f"   僚机发射延迟: {time_diff:.1f}s (相对于长机)")
+                    logging.info(f"   阶段变化: {phase_diff}")
+
+                    if time_diff > 30:
+                        logging.warning(f"⚠️  僚机发射延迟过大: {time_diff:.1f}s > 30s，可能影响掩护效果")
+                    elif time_diff < 0:
+                        logging.info(f"✅  僚机提前发射: {abs(time_diff):.1f}s，良好的战术协调")
+                    else:
+                        logging.info(f"✅  僚机发射时机合理: {time_diff:.1f}s延迟")
+
+            # 敌方发射分析
+            elif agent_id.startswith("B"):
+                logging.info(f"   敌方{agent_id}发射: {current_time:.1f}s, 阶段={self.current_phase.value}, 距离={distance_km:.1f}km")
+                # 分析敌方发射时机相对于我方的情况
+                our_launches = [k for k in self.missile_launch_timeline.keys() if k.startswith("A")]
+                if our_launches:
+                    earliest_our_launch = min([self.missile_launch_timeline[k]['launch_time'] for k in our_launches])
+                    enemy_delay = current_time - earliest_our_launch
+                    logging.info(f"   敌方发射延迟: {enemy_delay:.1f}s (相对于我方最早发射)")
+
+            # 打印当前所有发射记录
+            logging.info(f"📊 当前发射状态汇总:")
+            for launcher, data in self.missile_launch_timeline.items():
+                logging.info(f"   {launcher}: {data['launch_time']:.1f}s, {data['phase']}, {data['distance']:.1f}km -> {data['target']}")
 
         except Exception as e:
             logging.error(f"Failed to launch missile from {agent_id}: {e}")
@@ -1476,6 +1603,49 @@ class DragShootTacticalTask(MultipleCombatTask):
             return f"敌方AI:{heading_desc}+{alt_desc}+{speed_desc}"
         except:
             return "敌方AI:未知机动"
+
+    def _print_formation_spacing(self, env, current_time: float):
+        """打印编队间距信息 - 专门监控30-90秒时间段（crank机动完成后）"""
+        try:
+            # 获取我方长机和僚机
+            leader = env._jsbsims.get("A0100")
+            wingman = env._jsbsims.get("A0200")
+
+            if not leader or not wingman or not leader.is_alive or not wingman.is_alive:
+                return
+
+            # 计算编队间距
+            formation_distance = self._calculate_distance(leader, wingman)
+
+            # 转换为海里 (1海里 = 1852米)
+            distance_nm = formation_distance / 1852.0
+            distance_km = formation_distance / 1000.0
+
+            # 判断是否在标准范围内 (5-10海里)
+            in_range = 5.0 <= distance_nm <= 10.0
+            status_icon = "✅" if in_range else "⚠️"
+
+            # 获取飞机航向信息
+            leader_heading = np.rad2deg(leader.get_property_value(c.attitude_psi_rad))
+            wingman_heading = np.rad2deg(wingman.get_property_value(c.attitude_psi_rad))
+
+            # 打印编队间距信息（包含更多细节）
+            logging.info(f"🔍 CRANK机动后编队间距监控:")
+            logging.info(f"{status_icon} [{self.current_phase.value}] 时间: {current_time:.1f}s, "
+                        f"编队间距: {distance_km:.1f}km ({distance_nm:.1f}海里)")
+            logging.info(f"   长机A0100航向: {leader_heading:.1f}°, 僚机A0200航向: {wingman_heading:.1f}°")
+
+            # 如果超出标准范围，给出提示
+            if not in_range:
+                if distance_nm < 5.0:
+                    logging.warning(f"⚠️  编队间距过近！当前{distance_nm:.1f}海里 < 标准5海里")
+                else:
+                    logging.warning(f"⚠️  编队间距过远！当前{distance_nm:.1f}海里 > 标准10海里")
+            else:
+                logging.info(f"✅  编队间距符合标准！{distance_nm:.1f}海里在5-10海里范围内")
+
+        except Exception as e:
+            logging.error(f"编队间距监控失败: {e}")
 
 
 
