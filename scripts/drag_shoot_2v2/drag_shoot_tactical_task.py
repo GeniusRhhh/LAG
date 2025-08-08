@@ -7,14 +7,13 @@
 import logging
 import numpy as np
 import torch
-import math
 from enum import Enum
 from envs.JSBSim.tasks.multiplecombat_task import MultipleCombatTask
 from envs.JSBSim.model.baseline_actor import BaselineActor
 from envs.JSBSim.utils.utils import get_root_dir
 from envs.JSBSim.core.catalog import Catalog as c
 from envs.JSBSim.termination_conditions.termination_condition_base import BaseTerminationCondition
-from envs.JSBSim.tasks.pure_maneuvers import BasicManeuvers, CompositeManeuverExecutor, normalize_heading
+from envs.JSBSim.tasks.pure_maneuvers import BasicManeuvers, CompositeManeuverExecutor
 
 
 class DragShootTermination(BaseTerminationCondition):
@@ -83,7 +82,21 @@ class TacticalPhase(Enum):
 
 
 class DragShootTacticalTask(MultipleCombatTask):
-    """拖曳射击战术任务 - 基于pure_maneuver_task架构模式"""
+    """
+    拖曳射击战术任务 - 基于pure_maneuver_task架构模式
+
+    动作空间架构：
+    - 定义的动作空间: [41, 41, 41, 30] (继承自MultipleCombatTask，但实际不使用)
+    - 实际使用的动作空间: [15, 17, 7] (高层战术指令)
+    - 转换机制: 高层指令 → baseline模型 → 底层飞行控制
+
+    主要函数调用链：
+    normalize_action() → _process_drag_shoot_tactics() → _get_tactical_command_indices()
+    → _get_leader_command_indices() / _get_wingman_command_indices() / _get_enemy_command_indices()
+    → _use_lowlevel_policy() → baseline模型输出底层控制指令
+
+    平稳飞行指令: [7, 8, 3] = [高度0m变化, 航向0°变化, 速度0m/s变化]
+    """
 
     def __init__(self, config):
         """初始化拖曳射击任务 - 学习pure_maneuver_task的模式"""
@@ -141,30 +154,37 @@ class DragShootTacticalTask(MultipleCombatTask):
         self.enable_precise_maneuvers = True
         logging.info("🎯 精确机动系统已启用 - 集成 pure_maneuvers 控制")
 
-        # 指令数组 - 完全照抄pure_maneuver_task的定义
+        # 动作空间定义：[15, 17, 7] - 高层战术指令空间
+        # 这些指令通过baseline模型转换为底层飞行控制指令 [41, 41, 41, 30]
+
+        # 高度指令数组 (15个选项，索引0-14)
         self.norm_delta_altitude = np.array([
             -1500, -1000, -750, -500, -300, -150, -50, 0, 50, 150, 300, 500, 750, 1000, 1500
-        ]) / 1000.0
+        ]) / 1000.0  # 索引7 = 0m变化（平稳飞行）
+
+        # 航向指令数组 (17个选项，索引0-16)
         self.norm_delta_heading = np.array([
-            -np.pi,           # -180°
-            -2*np.pi/3,       # -120°
-            -np.pi/2,         # -90°
-            -5*np.pi/12,      # -75°
-            -np.pi/3,         # -60°
-            -np.pi/4,         # -45°
-            -np.pi/6,         # -30°
-            -np.pi/12,        # -15°
-            0,                # 0°
-            np.pi/12,         # 15°
-            np.pi/6,          # 30°
-            np.pi/4,          # 45°
-            np.pi/3,          # 60°
-            5*np.pi/12,       # 75°
-            np.pi/2,          # 90°
-            2*np.pi/3,        # 120°
-            np.pi             # 180°
+            -np.pi,           # 索引0:  -180°
+            -2*np.pi/3,       # 索引1:  -120°
+            -np.pi/2,         # 索引2:  -90°
+            -5*np.pi/12,      # 索引3:  -75°
+            -np.pi/3,         # 索引4:  -60°
+            -np.pi/4,         # 索引5:  -45°
+            -np.pi/6,         # 索引6:  -30°
+            -np.pi/12,        # 索引7:  -15°
+            0,                # 索引8:  0° (平稳飞行)
+            np.pi/12,         # 索引9:  15°
+            np.pi/6,          # 索引10: 30°
+            np.pi/4,          # 索引11: 45°
+            np.pi/3,          # 索引12: 60°
+            5*np.pi/12,       # 索引13: 75°
+            np.pi/2,          # 索引14: 90°
+            2*np.pi/3,        # 索引15: 120°
+            np.pi             # 索引16: 180°
         ])
-        self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 100.0
+
+        # 速度指令数组 (7个选项，索引0-6)
+        self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 100.0  # 索引3 = 0m/s变化（平稳飞行）
 
         # 加载baseline模型
         self._load_baseline_models()
@@ -236,7 +256,11 @@ class DragShootTacticalTask(MultipleCombatTask):
             self.my_lowlevel_policy = None
     
     def normalize_action(self, env, agent_id, action):
-        """动作归一化 - 学习pure_maneuver_task的模式"""
+        """
+        动作归一化 - 拖曳射击战术系统
+        注意：action参数在此实现中未使用，因为使用内部战术逻辑生成动作
+        但必须保留此参数以符合父类接口要求
+        """
         if agent_id not in env.agents or not env.agents[agent_id].is_alive:
             return np.array([0.0, 0.0, 0.0, 0.7])
 
@@ -479,8 +503,8 @@ class DragShootTacticalTask(MultipleCombatTask):
             obs[agent_id] = agent_obs
             share_obs[agent_id] = agent_obs
 
-            # 生成战术动作
-            tactical_action = self._get_tactical_action(env, agent_id)
+            # 注意：战术动作生成已集成到 normalize_action 方法中
+            # 通过 _get_tactical_command_indices 系统处理
 
             # 计算奖励
             reward = self._calculate_reward(env, agent_id)
@@ -533,150 +557,12 @@ class DragShootTacticalTask(MultipleCombatTask):
         pos2 = aircraft2.get_position()
         return np.linalg.norm(pos1 - pos2)
     
-    def _get_tactical_action(self, env, agent_id: str):
-        """生成战术动作 - 基于拖曳射击逻辑"""
-        # 根据智能体角色和当前阶段生成动作
-        if agent_id == "A0100":  # 己方长机
-            return self._get_leader_action(env, agent_id)
-        elif agent_id == "A0200":  # 己方僚机
-            return self._get_wingman_action(env, agent_id)
-        elif agent_id.startswith("B"):  # 敌方
-            return self._get_enemy_action(env, agent_id)
-        else:
-            # 默认平稳飞行
-            return np.array([3, 4, 3])  # 中性指令
+    # 注意：_get_tactical_action、_get_leader_action、_get_wingman_action 等函数已被删除
+    # 这些是废弃的旧动作系统，实际使用的是 _get_tactical_command_indices 系统
     
-    def _get_leader_action(self, env, agent_id: str):
-        """长机战术动作"""
-        if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
-            # 平稳飞行 (航向180°)
-            return np.array([3, 4, 3])  # 保持高度、航向、速度
-        elif self.current_phase == TacticalPhase.TR_DOR:
-            # 左侧short_skate (turn_angle=-45.0)
-            return np.array([3, 2, 3])  # 保持高度、左转、保持速度
-        elif self.current_phase == TacticalPhase.DOR_DR:
-            # 返航 (航向0°)
-            return np.array([3, 0, 3])  # 保持高度、大幅左转、保持速度
-        else:
-            return np.array([3, 4, 3])
-    
-    def _get_wingman_action(self, env, agent_id: str):
-        """僚机战术动作"""
-        if self.current_phase == TacticalPhase.NLT_MELD:
-            # 右侧crank (turn_angle=30.0)
-            return np.array([3, 6, 3])  # 保持高度、右转、保持速度
-        elif self.current_phase == TacticalPhase.MELD_MTR:
-            # 左侧crank (turn_angle=-30.0, 调整至180°)
-            return np.array([3, 2, 3])  # 保持高度、左转、保持速度
-        elif self.current_phase in [TacticalPhase.MTR_TR, TacticalPhase.TR_DOR]:
-            # 平稳飞行 (航向180°)
-            return np.array([3, 4, 3])  # 保持高度、航向、速度
-        elif self.current_phase == TacticalPhase.DOR_DR:
-            # 左侧short_skate后返航
-            return np.array([3, 2, 3])  # 保持高度、左转、保持速度
-        else:
-            return np.array([3, 4, 3])
-    
-    def _get_enemy_action(self, env, agent_id: str):
-        """敌方战术动作 - 使用增强AI系统"""
-        current_time = env.current_step * env.time_interval
+    # 注意：_get_enemy_action 函数已被删除，敌方AI现在通过 _get_enemy_command_indices 处理
 
-        # 使用增强的敌方AI系统获取指令索引
-        try:
-            import sys
-            import os
-            # 添加当前目录到Python路径
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
-
-            from enemy_tactical_ai import get_enemy_tactical_command
-            altitude_cmd_id, heading_cmd_id, velocity_cmd_id = get_enemy_tactical_command(env, agent_id, current_time)
-
-            # 将指令索引转换为动作数组（兼容原有的动作空间）
-            # 原有动作空间似乎是[0-6, 0-8, 0-4]，需要映射到[0-14, 0-16, 0-6]
-
-            # 高度动作映射：[0-14] -> [0-6]
-            if altitude_cmd_id <= 6:
-                alt_action = altitude_cmd_id // 2  # 下降动作
-            elif altitude_cmd_id >= 8:
-                alt_action = min(6, 3 + (altitude_cmd_id - 7) // 2)  # 上升动作
-            else:
-                alt_action = 3  # 保持高度
-
-            # 航向动作映射：[0-16] -> [0-8]
-            if heading_cmd_id <= 7:
-                hdg_action = heading_cmd_id // 2  # 左转动作
-            elif heading_cmd_id >= 9:
-                hdg_action = min(8, 4 + (heading_cmd_id - 8) // 2)  # 右转动作
-            else:
-                hdg_action = 4  # 保持航向
-
-            # 速度动作映射：[0-6] -> [0-4]
-            vel_action = min(4, velocity_cmd_id * 4 // 6)
-
-            logging.debug(f"{agent_id} AI指令: [{altitude_cmd_id},{heading_cmd_id},{velocity_cmd_id}] -> 动作: [{alt_action},{hdg_action},{vel_action}]")
-
-            return np.array([alt_action, hdg_action, vel_action])
-
-        except ImportError:
-            logging.warning("Enemy tactical AI not available, using fallback logic")
-            # 回退到简化逻辑
-            return self._get_enemy_action_fallback(env, agent_id)
-        except Exception as e:
-            logging.error(f"{agent_id} 敌方AI执行错误: {e}")
-            return self._get_enemy_action_fallback(env, agent_id)
-
-    def _get_enemy_action_fallback(self, env, agent_id: str):
-        """敌方动作回退逻辑"""
-        # 检查是否应该返航
-        should_return = False
-
-        # 条件1：队友被击落
-        if agent_id == "B0200":
-            if "B0100" not in env.agents or not env.agents["B0100"].is_alive:
-                should_return = True
-        elif agent_id == "B0100":
-            if "B0200" not in env.agents or not env.agents["B0200"].is_alive:
-                should_return = True
-
-        # 条件2：距离过近（进入危险区域）
-        current_pos = np.array([
-            env.agents[agent_id].get_property_value(c.position_long_gc_deg),
-            env.agents[agent_id].get_property_value(c.position_lat_gc_deg)
-        ])
-
-        # 计算与我方的最近距离
-        min_distance = float('inf')
-        for friendly_id in ["A0100", "A0200"]:
-            if friendly_id in env.agents and env.agents[friendly_id].is_alive:
-                friendly_pos = np.array([
-                    env.agents[friendly_id].get_property_value(c.position_long_gc_deg),
-                    env.agents[friendly_id].get_property_value(c.position_lat_gc_deg)
-                ])
-                distance = np.linalg.norm((current_pos - friendly_pos) * 111000)  # 转换为米
-                min_distance = min(min_distance, distance)
-
-        # 条件3：进入DOR_DR阶段，与我方同步返航
-        if self.current_phase == TacticalPhase.DOR_DR:
-            should_return = True
-
-        # 如果距离小于30km，返航
-        if min_distance < 30000:
-            should_return = True
-
-        if should_return:
-            # 执行short_skate返航机动
-            current_time = env.current_step * env.time_interval
-            action = self._execute_short_skate(env, agent_id, current_time)
-            # 转换为敌方动作格式 - 确保正确的动作空间转换
-            alt_action = max(0, min(6, action[0] - 4))  # 高度动作：7->3, 范围[0,6]
-            hdg_action = max(0, min(8, action[1] - 4))  # 航向动作：8->4, 范围[0,8]
-            vel_action = max(0, min(4, action[2]))      # 速度动作：保持原值, 范围[0,4]
-            return np.array([alt_action, hdg_action, vel_action])
-        else:
-            # 正常CAP巡逻：平稳飞行 (航向0°)
-            return np.array([3, 4, 3])  # 保持高度、航向、速度
+    # 注意：_get_enemy_action_fallback 函数已被删除，敌方AI现在通过 _get_enemy_command_indices 处理
     
     def _get_tactical_command_indices(self, env, agent_id: str):
         """生成战术指令索引 - 基于拖曳射击逻辑"""
@@ -688,8 +574,8 @@ class DragShootTacticalTask(MultipleCombatTask):
         elif agent_id.startswith("B"):  # 敌方
             return self._get_enemy_command_indices(env, agent_id)
         else:
-            # 默认平稳飞行
-            return 7, 8, 3  # 中性指令
+            # 默认平稳飞行：高度0m变化，航向0°变化，速度0m/s变化
+            return 7, 8, 3  # [15,17,7]动作空间中的平稳飞行指令
 
     def _get_leader_command_indices(self, env, agent_id: str):
         """长机战术指令索引 - 基于拖曳射击战术"""
@@ -701,7 +587,7 @@ class DragShootTacticalTask(MultipleCombatTask):
             return self._execute_short_skate(env, agent_id, current_time)
 
         if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
-            # 平稳飞行 - 朝北接敌（0°）- 使用精确航向保持
+            # 长机平稳飞行 - 朝北接敌（0°）- 使用精确航向保持
             return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif self.current_phase == TacticalPhase.TR_DOR:
@@ -1072,10 +958,10 @@ class DragShootTacticalTask(MultipleCombatTask):
         while heading_diff > 180: heading_diff -= 360
         while heading_diff < -180: heading_diff += 360
 
-        # 默认索引
-        altitude_cmd_id = 7  # 保持高度
-        heading_cmd_id = 8   # 保持航向
-        velocity_cmd_id = 3  # 保持速度
+        # 默认索引：[15,17,7]动作空间中的平稳飞行
+        altitude_cmd_id = 7  # 高度索引7 = 0m变化（保持高度）
+        heading_cmd_id = 8   # 航向索引8 = 0°变化（保持航向）
+        velocity_cmd_id = 3  # 速度索引3 = 0m/s变化（保持速度）
 
         # 针对长机A0100的超精确航向控制（目标0°）
         if agent_id == "A0100" and target_heading == 0.0:
