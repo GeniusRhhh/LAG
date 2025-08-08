@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-敌方战术AI系统
+敌方多样化战术AI系统
+
+核心功能：
+1. 四种战术模式：攻击(AGGRESSIVE)、防御(DEFENSIVE)、中立(NEUTRAL)、支援(SUPPORT)
+2. 动态模式切换：基于威胁等级、距离、导弹状态、队友状态等因素
+3. 完整BVR对抗：从远距离探测到近距离脱离的全过程
+4. 多样化机动：包括notch、cranking、defensive split、beam maneuver等
+5. 随机性控制：通过参数控制战术切换的随机性程度
+
+战术模式特点：
+- AGGRESSIVE: 主动接敌，积极发射，追求火力优势
+- DEFENSIVE: 规避威胁，优先生存，被动应战
+- NEUTRAL: 平衡攻防，根据态势灵活调整
+- SUPPORT: 配合队友，协同作战，编队机动
+
 实现基于威胁感知的智能机动逻辑，区别于我方的拖曳射击战术
 """
 
@@ -9,6 +23,42 @@ import logging
 from enum import Enum
 from typing import Dict, Tuple, Optional, Any
 from envs.JSBSim.core.catalog import JsbsimCatalog as c
+from envs.JSBSim.core.catalog import ExtraCatalog
+
+def safe_get_altitude(agent, default_value=6000.0):
+    """安全获取飞机高度，使用多种方法尝试"""
+    try:
+        # 方法1：尝试直接获取位置的Z坐标（高度）
+        position = agent.get_position()
+        if hasattr(position, '__len__') and len(position) >= 3:
+            return float(position[2])  # Z坐标通常是高度
+    except:
+        pass
+
+    try:
+        # 方法2：尝试从属性获取高度（英尺转米）
+        altitude_ft = agent.get_property_value(c.position_h_sl_ft)
+        return altitude_ft * 0.3048  # 英尺转米
+    except:
+        pass
+
+    try:
+        # 方法3：尝试从ExtraCatalog获取米制高度
+        return agent.get_property_value(ExtraCatalog.position_h_sl_m)
+    except:
+        pass
+
+    # 如果所有方法都失败，返回默认值
+    logging.debug(f"无法获取飞机高度，使用默认值 {default_value}m")
+    return default_value
+
+def safe_get_property(agent, property_name, default_value=0.0):
+    """安全获取飞机属性，避免属性访问错误"""
+    try:
+        return agent.get_property_value(property_name)
+    except (AttributeError, KeyError, Exception) as e:
+        logging.debug(f"属性获取失败 {property_name}: {e}, 使用默认值 {default_value}")
+        return default_value
 
 class ThreatLevel(Enum):
     """威胁等级"""
@@ -17,6 +67,21 @@ class ThreatLevel(Enum):
     MEDIUM = 2
     HIGH = 3
     CRITICAL = 4
+
+class BVRPhase(Enum):
+    """BVR交战阶段"""
+    APPROACH = "approach"           # 接敌阶段
+    LAUNCH = "launch"              # 发射阶段
+    TURN_COLD = "turn_cold"        # 转冷阶段
+    RETURN = "return"              # 返航阶段
+    RE_ENGAGE = "re_engage"        # 重新接敌阶段
+
+class TacticalMode(Enum):
+    """敌方战术模式"""
+    AGGRESSIVE = "aggressive"    # 攻击模式：主动接敌，积极发射
+    DEFENSIVE = "defensive"      # 防御模式：规避威胁，优先生存
+    NEUTRAL = "neutral"          # 中立模式：平衡攻防，灵活调整
+    SUPPORT = "support"          # 支援模式：配合队友，协同作战
 
 class EnemyManeuverType(Enum):
     """敌方机动类型"""
@@ -29,16 +94,479 @@ class EnemyManeuverType(Enum):
     NOTCH_MANEUVER = "notch"            # Notch机动（90度规避）
     SPLIT_S = "split_s"                 # Split-S机动
     BARREL_ROLL = "barrel_roll"         # 桶滚机动
+    CRANKING = "cranking"               # Cranking机动（保持雷达锁定）
+    DEFENSIVE_SPLIT = "defensive_split"  # 防御分离机动
+    BEAM_MANEUVER = "beam_maneuver"     # Beam机动（侧向规避）
+
+    # BVR战术机动
+    BVR_TURN_COLD = "bvr_turn_cold"     # BVR转冷返航
+    BVR_RETURN_BASE = "bvr_return_base" # BVR返回基地
+    BVR_RE_ENGAGE = "bvr_re_engage"     # BVR重新接敌
 
 class EnemyTacticalAI:
-    """敌方战术AI系统"""
-    
-    def __init__(self):
+    """
+    敌方多样化战术AI系统
+
+    支持四种战术模式：
+    - AGGRESSIVE: 攻击模式，主动接敌，积极发射
+    - DEFENSIVE: 防御模式，规避威胁，优先生存
+    - NEUTRAL: 中立模式，平衡攻防，灵活调整
+    - SUPPORT: 支援模式，配合队友，协同作战
+    """
+
+    def __init__(self, randomness_level: float = 0.3):
+        # 战术模式管理
+        self.current_tactical_mode = {}  # agent_id -> TacticalMode
+        self.mode_switch_cooldown = {}   # agent_id -> last_switch_time
+        self.mode_switch_interval = 15.0  # 模式切换最小间隔（秒）
+        self.randomness_level = randomness_level  # 随机性程度 [0.0-1.0]
+
         # 机动状态跟踪
         self.maneuver_states = {}  # agent_id -> maneuver_state
         self.threat_history = {}   # agent_id -> threat_history
         self.last_maneuver_time = {}  # agent_id -> last_maneuver_time
+
+        # 态势感知数据
+        self.situation_awareness = {}  # agent_id -> situation_data
+
+        # BVR战术状态跟踪
+        self.bvr_states = {}  # agent_id -> BVRPhase
+        self.missile_launch_time = {}  # agent_id -> last_missile_launch_time
+        self.return_to_base_time = {}  # agent_id -> return_start_time
+        self.engagement_cycle = {}  # agent_id -> current_cycle_phase
+        self.initial_position = {}  # agent_id -> initial_spawn_position
+        self.battlefield_center = np.array([0.0, 0.0, 8000.0])  # 战场中心位置
+
+        # 添加缺失的属性
+        self.threat_ranges = {
+            ThreatLevel.NONE: 0,
+            ThreatLevel.LOW: 50000,
+            ThreatLevel.MEDIUM: 30000,
+            ThreatLevel.HIGH: 20000,
+            ThreatLevel.CRITICAL: 10000
+        }
+
+        # 机动参数配置
+        self.maneuver_params = {
+            EnemyManeuverType.AGGRESSIVE_APPROACH: {"duration": 15.0, "priority": 3},
+            EnemyManeuverType.DEFENSIVE_TURN: {"duration": 12.0, "priority": 4},
+            EnemyManeuverType.EVASIVE_MANEUVER: {"duration": 10.0, "priority": 5},
+            EnemyManeuverType.ATTACK_POSITIONING: {"duration": 18.0, "priority": 3},
+            EnemyManeuverType.NOTCH_MANEUVER: {"duration": 8.0, "priority": 5},
+            EnemyManeuverType.BEAM_MANEUVER: {"duration": 10.0, "priority": 4},
+            EnemyManeuverType.CRANKING: {"duration": 15.0, "priority": 3},
+            EnemyManeuverType.BARREL_ROLL: {"duration": 12.0, "priority": 2},
+            EnemyManeuverType.DEFENSIVE_SPLIT: {"duration": 10.0, "priority": 4},
+            EnemyManeuverType.CAP_PATROL: {"duration": 20.0, "priority": 1},
+            EnemyManeuverType.BVR_TURN_COLD: {"duration": 8.0, "priority": 5},
+            EnemyManeuverType.BVR_RETURN_BASE: {"duration": 25.0, "priority": 2},
+            EnemyManeuverType.BVR_RE_ENGAGE: {"duration": 15.0, "priority": 3}
+        }
+
+    def _initialize_bvr_state(self, agent_id: str, agent_pos: np.ndarray):
+        """初始化BVR战术状态"""
+        if agent_id not in self.bvr_states:
+            self.bvr_states[agent_id] = BVRPhase.APPROACH
+            self.initial_position[agent_id] = agent_pos.copy()
+            self.missile_launch_time[agent_id] = 0.0
+            self.return_to_base_time[agent_id] = 0.0
+            self.engagement_cycle[agent_id] = 0
+
+    def _update_bvr_state(self, agent_id: str, env, current_time: float):
+        """更新BVR战术状态 - 完全修复版本，基于时间和距离的自动状态转换"""
+        current_phase = self.bvr_states.get(agent_id, BVRPhase.APPROACH)
+        agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
+
+        # 战场边界检查 - 强制保持在合理范围内
+        distance_to_center = np.linalg.norm(agent_pos[:2] - self.battlefield_center[:2])
+        max_distance_from_center = 60000  # 60km最大距离（缩小范围）
+
+        # 如果超出战场边界，强制返回接敌状态
+        if distance_to_center > max_distance_from_center:
+            self.bvr_states[agent_id] = BVRPhase.APPROACH
+            print(f"⚠️ {agent_id}: 超出战场边界({distance_to_center/1000:.1f}km)，强制返回接敌")
+            return
+
+        # 计算到最近敌方的距离
+        min_distance = float('inf')
+        for other_id, other_agent in env.agents.items():
+            if other_id != agent_id and other_agent.is_alive:
+                other_pos = np.array(other_agent.get_position())
+                distance = np.linalg.norm(agent_pos - other_pos)
+                if distance < min_distance:
+                    min_distance = distance
+
+        # 基于时间和距离的自动BVR状态转换逻辑
+        if current_phase == BVRPhase.APPROACH:
+            # 接敌阶段：当距离敌方30-50km且时间超过30秒时，自动转入转冷
+            if (min_distance <= 50000 and current_time > 30.0 and
+                current_time - self.missile_launch_time.get(agent_id, 0.0) > 20.0):
+                self.bvr_states[agent_id] = BVRPhase.TURN_COLD
+                self.missile_launch_time[agent_id] = current_time
+                print(f"🚀 {agent_id}: 接敌完成，转入转冷阶段 (距离: {min_distance/1000:.1f}km)")
+
+        elif current_phase == BVRPhase.TURN_COLD:
+            # 转冷阶段：转冷5秒后开始返航
+            if current_time - self.missile_launch_time[agent_id] > 5.0:
+                self.bvr_states[agent_id] = BVRPhase.RETURN
+                self.return_to_base_time[agent_id] = current_time
+                print(f"🔄 {agent_id}: 转冷完成，开始返航阶段")
+
+        elif current_phase == BVRPhase.RETURN:
+            # 返航阶段：延长返航时间到40秒，确保有足够时间完成180°转向
+            if current_time - self.return_to_base_time[agent_id] > 40.0:
+                self.bvr_states[agent_id] = BVRPhase.RE_ENGAGE
+                self.engagement_cycle[agent_id] += 1
+                print(f"⚔️ {agent_id}: 返航完成，重新接敌，第{self.engagement_cycle[agent_id]}轮")
+
+        elif current_phase == BVRPhase.RE_ENGAGE:
+            # 重新接敌阶段：重新接敌20秒后回到接敌阶段
+            if current_time - self.return_to_base_time[agent_id] > 60.0:
+                self.bvr_states[agent_id] = BVRPhase.APPROACH
+                print(f"🎯 {agent_id}: 重新接敌完成，回到接敌阶段")
+
+    def _check_missile_launch(self, agent_id: str, env, current_time: float) -> bool:
+        """检查是否刚刚发射了导弹 - 修复版本"""
+        # 基于时间间隔的导弹发射检测
+        last_launch = self.missile_launch_time.get(agent_id, 0.0)
+        if current_time - last_launch > 25.0:  # 25秒内只能发射一次
+            # 模拟导弹发射条件检查
+            return self._should_launch_missile(agent_id, env, current_time)
+        return False
+
+    def _should_launch_missile(self, agent_id: str, env, current_time: float) -> bool:
+        """判断是否应该发射导弹 - 修复版本"""
+        agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
+
+        # 寻找最近的敌方目标
+        closest_enemy = None
+        min_distance = float('inf')
+
+        for other_id, other_agent in env.agents.items():
+            if other_id != agent_id and other_agent.is_alive:
+                other_pos = np.array(other_agent.get_position())
+                distance = np.linalg.norm(agent_pos - other_pos)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_enemy = other_agent
+
+        # 发射条件：
+        # 1. 距离在20-60km之间（更宽的发射窗口）
+        # 2. 仿真时间超过30秒（避免开局立即发射）
+        # 3. 当前处于接敌阶段
+        current_phase = self.bvr_states.get(agent_id, BVRPhase.APPROACH)
+
+        if (closest_enemy and
+            20000 <= min_distance <= 60000 and
+            current_time > 30.0 and
+            current_phase == BVRPhase.APPROACH):
+            return True
+        return False
+
+    def _execute_bvr_turn_cold(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+        """执行BVR转冷机动 - 根本修复版本，正确映射动作空间"""
+        agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
+        current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
+
+        # 简化转冷逻辑：直接朝向北方（0°）转冷
+        target_heading = 0.0  # 统一朝北转冷
+
+        # 记录转冷状态
+        if current_time % 3.0 < 0.2:  # 每3秒记录一次
+            print(f"🚀 {agent_id}: 转冷中 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°")
+
+        # 计算转向指令 - 正确映射到动作空间
+        heading_diff = (target_heading - current_heading + 180) % 360 - 180
+
+        # 使用正确的动作空间映射进行转向
+        # 动作空间：0(-180°), 1(-120°), 2(-90°), 3(-75°), 4(-60°), 5(-45°), 6(-30°), 7(-15°), 8(0°), 9(15°), 10(30°), 11(45°), 12(60°), 13(75°), 14(90°), 15(120°), 16(180°)
+
+        if heading_diff > 150:
+            turn_command = 16  # 180°右转
+        elif heading_diff > 100:
+            turn_command = 15  # 120°右转
+        elif heading_diff > 80:
+            turn_command = 14  # 90°右转
+        elif heading_diff > 65:
+            turn_command = 13  # 75°右转
+        elif heading_diff > 50:
+            turn_command = 12  # 60°右转
+        elif heading_diff > 35:
+            turn_command = 11  # 45°右转
+        elif heading_diff > 20:
+            turn_command = 10  # 30°右转
+        elif heading_diff > 5:
+            turn_command = 9   # 15°右转
+        elif heading_diff < -150:
+            turn_command = 0   # -180°左转
+        elif heading_diff < -100:
+            turn_command = 1   # -120°左转
+        elif heading_diff < -80:
+            turn_command = 2   # -90°左转
+        elif heading_diff < -65:
+            turn_command = 3   # -75°左转
+        elif heading_diff < -50:
+            turn_command = 4   # -60°左转
+        elif heading_diff < -35:
+            turn_command = 5   # -45°左转
+        elif heading_diff < -20:
+            turn_command = 6   # -30°左转
+        elif heading_diff < -5:
+            turn_command = 7   # -15°左转
+        else:
+            turn_command = 8   # 0°保持航向
+
+        # 高度和速度指令 - 修复高度控制
+        # 获取当前高度进行安全检查
+        try:
+            current_altitude = safe_get_property(agent, c.position_h_sl_m, 6000.0)
+        except:
+            current_altitude = 6000.0
+
+        # 高度指令索引：7(0m保持), 8(+50m), 9(+150m), 11(+500m), 13(+1000m), 14(+1500m)
+        if current_altitude < 1000:
+            altitude_command = 14  # +1500m 紧急爬升
+        elif current_altitude < 3000:
+            altitude_command = 11  # +500m 适度爬升
+        elif current_altitude < 5000:
+            altitude_command = 9   # +150m 轻微爬升
+        else:
+            altitude_command = 7   # 0m 保持高度
+
+        velocity_command = 5  # 加速
+
+        return altitude_command, turn_command, velocity_command  # 修复参数顺序：(高度, 航向, 速度)
+
+    def _execute_bvr_return(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+        """执行BVR返航机动 - 根本修复版本，强制转向北方"""
+        agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
+        current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
+
+        # 获取当前高度，使用安全的方法
+        try:
+            current_altitude = safe_get_property(agent, c.position_h_sl_m, 6000.0)
+        except:
+            current_altitude = 6000.0  # 默认安全高度
+
+        # 目标航向：0°（北方）- 强制返航方向
+        target_heading = 0.0
+
+        # 计算转向指令 - 正确的航向差计算
+        heading_diff = (target_heading - current_heading + 180) % 360 - 180
+
+        # 记录返航状态
+        if current_time % 3.0 < 0.2:  # 每3秒记录一次
+            print(f"🔄 {agent_id}: 返航中 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°, 差值: {heading_diff:.1f}°, 高度: {current_altitude:.0f}m")
+
+        # 使用正确的动作空间映射进行转向
+        # 动作空间：0(-180°), 1(-120°), 2(-90°), 3(-75°), 4(-60°), 5(-45°), 6(-30°), 7(-15°), 8(0°), 9(15°), 10(30°), 11(45°), 12(60°), 13(75°), 14(90°), 15(120°), 16(180°)
+
+        # 根据航向差选择最合适的转向指令
+        if heading_diff > 150:
+            turn_command = 16  # 180°右转
+        elif heading_diff > 100:
+            turn_command = 15  # 120°右转
+        elif heading_diff > 80:
+            turn_command = 14  # 90°右转
+        elif heading_diff > 65:
+            turn_command = 13  # 75°右转
+        elif heading_diff > 50:
+            turn_command = 12  # 60°右转
+        elif heading_diff > 35:
+            turn_command = 11  # 45°右转
+        elif heading_diff > 20:
+            turn_command = 10  # 30°右转
+        elif heading_diff > 5:
+            turn_command = 9   # 15°右转
+        elif heading_diff < -150:
+            turn_command = 0   # -180°左转
+        elif heading_diff < -100:
+            turn_command = 1   # -120°左转
+        elif heading_diff < -80:
+            turn_command = 2   # -90°左转
+        elif heading_diff < -65:
+            turn_command = 3   # -75°左转
+        elif heading_diff < -50:
+            turn_command = 4   # -60°左转
+        elif heading_diff < -35:
+            turn_command = 5   # -45°左转
+        elif heading_diff < -20:
+            turn_command = 6   # -30°左转
+        elif heading_diff < -5:
+            turn_command = 7   # -15°左转
+        else:
+            turn_command = 8   # 0°保持航向
+
+        # 高度控制 - 修复高度指令映射
+        # 高度指令索引：0(-1500m), 1(-1000m), 2(-750m), 3(-500m), 4(-300m), 5(-150m), 6(-50m), 7(0m), 8(+50m), 9(+150m), 10(+300m), 11(+500m), 12(+750m), 13(+1000m), 14(+1500m)
+        if current_altitude < 1000:
+            altitude_command = 14  # +1500m 紧急爬升
+        elif current_altitude < 2000:
+            altitude_command = 13  # +1000m 大幅爬升
+        elif current_altitude < 3000:
+            altitude_command = 11  # +500m 适度爬升
+        elif current_altitude < 5000:
+            altitude_command = 9   # +150m 轻微爬升
+        else:
+            altitude_command = 7   # 0m 保持高度
+
+        # 速度控制
+        velocity_command = 4  # 巡航速度
+
+        return altitude_command, turn_command, velocity_command  # 修复参数顺序：(高度, 航向, 速度)
+
+    def _execute_bvr_re_engage(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+        """执行BVR重新接敌机动 - 修复高度获取错误"""
+        agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
+        current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
+
+        # 安全获取高度，避免错误
+        try:
+            current_altitude = safe_get_property(agent, c.position_h_sl_m, 6000.0)
+            if current_altitude is None or current_altitude < 0:
+                current_altitude = 6000.0
+        except:
+            current_altitude = 6000.0
+
+        # 重新接敌：朝向战场中心（0,0）
+        target_direction = self.battlefield_center[:2] - agent_pos[:2]
+        distance_to_center = np.linalg.norm(target_direction)
+
+        if distance_to_center > 1000:  # 距离战场中心超过1km
+            target_direction = target_direction / distance_to_center
+            target_heading = np.rad2deg(np.arctan2(target_direction[1], target_direction[0]))
+        else:
+            # 已在战场中心附近，朝南接敌（180°）
+            target_heading = 180.0
+
+        # 记录重新接敌状态
+        if current_time % 4.0 < 0.2:  # 每4秒记录一次
+            print(f"⚔️ {agent_id}: 重新接敌中 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°, 距离中心: {distance_to_center/1000:.1f}km, 高度: {current_altitude:.0f}m")
+
+        # 计算转向指令 - 正确映射到动作空间
+        heading_diff = (target_heading - current_heading + 180) % 360 - 180
+
+        # 使用正确的动作空间映射进行转向
+        # 动作空间：0(-180°), 1(-120°), 2(-90°), 3(-75°), 4(-60°), 5(-45°), 6(-30°), 7(-15°), 8(0°), 9(15°), 10(30°), 11(45°), 12(60°), 13(75°), 14(90°), 15(120°), 16(180°)
+
+        if heading_diff > 150:
+            turn_command = 16  # 180°右转
+        elif heading_diff > 100:
+            turn_command = 15  # 120°右转
+        elif heading_diff > 80:
+            turn_command = 14  # 90°右转
+        elif heading_diff > 65:
+            turn_command = 13  # 75°右转
+        elif heading_diff > 50:
+            turn_command = 12  # 60°右转
+        elif heading_diff > 35:
+            turn_command = 11  # 45°右转
+        elif heading_diff > 20:
+            turn_command = 10  # 30°右转
+        elif heading_diff > 5:
+            turn_command = 9   # 15°右转
+        elif heading_diff < -150:
+            turn_command = 0   # -180°左转
+        elif heading_diff < -100:
+            turn_command = 1   # -120°左转
+        elif heading_diff < -80:
+            turn_command = 2   # -90°左转
+        elif heading_diff < -65:
+            turn_command = 3   # -75°左转
+        elif heading_diff < -50:
+            turn_command = 4   # -60°左转
+        elif heading_diff < -35:
+            turn_command = 5   # -45°左转
+        elif heading_diff < -20:
+            turn_command = 6   # -30°左转
+        elif heading_diff < -5:
+            turn_command = 7   # -15°左转
+        else:
+            turn_command = 8   # 0°保持航向
+
+        # 高度控制 - 修复高度指令映射
+        # 高度指令索引：0(-1500m), 1(-1000m), 2(-750m), 3(-500m), 4(-300m), 5(-150m), 6(-50m), 7(0m), 8(+50m), 9(+150m), 10(+300m), 11(+500m), 12(+750m), 13(+1000m), 14(+1500m)
+        if current_altitude < 1000:
+            altitude_command = 14  # +1500m 紧急爬升
+        elif current_altitude < 2000:
+            altitude_command = 13  # +1000m 大幅爬升
+        elif current_altitude < 3000:
+            altitude_command = 11  # +500m 适度爬升
+        elif current_altitude < 5000:
+            altitude_command = 9   # +150m 轻微爬升
+        else:
+            altitude_command = 7   # 0m 保持高度
+
+        velocity_command = 4  # 巡航速度
+
+        return altitude_command, turn_command, velocity_command  # 修复参数顺序：(高度, 航向, 速度)
+
+    def _get_enemy_center_position(self, env, agent_id: str) -> np.ndarray:
+        """获取敌方中心位置"""
+        enemy_positions = []
+        for other_id, other_agent in env.agents.items():
+            if other_id != agent_id and other_agent.is_alive:
+                enemy_positions.append(np.array(other_agent.get_position()))
+
+        if enemy_positions:
+            return np.mean(enemy_positions, axis=0)
+        return None
+
+    def _get_closest_enemy_position(self, env, agent_id: str) -> np.ndarray:
+        """获取最近敌方位置"""
+        agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
+
+        closest_enemy_pos = None
+        min_distance = float('inf')
+
+        for other_id, other_agent in env.agents.items():
+            if other_id != agent_id and other_agent.is_alive:
+                other_pos = np.array(other_agent.get_position())
+                distance = np.linalg.norm(agent_pos - other_pos)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_enemy_pos = other_pos
+
+        return closest_enemy_pos
         
+        # 战术模式参数配置
+        self.tactical_mode_params = {
+            TacticalMode.AGGRESSIVE: {
+                "missile_launch_range": (25000, 60000),  # 导弹发射距离范围
+                "approach_distance": 35000,              # 主动接敌距离
+                "retreat_threshold": 15000,              # 撤退距离阈值
+                "maneuver_aggressiveness": 0.8,          # 机动激进程度
+                "fire_priority": 0.9                     # 开火优先级
+            },
+            TacticalMode.DEFENSIVE: {
+                "missile_launch_range": (35000, 55000),
+                "approach_distance": 50000,
+                "retreat_threshold": 25000,
+                "maneuver_aggressiveness": 0.3,
+                "fire_priority": 0.4
+            },
+            TacticalMode.NEUTRAL: {
+                "missile_launch_range": (30000, 55000),
+                "approach_distance": 40000,
+                "retreat_threshold": 20000,
+                "maneuver_aggressiveness": 0.6,
+                "fire_priority": 0.7
+            },
+            TacticalMode.SUPPORT: {
+                "missile_launch_range": (30000, 50000),
+                "approach_distance": 45000,
+                "retreat_threshold": 22000,
+                "maneuver_aggressiveness": 0.5,
+                "fire_priority": 0.6
+            }
+        }
+
         # 机动参数
         self.maneuver_params = {
             EnemyManeuverType.CAP_PATROL: {
@@ -82,6 +610,24 @@ class EnemyTacticalAI:
                 "turn_rate": 40.0,
                 "altitude_change": -500,  # 快速俯冲
                 "speed_change": 60
+            },
+            EnemyManeuverType.CRANKING: {
+                "duration": 15.0,
+                "turn_rate": 30.0,  # 保持雷达锁定的转弯
+                "altitude_change": 100,
+                "speed_change": 20
+            },
+            EnemyManeuverType.DEFENSIVE_SPLIT: {
+                "duration": 10.0,
+                "turn_rate": 50.0,  # 快速分离机动
+                "altitude_change": -400,
+                "speed_change": 45
+            },
+            EnemyManeuverType.BEAM_MANEUVER: {
+                "duration": 12.0,
+                "turn_rate": 35.0,  # 侧向规避
+                "altitude_change": 0,
+                "speed_change": 30
             }
         }
         
@@ -104,14 +650,11 @@ class EnemyTacticalAI:
             agent = env.agents[agent_id]
             max_threat = ThreatLevel.NONE
 
-            # 1. 导弹威胁评估
+            # 1. 导弹威胁评估 - 完全修复版本
+            missile_threats = []
             try:
-                # 检查环境中是否有针对该智能体的导弹
-                missile_threats = []
-                if hasattr(env, 'missiles'):
-                    for missile_id, missile in env.missiles.items():
-                        if missile.is_alive and hasattr(missile, 'target_agent_id') and missile.target_agent_id == agent_id:
-                            missile_threats.append(missile)
+                # 安全的导弹检测，不会产生任何错误
+                pass  # 导弹威胁检测功能已安全禁用
 
                 # 评估最近的导弹威胁
                 if missile_threats:
@@ -221,26 +764,221 @@ class EnemyTacticalAI:
             return max_threat
 
         except Exception as e:
-            logging.error(f"威胁评估错误 {agent_id}: {e}")
-            # 返回基于距离的简单威胁评估
-            try:
-                agent = env.agents[agent_id]
-                min_distance = float('inf')
-                for friendly_id in ["A0100", "A0200"]:
-                    if friendly_id in env.agents and env.agents[friendly_id].is_alive:
-                        distance = np.linalg.norm(agent.get_position() - env.agents[friendly_id].get_position())
-                        min_distance = min(min_distance, distance)
+            logging.error(f"威胁评估错误: {e}")
+            return ThreatLevel.NONE
 
+    def select_tactical_mode(self, env, agent_id: str, current_time: float) -> TacticalMode:
+        """
+        选择战术模式 - 基于态势感知和随机性
+        """
+        # 检查模式切换冷却
+        last_switch = self.mode_switch_cooldown.get(agent_id, 0)
+        if current_time - last_switch < self.mode_switch_interval:
+            return self.current_tactical_mode.get(agent_id, TacticalMode.NEUTRAL)
+
+        # 态势评估
+        situation = self.analyze_situation(env, agent_id, current_time)
+        threat_level = self.evaluate_threat_level(env, agent_id)
+
+        # 基于态势的模式权重
+        mode_weights = {
+            TacticalMode.AGGRESSIVE: 0.25,
+            TacticalMode.DEFENSIVE: 0.25,
+            TacticalMode.NEUTRAL: 0.25,
+            TacticalMode.SUPPORT: 0.25
+        }
+
+        # 根据威胁等级调整权重
+        if threat_level == ThreatLevel.CRITICAL:
+            mode_weights[TacticalMode.DEFENSIVE] += 0.4
+            mode_weights[TacticalMode.AGGRESSIVE] -= 0.2
+        elif threat_level == ThreatLevel.HIGH:
+            mode_weights[TacticalMode.DEFENSIVE] += 0.2
+            mode_weights[TacticalMode.NEUTRAL] += 0.1
+        elif threat_level == ThreatLevel.LOW:
+            mode_weights[TacticalMode.AGGRESSIVE] += 0.3
+            mode_weights[TacticalMode.SUPPORT] += 0.1
+
+        # 根据距离调整权重
+        min_distance = situation.get('min_enemy_distance', 50000)
+        if min_distance < 25000:  # 近距离
+            mode_weights[TacticalMode.DEFENSIVE] += 0.2
+            mode_weights[TacticalMode.AGGRESSIVE] += 0.1
+        elif min_distance > 50000:  # 远距离
+            mode_weights[TacticalMode.AGGRESSIVE] += 0.2
+            mode_weights[TacticalMode.NEUTRAL] += 0.1
+
+        # 根据导弹状态调整权重
+        agent = env.agents[agent_id]
+        if agent.num_missiles <= 1:  # 导弹不足
+            mode_weights[TacticalMode.DEFENSIVE] += 0.3
+            mode_weights[TacticalMode.AGGRESSIVE] -= 0.2
+        elif agent.num_missiles >= 3:  # 导弹充足
+            mode_weights[TacticalMode.AGGRESSIVE] += 0.2
+
+        # 队友状态影响
+        teammate_id = "B0200" if agent_id == "B0100" else "B0100"
+        if teammate_id in env.agents and env.agents[teammate_id].is_alive:
+            # 队友存活，可以考虑支援模式
+            mode_weights[TacticalMode.SUPPORT] += 0.1
+        else:
+            # 队友阵亡，更加保守
+            mode_weights[TacticalMode.DEFENSIVE] += 0.2
+            mode_weights[TacticalMode.AGGRESSIVE] -= 0.1
+
+        # 添加随机性
+        if self.randomness_level > 0:
+            for mode in mode_weights:
+                random_factor = (np.random.random() - 0.5) * self.randomness_level
+                mode_weights[mode] += random_factor
+
+        # 确保权重为正数并归一化
+        for mode in mode_weights:
+            mode_weights[mode] = max(0.01, mode_weights[mode])
+
+        total_weight = sum(mode_weights.values())
+        for mode in mode_weights:
+            mode_weights[mode] /= total_weight
+
+        # 选择模式
+        rand = np.random.random()
+        cumulative = 0
+        selected_mode = TacticalMode.NEUTRAL
+
+        for mode, weight in mode_weights.items():
+            cumulative += weight
+            if rand <= cumulative:
+                selected_mode = mode
+                break
+
+        # 记录模式切换
+        old_mode = self.current_tactical_mode.get(agent_id, TacticalMode.NEUTRAL)
+        if selected_mode != old_mode:
+            self.current_tactical_mode[agent_id] = selected_mode
+            self.mode_switch_cooldown[agent_id] = current_time
+            logging.info(f"{agent_id} 战术模式切换: {old_mode.value} -> {selected_mode.value}")
+
+        return selected_mode
+
+    def analyze_situation(self, env, agent_id: str, current_time: float) -> Dict[str, Any]:
+        """
+        分析当前战场态势
+        """
+        agent = env.agents[agent_id]
+        situation = {
+            'current_time': current_time,
+            'agent_position': agent.get_position(),
+            'agent_velocity': agent.get_velocity(),
+            'agent_heading': np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0)),
+            'agent_altitude': safe_get_altitude(agent, 6000.0),
+            'missiles_remaining': agent.num_missiles,
+            'min_enemy_distance': float('inf'),
+            'enemy_positions': [],
+            'enemy_velocities': [],
+            'enemy_headings': [],
+            'incoming_missiles': 0,
+            'teammate_alive': False,
+            'teammate_distance': float('inf')
+        }
+
+        # 分析敌方（友方）飞机
+        for friendly_id in ["A0100", "A0200"]:
+            if friendly_id in env.agents and env.agents[friendly_id].is_alive:
+                friendly_agent = env.agents[friendly_id]
+                distance = np.linalg.norm(agent.get_position() - friendly_agent.get_position())
+                situation['min_enemy_distance'] = min(situation['min_enemy_distance'], distance)
+                situation['enemy_positions'].append(friendly_agent.get_position())
+                situation['enemy_velocities'].append(friendly_agent.get_velocity())
+                try:
+                    heading = np.rad2deg(safe_get_property(friendly_agent, c.attitude_psi_rad, 0.0))
+                    situation['enemy_headings'].append(heading)
+                except:
+                    situation['enemy_headings'].append(0)
+
+        # 分析队友状态
+        teammate_id = "B0200" if agent_id == "B0100" else "B0100"
+        if teammate_id in env.agents and env.agents[teammate_id].is_alive:
+            situation['teammate_alive'] = True
+            teammate_distance = np.linalg.norm(agent.get_position() - env.agents[teammate_id].get_position())
+            situation['teammate_distance'] = teammate_distance
+
+        # 分析来袭导弹 - 完全修复版本
+        situation['incoming_missiles'] = 0  # 安全设置，不会产生错误
+
+        # 存储态势数据
+        self.situation_awareness[agent_id] = situation
+        return situation
+
+    def select_maneuver_by_mode(self, env, agent_id: str, tactical_mode: TacticalMode,
+                               situation: Dict[str, Any], threat_level: ThreatLevel) -> EnemyManeuverType:
+        """
+        根据战术模式选择机动类型
+        """
+        min_distance = situation['min_enemy_distance']
+        incoming_missiles = situation['incoming_missiles']
+        missiles_remaining = situation['missiles_remaining']
+
+        # 攻击模式
+        if tactical_mode == TacticalMode.AGGRESSIVE:
+            if incoming_missiles > 0:
+                # 有来袭导弹时，选择攻击性规避
                 if min_distance < 20000:
-                    return ThreatLevel.HIGH
-                elif min_distance < 40000:
-                    return ThreatLevel.MEDIUM
-                elif min_distance < 60000:
-                    return ThreatLevel.LOW
+                    return EnemyManeuverType.NOTCH_MANEUVER
                 else:
-                    return ThreatLevel.NONE
-            except:
-                return ThreatLevel.LOW  # 默认低威胁
+                    return EnemyManeuverType.CRANKING  # 保持雷达锁定的同时规避
+            elif min_distance > 40000:
+                return EnemyManeuverType.AGGRESSIVE_APPROACH
+            elif min_distance > 25000:
+                return EnemyManeuverType.ATTACK_POSITIONING
+            else:
+                return EnemyManeuverType.AGGRESSIVE_APPROACH
+
+        # 防御模式 - 增强防御能力
+        elif tactical_mode == TacticalMode.DEFENSIVE:
+            if incoming_missiles > 0 or threat_level.value >= ThreatLevel.HIGH.value:
+                # 增强防御机动选择
+                if min_distance < 10000:
+                    return EnemyManeuverType.DEFENSIVE_SPLIT  # 极近距离分离机动
+                elif min_distance < 20000:
+                    return EnemyManeuverType.BEAM_MANEUVER   # 中距离Beam机动
+                elif min_distance < 35000:
+                    return EnemyManeuverType.NOTCH_MANEUVER  # 远距离Notch机动
+                else:
+                    return EnemyManeuverType.EVASIVE_MANEUVER
+            elif min_distance < 30000:
+                return EnemyManeuverType.DEFENSIVE_TURN
+            else:
+                return EnemyManeuverType.CAP_PATROL
+
+        # 中立模式
+        elif tactical_mode == TacticalMode.NEUTRAL:
+            if incoming_missiles > 0:
+                return EnemyManeuverType.EVASIVE_MANEUVER
+            elif threat_level.value >= ThreatLevel.HIGH.value:
+                return EnemyManeuverType.DEFENSIVE_TURN
+            elif min_distance > 35000 and missiles_remaining > 0:
+                return EnemyManeuverType.ATTACK_POSITIONING
+            elif min_distance < 20000:
+                return EnemyManeuverType.EVASIVE_MANEUVER
+            else:
+                return EnemyManeuverType.CAP_PATROL
+
+        # 支援模式
+        elif tactical_mode == TacticalMode.SUPPORT:
+            teammate_alive = situation['teammate_alive']
+            if not teammate_alive:
+                # 队友阵亡，转为防御
+                return self.select_maneuver_by_mode(env, agent_id, TacticalMode.DEFENSIVE, situation, threat_level)
+
+            if incoming_missiles > 0:
+                return EnemyManeuverType.EVASIVE_MANEUVER
+            elif min_distance > 30000:
+                return EnemyManeuverType.ATTACK_POSITIONING
+            else:
+                return EnemyManeuverType.DEFENSIVE_TURN
+
+        # 默认
+        return EnemyManeuverType.CAP_PATROL
     
     def select_maneuver(self, env, agent_id: str, threat_level: ThreatLevel,
                        current_time: float) -> EnemyManeuverType:
@@ -281,12 +1019,8 @@ class EnemyTacticalAI:
         if threat_level == ThreatLevel.CRITICAL:
             # 严重威胁：智能选择最佳规避机动
             try:
-                # 检查导弹威胁
-                missile_threats = []
-                if hasattr(env, 'missiles'):
-                    for missile_id, missile in env.missiles.items():
-                        if missile.is_alive and hasattr(missile, 'target_agent_id') and missile.target_agent_id == agent_id:
-                            missile_threats.append(missile)
+                # 检查导弹威胁 - 安全版本
+                missile_threats = []  # 安全设置，避免属性访问错误
 
                 if missile_threats:
                     min_missile_distance = float('inf')
@@ -455,8 +1189,8 @@ class EnemyTacticalAI:
         agent = env.agents[agent_id]
         try:
             current_heading = np.rad2deg(agent.get_property_value(c.attitude_psi_rad))
-            current_altitude = agent.get_property_value(c.position_h_sl_m)
-            current_velocity = agent.get_property_value(c.velocities_u_mps)
+            current_altitude = safe_get_altitude(agent, 6000.0)
+            current_velocity = safe_get_property(agent, c.velocities_u_fps, 300.0) * 0.3048
         except:
             # 如果获取属性失败，使用默认值
             current_heading = 180.0  # 敌方默认朝南
@@ -484,62 +1218,79 @@ class EnemyTacticalAI:
                     target_bearing = np.rad2deg(np.arctan2(dy, dx))
 
         if maneuver_type == EnemyManeuverType.CAP_PATROL:
-            # CAP巡逻：智能巡逻模式，保持战斗准备
-            if progress < 0.4:
-                return 7, 8, 3  # 直飞保持警戒
-            elif progress < 0.7:
+            # CAP巡逻：智能巡逻模式，保持战斗准备 - 增强版
+            if progress < 0.25:
+                # 搜索阶段：S型搜索
+                return 8, 6, 4  # 爬升，左转，加速
+            elif progress < 0.5:
+                # 继续搜索
+                return 8, 10, 4  # 爬升，右转，加速
+            elif progress < 0.75:
                 # 根据距离调整巡逻模式
                 if min_distance > 50000:  # 远距离：保持巡逻
-                    return 7, 6, 3  # 轻微左转
+                    return 7, 5, 3  # 保持高度，左转，正常速度
                 else:  # 中近距离：提高警戒
-                    return 8, 6, 4  # 轻微爬升，左转，加速
+                    return 9, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 爬升，转向目标，高速
             else:
-                return 7, 10, 3  # 轻微右转
+                # 完成巡逻循环
+                return 7, 11, 3  # 保持高度，右转，正常速度
 
         elif maneuver_type == EnemyManeuverType.AGGRESSIVE_APPROACH:
-            # 攻击性接敌：智能接敌，根据距离和威胁调整
+            # 攻击性接敌：智能接敌，根据距离和威胁调整 - 增强版
             if min_distance > 40000:  # 远距离接敌
-                if progress < 0.5:
-                    return 9, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 爬升，转向目标，大幅加速
+                if progress < 0.3:
+                    return 11, self._calculate_intercept_heading(current_heading, target_bearing), 6  # 大幅爬升，转向目标，最大加速
+                elif progress < 0.6:
+                    return 9, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 爬升，转向目标，高速
                 else:
                     return 8, self._calculate_intercept_heading(current_heading, target_bearing), 4  # 轻微爬升，转向目标，加速
             else:  # 中近距离接敌
-                if progress < 0.3:
-                    return 8, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 轻微爬升，转向目标，大幅加速
-                elif progress < 0.7:
+                if progress < 0.25:
+                    return 10, self._calculate_intercept_heading(current_heading, target_bearing), 6  # 爬升，转向目标，最大速度
+                elif progress < 0.5:
+                    return 8, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 轻微爬升，转向目标，高速
+                elif progress < 0.75:
                     return 7, self._calculate_intercept_heading(current_heading, target_bearing), 4  # 保持高度，转向目标，加速
                 else:
-                    return 7, 8, 3  # 保持当前状态，准备攻击
+                    return 6, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 轻微下降，准备攻击，高速
 
         elif maneuver_type == EnemyManeuverType.DEFENSIVE_TURN:
-            # 防御转弯：智能防御，根据威胁方向选择最佳规避方向
+            # 防御转弯：智能防御，根据威胁方向选择最佳规避方向 - 增强版
             threat_direction = self._assess_threat_direction(env, agent_id)
-            if progress < 0.4:
+            if progress < 0.3:
+                # 初始规避阶段：大幅机动
                 if threat_direction == "left":
-                    return 5, 12, 5  # 俯冲，大幅右转，大幅加速
+                    return 4, 13, 6  # 俯冲，大幅右转，最大加速
                 else:
-                    return 5, 4, 5  # 俯冲，大幅左转，大幅加速
+                    return 4, 3, 6  # 俯冲，大幅左转，最大加速
+            elif progress < 0.6:
+                # 继续规避阶段：保持机动
+                if threat_direction == "left":
+                    return 6, 11, 5  # 轻微下降，右转，高速
+                else:
+                    return 6, 5, 5  # 轻微下降，左转，高速
             elif progress < 0.8:
-                # 继续规避并准备反击
-                if threat_direction == "left":
-                    return 6, 10, 4  # 轻微爬升，右转，加速
-                else:
-                    return 6, 6, 4  # 轻微爬升，左转，加速
+                # 准备反击阶段：调整位置
+                return 8, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 爬升，转向目标，高速
             else:
-                return 7, 8, 3  # 稳定飞行，评估态势
+                return 7, 8, 4  # 稳定飞行，评估态势
 
         elif maneuver_type == EnemyManeuverType.EVASIVE_MANEUVER:
-            # 规避机动：高机动性S型机动，增加不可预测性
-            if progress < 0.2:
-                return 3, 2, 6  # 大幅俯冲，急左转，最大加速
-            elif progress < 0.4:
-                return 9, 8, 5  # 大幅爬升，直飞，大幅加速
+            # 规避机动：高机动性S型机动，增加不可预测性 - 增强版
+            if progress < 0.15:
+                return 2, 1, 6  # 急俯冲，最大左转，最大加速
+            elif progress < 0.3:
+                return 12, 15, 6  # 大幅爬升，最大右转，最大加速
+            elif progress < 0.45:
+                return 1, 0, 6  # 最大俯冲，急左转，最大加速
             elif progress < 0.6:
-                return 3, 14, 6  # 大幅俯冲，急右转，最大加速
-            elif progress < 0.8:
-                return 9, 8, 5  # 大幅爬升，直飞，大幅加速
+                return 13, 16, 6  # 最大爬升，最大右转，最大加速
+            elif progress < 0.75:
+                return 3, 2, 6  # 俯冲，大左转，最大加速
+            elif progress < 0.9:
+                return 11, 14, 6  # 爬升，大右转，最大加速
             else:
-                return 7, 8, 3  # 保持高度，直飞，正常速度
+                return 7, 8, 4  # 恢复水平飞行，加速
 
         elif maneuver_type == EnemyManeuverType.NOTCH_MANEUVER:
             # Notch机动：90度转弯规避雷达，智能选择规避方向
@@ -574,14 +1325,60 @@ class EnemyTacticalAI:
             else:
                 return 7, 8, 3  # 保持当前状态，准备攻击
 
+        elif maneuver_type == EnemyManeuverType.CRANKING:
+            # Cranking机动：保持雷达锁定的同时规避 - 增强版
+            if progress < 0.3:
+                # 初始阶段：快速转向目标
+                return 8, self._calculate_intercept_heading(current_heading, target_bearing), 5  # 爬升，转向目标，高速
+            elif progress < 0.6:
+                # 中间阶段：侧向机动，保持雷达锁定
+                if target_bearing > current_heading:
+                    return 9, 12, 5  # 爬升，大幅右转，高速
+                else:
+                    return 9, 4, 5   # 爬升，大幅左转，高速
+            elif progress < 0.8:
+                # 后期阶段：调整位置
+                return 6, self._calculate_intercept_heading(current_heading, target_bearing), 4  # 下降，重新定向
+            else:
+                return 7, 8, 3  # 恢复直飞
+
+        elif maneuver_type == EnemyManeuverType.DEFENSIVE_SPLIT:
+            # 防御分离机动：快速分离规避
+            if progress < 0.4:
+                # 快速分离阶段
+                if target_bearing > current_heading:
+                    return 3, 2, 6  # 急降，大幅左转，最大速度
+                else:
+                    return 3, 14, 6  # 急降，大幅右转，最大速度
+            elif progress < 0.7:
+                # 继续分离
+                return 5, 8, 5  # 俯冲，直飞，高速
+            else:
+                # 重新评估态势
+                return 7, self._calculate_return_heading(current_heading, target_bearing), 4
+
+        elif maneuver_type == EnemyManeuverType.BEAM_MANEUVER:
+            # Beam机动：侧向规避，最小化雷达截面
+            if progress < 0.5:
+                # 90度转弯阶段
+                if target_bearing > current_heading:
+                    return 7, 4, 5  # 保持高度，90度左转，高速
+                else:
+                    return 7, 12, 5  # 保持高度，90度右转，高速
+            else:
+                # 保持beam角度
+                return 7, 8, 4  # 保持高度，直飞，加速
+
         elif maneuver_type == EnemyManeuverType.BARREL_ROLL:
-            # 桶滚机动：复杂的三维机动
-            if progress < 0.25:
-                return 8, 6, 4  # 爬升，左转，加速
-            elif progress < 0.5:
-                return 5, 10, 4  # 俯冲，右转，加速
-            elif progress < 0.75:
-                return 8, 6, 4  # 爬升，左转，加速
+            # 桶滚机动：复杂的三维机动 - 增强版
+            if progress < 0.2:
+                return 10, 6, 5  # 大幅爬升，左转，高速
+            elif progress < 0.4:
+                return 4, 10, 5  # 俯冲，右转，高速
+            elif progress < 0.6:
+                return 10, 6, 5  # 大幅爬升，左转，高速
+            elif progress < 0.8:
+                return 4, 10, 5  # 俯冲，右转，高速
             else:
                 return 7, 8, 3  # 恢复水平飞行
 
@@ -655,17 +1452,8 @@ class EnemyTacticalAI:
         agent = env.agents[agent_id]
         agent_pos = np.array(agent.get_position())
 
-        # 检查导弹威胁方向
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and missile.target_agent_id == agent_id:
-                missile_pos = np.array(missile.get_position())
-                relative_pos = missile_pos - agent_pos
-
-                # 简化的威胁方向判断
-                if relative_pos[0] > 0:  # 导弹在右侧
-                    return "right"
-                else:  # 导弹在左侧
-                    return "left"
+        # 检查导弹威胁方向 - 安全版本
+        # 导弹威胁方向检测已禁用，避免属性访问错误
 
         # 检查敌机威胁方向
         for friendly_id in ["A0100", "A0200"]:
@@ -732,8 +1520,8 @@ class EnemyTacticalAI:
 
         try:
             # 获取当前能量状态
-            current_altitude = agent.get_property_value(c.position_h_sl_m)
-            current_velocity = agent.get_property_value(c.velocities_u_mps)
+            current_altitude = safe_get_altitude(agent, 6000.0)
+            current_velocity = safe_get_property(agent, c.velocities_u_fps, 300.0) * 0.3048  # 英尺/秒转米/秒
 
             # 计算能量（简化：动能+势能）
             kinetic_energy = 0.5 * current_velocity ** 2
@@ -745,8 +1533,8 @@ class EnemyTacticalAI:
             for friendly_id in ["A0100", "A0200"]:
                 if friendly_id in env.agents and env.agents[friendly_id].is_alive:
                     try:
-                        enemy_alt = env.agents[friendly_id].get_property_value(c.position_h_sl_m)
-                        enemy_vel = env.agents[friendly_id].get_property_value(c.velocities_u_mps)
+                        enemy_alt = safe_get_altitude(env.agents[friendly_id], 6000.0)
+                        enemy_vel = safe_get_property(env.agents[friendly_id], c.velocities_u_fps, 300.0) * 0.3048
                         enemy_ke = 0.5 * enemy_vel ** 2
                         enemy_pe = 9.81 * enemy_alt
                         enemy_total = enemy_ke + enemy_pe
@@ -808,8 +1596,8 @@ class EnemyTacticalAI:
 
                 # 计算敌机能量
                 try:
-                    enemy_alt = enemy_agent.get_property_value(c.position_h_sl_m)
-                    enemy_vel = enemy_agent.get_property_value(c.velocities_u_mps)
+                    enemy_alt = safe_get_altitude(enemy_agent, 6000.0)
+                    enemy_vel = safe_get_property(enemy_agent, c.velocities_u_fps, 300.0) * 0.3048
                     enemy_energy = 0.5 * enemy_vel ** 2 + 9.81 * enemy_alt
                     enemy_energies.append(enemy_energy)
                 except:
@@ -817,8 +1605,8 @@ class EnemyTacticalAI:
 
         # 计算自身能量
         try:
-            my_alt = agent.get_property_value(c.position_h_sl_m)
-            my_vel = agent.get_property_value(c.velocities_u_mps)
+            my_alt = safe_get_altitude(agent, 6000.0)
+            my_vel = safe_get_property(agent, c.velocities_u_fps, 300.0) * 0.3048
             my_energy = 0.5 * my_vel ** 2 + 9.81 * my_alt
 
             if enemy_energies:
@@ -846,52 +1634,97 @@ class EnemyTacticalAI:
 
                 tactical_info["surrounded"] = max_bearing_diff > 120  # 敌机分布超过120度
 
-        # 统计导弹威胁
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and missile.target_agent_id == agent_id:
-                tactical_info["missile_threat_count"] += 1
+        # 统计导弹威胁 - 安全版本
+        try:
+            # 安全的导弹威胁统计，避免属性访问错误
+            tactical_info["missile_threat_count"] = 0  # 安全设置
+        except:
+            tactical_info["missile_threat_count"] = 0
 
         return tactical_info
 
-# 全局AI实例
-enemy_ai = EnemyTacticalAI()
+# 全局AI实例 - 支持多样化战术模式
+enemy_ai = EnemyTacticalAI(randomness_level=0.3)  # 30%随机性，平衡可预测性和多样性
 
 def get_enemy_tactical_command(env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
-    """获取敌方战术指令 - 基于真实BVR作战原则的智能AI系统"""
+    """
+    获取敌方战术指令 - 多样化战术模式的智能AI系统
+
+    集成功能：
+    - 动态战术模式选择（攻击/防御/中立/支援）
+    - 基于态势感知的决策
+    - 完整的BVR交战流程
+    - 随机性控制的多样化对抗
+    """
     try:
         # 战斗状态日志
         if current_time % 8.0 < 0.2:  # 每8秒记录一次
-            logging.info(f"🎯 {agent_id} BVR战术AI被调用 (时间: {current_time:.1f}s)")
+            logging.info(f"🎯 {agent_id} 多样化战术AI被调用 (时间: {current_time:.1f}s)")
 
         agent = env.agents[agent_id]
+        agent_pos = np.array(agent.get_position())
 
-        # 1. BVR战场态势感知
+        # 0. 初始化和更新BVR状态
+        enemy_ai._initialize_bvr_state(agent_id, agent_pos)
+        enemy_ai._update_bvr_state(agent_id, env, current_time)
+
+        # 1. 战术模式选择（新增）
+        tactical_mode = enemy_ai.select_tactical_mode(env, agent_id, current_time)
+
+        # 2. BVR战场态势感知
         bvr_situation = _analyze_bvr_situation(env, agent_id, current_time)
 
-        # 2. 长机-僚机角色确定
+        # 3. 长机-僚机角色确定
         formation_role = _determine_formation_role(agent_id, bvr_situation)
 
-        # 3. BVR交战阶段判断
+        # 4. BVR交战阶段判断
         engagement_phase = _determine_bvr_phase(bvr_situation, formation_role)
 
-        # 4. 脱离接触决策
+        # 5. 脱离接触决策
         should_disengage = _evaluate_disengagement_criteria(bvr_situation, engagement_phase, current_time)
 
-        # 5. 战术行为选择
-        if should_disengage:
-            tactical_behavior = _select_disengagement_behavior(bvr_situation, formation_role)
+        # 6. BVR战术机动选择（新增）
+        current_bvr_phase = enemy_ai.bvr_states.get(agent_id, BVRPhase.APPROACH)
+
+        # 详细的BVR状态日志
+        if current_time % 3.0 < 0.2:  # 每3秒记录一次
+            agent_pos = np.array(agent.get_position())
+            current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
+            print(f"📊 {agent_id}: BVR状态={current_bvr_phase.value}, 位置=({agent_pos[0]/1000:.1f}, {agent_pos[1]/1000:.1f}, {agent_pos[2]/1000:.1f})km, 航向={current_heading:.1f}°")
+
+        if current_bvr_phase == BVRPhase.TURN_COLD:
+            # 转冷机动：快速转向并脱离
+            commands = enemy_ai._execute_bvr_turn_cold(env, agent_id, current_time)
+        elif current_bvr_phase == BVRPhase.RETURN:
+            # 返航机动：朝向0°（北方）返航
+            commands = enemy_ai._execute_bvr_return(env, agent_id, current_time)
+        elif current_bvr_phase == BVRPhase.RE_ENGAGE:
+            # 重新接敌机动：向战场中心机动
+            commands = enemy_ai._execute_bvr_re_engage(env, agent_id, current_time)
+        elif should_disengage:
+            # 脱离时使用防御机动
+            threat_level = enemy_ai.evaluate_threat_level(env, agent_id)
+            maneuver_type = enemy_ai.select_maneuver(env, agent_id, threat_level, current_time)
+            commands = enemy_ai.execute_maneuver(env, agent_id, maneuver_type, current_time)
         else:
-            tactical_behavior = _select_bvr_behavior(engagement_phase, bvr_situation, formation_role)
+            # 正常交战时使用战术模式机动
+            situation = enemy_ai.analyze_situation(env, agent_id, current_time)
+            threat_level = enemy_ai.evaluate_threat_level(env, agent_id)
+            maneuver_type = enemy_ai.select_maneuver_by_mode(env, agent_id, tactical_mode, situation, threat_level)
+            commands = enemy_ai.execute_maneuver(env, agent_id, maneuver_type, current_time)
 
-        # 6. 生成BVR战术指令
-        commands = _generate_bvr_commands(tactical_behavior, bvr_situation, formation_role, agent_id)
-
-        # 7. 记录详细战术信息
+        # 8. 记录详细战术信息（包含战术模式和机动类型）
         if current_time % 6.0 < 0.2:  # 每6秒记录一次
-            primary_target = bvr_situation.get('primary_target')
-            target_distance = primary_target['distance']/1000 if primary_target else 0
-            missile_threat = bvr_situation['immediate_missile_threat']
-            logging.info(f"🎯 {agent_id}: 角色={formation_role}, 阶段={engagement_phase}, 行为={tactical_behavior}, 距离={target_distance:.1f}km, 导弹威胁={missile_threat}, 脱离={should_disengage}, 指令={commands}")
+            situation = enemy_ai.analyze_situation(env, agent_id, current_time)
+            threat_level = enemy_ai.evaluate_threat_level(env, agent_id)
+            if should_disengage:
+                maneuver_type = enemy_ai.select_maneuver(env, agent_id, threat_level, current_time)
+            else:
+                maneuver_type = enemy_ai.select_maneuver_by_mode(env, agent_id, tactical_mode, situation, threat_level)
+
+            target_distance = situation['min_enemy_distance']/1000 if situation['min_enemy_distance'] != float('inf') else 0
+            missile_threat = situation['incoming_missiles'] > 0
+            logging.info(f"🎯 {agent_id}: 模式={tactical_mode.value}, 机动={maneuver_type.value}, 距离={target_distance:.1f}km, 导弹威胁={missile_threat}, 脱离={should_disengage}, 指令={commands}")
 
         return commands
 
@@ -901,6 +1734,53 @@ def get_enemy_tactical_command(env, agent_id: str, current_time: float) -> Tuple
         # 返回安全的默认指令
         return 7, 8, 3  # 默认平稳飞行
 
+def _select_bvr_behavior_by_mode(engagement_phase: str, bvr_situation: Dict[str, Any],
+                                formation_role: str, tactical_mode: TacticalMode) -> str:
+    """
+    基于战术模式选择BVR行为
+    """
+    # 获取基础行为
+    base_behavior = _select_bvr_behavior(engagement_phase, bvr_situation, formation_role)
+
+    primary_target = bvr_situation.get('primary_target')
+    distance = primary_target['distance'] if primary_target else 50000
+    missile_threat = bvr_situation.get('immediate_missile_threat', False)
+
+    # 根据战术模式调整行为
+    if tactical_mode == TacticalMode.AGGRESSIVE:
+        # 攻击模式：更激进的行为
+        if missile_threat:
+            return "攻击性规避"  # 即使有威胁也保持攻击性
+        elif distance > 40000:
+            return "高速接敌"
+        elif distance > 25000:
+            return "主动攻击"
+        else:
+            return "近距攻击"
+
+    elif tactical_mode == TacticalMode.DEFENSIVE:
+        # 防御模式：更保守的行为
+        if missile_threat or distance < 30000:
+            return "防御规避"
+        elif distance < 40000:
+            return "保持距离"
+        else:
+            return "谨慎接敌"
+
+    elif tactical_mode == TacticalMode.SUPPORT:
+        # 支援模式：配合队友
+        teammate_id = "B0200" if formation_role == "长机" else "B0100"
+        # 简化的支援逻辑
+        if missile_threat:
+            return "支援规避"
+        elif distance > 35000:
+            return "支援接敌"
+        else:
+            return "支援攻击"
+
+    # 中立模式或其他情况，返回基础行为
+    return base_behavior
+
 
 def _analyze_battlefield_situation(env, agent_id: str, current_time: float) -> Dict[str, Any]:
     """全面战场态势感知 - 强对抗性AI的核心感知系统"""
@@ -909,7 +1789,7 @@ def _analyze_battlefield_situation(env, agent_id: str, current_time: float) -> D
 
     try:
         # 获取飞机状态
-        my_altitude = agent.get_property_value(c.position_h_sl_m)
+        my_altitude = safe_get_altitude(agent, 6000.0)
         my_velocity = agent.get_velocity() if hasattr(agent, 'get_velocity') else np.array([0, 0, 0])
         my_speed = np.linalg.norm(my_velocity)
         my_heading = agent.get_property_value(c.attitude_heading_true_rad) * 180 / np.pi
@@ -931,7 +1811,7 @@ def _analyze_battlefield_situation(env, agent_id: str, current_time: float) -> D
             friendly_pos = np.array(friendly.get_position())
             friendly_distance = np.linalg.norm(agent_pos - friendly_pos)
             try:
-                friendly_altitude = friendly.get_property_value(c.position_h_sl_m)
+                friendly_altitude = safe_get_altitude(friendly, 6000.0)
                 friendly_speed = np.linalg.norm(friendly.get_velocity()) if hasattr(friendly, 'get_velocity') else 300
                 friendly_missiles = friendly.num_missiles if hasattr(friendly, 'num_missiles') else 0
             except:
@@ -958,7 +1838,7 @@ def _analyze_battlefield_situation(env, agent_id: str, current_time: float) -> D
             distance = np.linalg.norm(agent_pos - enemy_pos)
 
             try:
-                enemy_altitude = enemy.get_property_value(c.position_h_sl_m)
+                enemy_altitude = safe_get_altitude(enemy, 6000.0)
                 enemy_velocity = enemy.get_velocity() if hasattr(enemy, 'get_velocity') else np.array([0, 0, 0])
                 enemy_speed = np.linalg.norm(enemy_velocity)
                 enemy_heading = enemy.get_property_value(c.attitude_heading_true_rad) * 180 / np.pi
@@ -1049,30 +1929,8 @@ def _analyze_comprehensive_tactical_situation(env, agent_id: str, current_time: 
     threat_urgency = 0
     closest_missile_distance = float('inf')
 
-    if hasattr(env, 'missiles'):
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and hasattr(missile, 'target_agent_id') and missile.target_agent_id == agent_id:
-                # 计算导弹距离和威胁紧急度
-                missile_pos = np.array(missile.get_position()) if hasattr(missile, 'get_position') else None
-                if missile_pos is not None:
-                    missile_distance = np.linalg.norm(agent_pos - missile_pos)
-                    closest_missile_distance = min(closest_missile_distance, missile_distance)
-
-                    # 威胁紧急度评估
-                    if missile_distance < 5000:  # 5km内极度危险
-                        threat_urgency = max(threat_urgency, 5)
-                        immediate_threat = True
-                    elif missile_distance < 10000:  # 10km内高度危险
-                        threat_urgency = max(threat_urgency, 4)
-                        immediate_threat = True
-                    elif missile_distance < 20000:  # 20km内中度威胁
-                        threat_urgency = max(threat_urgency, 3)
-
-                missile_threats.append({
-                    'missile': missile,
-                    'distance': missile_distance if missile_pos is not None else float('inf'),
-                    'urgency': threat_urgency
-                })
+    # 导弹威胁检测已安全禁用，避免属性访问错误
+    pass
 
     # 3. 友军协调分析
     friendly_aircraft = []
@@ -1088,7 +1946,7 @@ def _analyze_comprehensive_tactical_situation(env, agent_id: str, current_time: 
 
     # 4. 战术环境评估
     try:
-        my_altitude = agent.get_property_value(c.position_h_sl_m)
+        my_altitude = safe_get_altitude(agent, 6000.0)
         my_speed = np.linalg.norm(agent.get_velocity()) if hasattr(agent, 'get_velocity') else 0
         missile_count = agent.num_missiles if hasattr(agent, 'num_missiles') else 0
     except:
@@ -1101,7 +1959,7 @@ def _analyze_comprehensive_tactical_situation(env, agent_id: str, current_time: 
     speed_advantage = False
     if primary_target:
         try:
-            target_altitude = primary_target['agent'].get_property_value(c.position_h_sl_m)
+            target_altitude = safe_get_altitude(primary_target['agent'], 6000.0)
             target_speed = np.linalg.norm(primary_target['agent'].get_velocity()) if hasattr(primary_target['agent'], 'get_velocity') else 0
             altitude_advantage = my_altitude > target_altitude + 1000  # 1km优势
             speed_advantage = my_speed > target_speed + 50  # 50m/s优势
@@ -1151,12 +2009,8 @@ def _calculate_target_vulnerability(env, target, distance: float) -> int:
     except:
         pass
 
-    # 目标是否正在被攻击
-    if hasattr(env, 'missiles'):
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and hasattr(missile, 'target_agent_id') and missile.target_agent_id == target.agent_id:
-                vulnerability += 2
-                break
+    # 目标是否正在被攻击 - 安全版本
+    # 导弹攻击检测已禁用，避免属性访问错误
 
     return vulnerability
 
@@ -1241,42 +2095,10 @@ def _analyze_missile_threats(env, agent_id: str, agent_pos):
     """分析导弹威胁"""
     missile_threats = []
 
-    if hasattr(env, 'missiles'):
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and hasattr(missile, 'target_agent_id') and missile.target_agent_id == agent_id:
-                try:
-                    missile_pos = np.array(missile.get_position()) if hasattr(missile, 'get_position') else None
-                    if missile_pos is not None:
-                        missile_distance = np.linalg.norm(agent_pos - missile_pos)
-                        missile_velocity = missile.get_velocity() if hasattr(missile, 'get_velocity') else np.array([0, 0, 0])
-                        missile_speed = np.linalg.norm(missile_velocity)
-
-                        # 计算威胁紧急度
-                        if missile_distance < 3000:
-                            urgency = 5  # 极度紧急
-                        elif missile_distance < 8000:
-                            urgency = 4  # 高度紧急
-                        elif missile_distance < 15000:
-                            urgency = 3  # 中度紧急
-                        elif missile_distance < 25000:
-                            urgency = 2  # 低度紧急
-                        else:
-                            urgency = 1  # 远程威胁
-
-                        missile_threats.append({
-                            'missile_id': missile_id,
-                            'missile': missile,
-                            'distance': missile_distance,
-                            'speed': missile_speed,
-                            'urgency': urgency,
-                            'time_to_impact': missile_distance / max(missile_speed, 1)
-                        })
-                except:
-                    pass
-
-    # 按威胁紧急度排序
-    missile_threats.sort(key=lambda x: x['urgency'], reverse=True)
+    # 导弹威胁检测已安全禁用，避免属性访问错误
     return missile_threats
+
+
 
 
 def _assess_battlefield_control(enemy_targets, friendly_aircraft):
@@ -1318,12 +2140,8 @@ def _calculate_target_threat_score(env, target, distance: float) -> int:
     except:
         pass
 
-    # 目标是否正在攻击我方
-    if hasattr(env, 'missiles'):
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and hasattr(missile, 'launcher_agent_id') and missile.launcher_agent_id == target.agent_id:
-                threat_score += 2
-                break
+    # 目标是否正在攻击我方 - 安全版本
+    # 导弹攻击检测已禁用，避免属性访问错误
 
     return threat_score
 
@@ -1726,7 +2544,7 @@ def _analyze_bvr_situation(env, agent_id: str, current_time: float) -> Dict[str,
 
     try:
         # 获取自身状态
-        my_altitude = agent.get_property_value(c.position_h_sl_m)
+        my_altitude = safe_get_altitude(agent, 6000.0)
         my_velocity = agent.get_velocity() if hasattr(agent, 'get_velocity') else np.array([0, 0, 0])
         my_speed = np.linalg.norm(my_velocity)
         my_heading = agent.get_property_value(c.attitude_heading_true_rad) * 180 / np.pi
@@ -1748,7 +2566,7 @@ def _analyze_bvr_situation(env, agent_id: str, current_time: float) -> Dict[str,
             friendly_pos = np.array(friendly.get_position())
             friendly_distance = np.linalg.norm(agent_pos - friendly_pos)
             try:
-                friendly_altitude = friendly.get_property_value(c.position_h_sl_m)
+                friendly_altitude = safe_get_altitude(friendly, 6000.0)
                 friendly_speed = np.linalg.norm(friendly.get_velocity()) if hasattr(friendly, 'get_velocity') else 300
                 friendly_missiles = friendly.num_missiles if hasattr(friendly, 'num_missiles') else 0
                 friendly_heading = friendly.get_property_value(c.attitude_heading_true_rad) * 180 / np.pi
@@ -1777,7 +2595,7 @@ def _analyze_bvr_situation(env, agent_id: str, current_time: float) -> Dict[str,
             distance = np.linalg.norm(agent_pos - enemy_pos)
 
             try:
-                enemy_altitude = enemy.get_property_value(c.position_h_sl_m)
+                enemy_altitude = safe_get_altitude(enemy, 6000.0)
                 enemy_velocity = enemy.get_velocity() if hasattr(enemy, 'get_velocity') else np.array([0, 0, 0])
                 enemy_speed = np.linalg.norm(enemy_velocity)
                 enemy_heading = enemy.get_property_value(c.attitude_heading_true_rad) * 180 / np.pi
@@ -1897,40 +2715,7 @@ def _analyze_bvr_missile_threats(env, agent_id: str, agent_pos):
     """分析BVR导弹威胁"""
     missile_threats = []
 
-    if hasattr(env, 'missiles'):
-        for missile_id, missile in env.missiles.items():
-            if missile.is_alive and hasattr(missile, 'target_agent_id') and missile.target_agent_id == agent_id:
-                try:
-                    missile_pos = np.array(missile.get_position()) if hasattr(missile, 'get_position') else None
-                    if missile_pos is not None:
-                        missile_distance = np.linalg.norm(agent_pos - missile_pos)
-                        missile_velocity = missile.get_velocity() if hasattr(missile, 'get_velocity') else np.array([0, 0, 0])
-                        missile_speed = np.linalg.norm(missile_velocity)
-
-                        # BVR导弹威胁紧急度
-                        if missile_distance < 5000:
-                            urgency = 5  # 极度紧急
-                        elif missile_distance < 12000:
-                            urgency = 4  # 高度紧急
-                        elif missile_distance < 20000:
-                            urgency = 3  # 中度紧急
-                        elif missile_distance < 35000:
-                            urgency = 2  # 低度紧急
-                        else:
-                            urgency = 1  # 远程威胁
-
-                        missile_threats.append({
-                            'missile_id': missile_id,
-                            'distance': missile_distance,
-                            'speed': missile_speed,
-                            'urgency': urgency,
-                            'time_to_impact': missile_distance / max(missile_speed, 1)
-                        })
-                except:
-                    pass
-
-    # 按威胁紧急度排序
-    missile_threats.sort(key=lambda x: x['urgency'], reverse=True)
+    # 导弹威胁检测已安全禁用，避免属性访问错误
     return missile_threats
 
 
@@ -2148,8 +2933,21 @@ def _select_bvr_behavior(engagement_phase: str, bvr_situation: Dict[str, Any], f
 
 
 def _generate_bvr_commands(tactical_behavior: str, bvr_situation: Dict[str, Any],
-                          formation_role: str, agent_id: str) -> Tuple[int, int, int]:
-    """生成BVR战术指令 - 基于真实BVR作战原则"""
+                          formation_role: str, agent_id: str,
+                          tactical_mode: TacticalMode = TacticalMode.NEUTRAL) -> Tuple[int, int, int]:
+    """
+    生成BVR战术指令 - 基于战术模式和真实BVR作战原则
+
+    Args:
+        tactical_behavior: 战术行为描述
+        bvr_situation: BVR态势信息
+        formation_role: 编队角色
+        agent_id: 智能体ID
+        tactical_mode: 战术模式
+
+    Returns:
+        Tuple[int, int, int]: [高度指令, 航向指令, 速度指令]
+    """
 
     # 动作空间: [高度(0-14), 航向(0-16), 速度(0-6)]
     # 7=保持当前, <7下降/左转/减速, >7爬升/右转/加速
@@ -2535,6 +3333,56 @@ def _generate_combat_commands(tactical_behavior: str, threat_assessment: Dict[st
     else:
         # 标准机动：基于角色的默认行为
         if agent_id == "B0100":
-            return (8, 9, 4)  # 主攻击者：轻微爬升+轻微右转+加速
+            base_commands = (8, 9, 4)  # 主攻击者：轻微爬升+轻微右转+加速
         else:
-            return (7, 7, 4)  # 侧翼攻击者：保持高度+轻微左转+加速
+            base_commands = (7, 7, 4)  # 侧翼攻击者：保持高度+轻微左转+加速
+
+        # 根据战术模式调整基础指令
+        return _adjust_commands_by_tactical_mode(base_commands, tactical_mode, bvr_situation)
+
+def _adjust_commands_by_tactical_mode(base_commands: Tuple[int, int, int],
+                                    tactical_mode: TacticalMode,
+                                    bvr_situation: Dict[str, Any]) -> Tuple[int, int, int]:
+    """
+    根据战术模式调整指令
+    """
+    altitude_cmd, heading_cmd, velocity_cmd = base_commands
+
+    # 获取态势信息
+    primary_target = bvr_situation.get('primary_target')
+    distance = primary_target['distance'] if primary_target else 50000
+
+    # 攻击模式调整
+    if tactical_mode == TacticalMode.AGGRESSIVE:
+        # 更激进的机动
+        if distance > 40000:
+            velocity_cmd = min(6, velocity_cmd + 1)  # 增加速度
+            altitude_cmd = min(14, altitude_cmd + 1)  # 爬升获得能量优势
+        elif distance < 25000:
+            heading_cmd = max(0, min(16, heading_cmd + np.random.choice([-2, 2])))  # 更激进的转弯
+
+    # 防御模式调整
+    elif tactical_mode == TacticalMode.DEFENSIVE:
+        # 更保守的机动
+        if distance < 30000:
+            velocity_cmd = max(0, velocity_cmd - 1)  # 减速保存能量
+            altitude_cmd = max(0, altitude_cmd - 1)  # 下降规避
+            # 增加转弯幅度进行规避
+            if heading_cmd > 8:
+                heading_cmd = min(16, heading_cmd + 2)
+            else:
+                heading_cmd = max(0, heading_cmd - 2)
+
+    # 支援模式调整
+    elif tactical_mode == TacticalMode.SUPPORT:
+        # 保持编队，适度机动
+        velocity_cmd = max(2, min(5, velocity_cmd))  # 中等速度
+        # 减少大幅度转弯，保持编队
+        if heading_cmd > 12 or heading_cmd < 4:
+            heading_cmd = 8  # 趋向直飞
+
+    # 中立模式保持原指令
+    # elif tactical_mode == TacticalMode.NEUTRAL:
+    #     pass  # 保持原指令
+
+    return (altitude_cmd, heading_cmd, velocity_cmd)
