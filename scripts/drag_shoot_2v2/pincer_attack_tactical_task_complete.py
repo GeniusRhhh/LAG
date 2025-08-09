@@ -242,7 +242,12 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         current_time = env.current_step * env.time_interval
 
         # 处理钳形夹击战术逻辑
-        return self._process_pincer_attack_tactics(env, agent_id, current_time)
+        result = self._process_pincer_attack_tactics(env, agent_id, current_time)
+
+        # 处理导弹发射 - 添加友方导弹发射功能
+        self._handle_missile_launch(env, agent_id, current_time)
+
+        return result
 
     def _process_pincer_attack_tactics(self, env, agent_id, current_time):
         """处理钳形夹击战术逻辑 - 照抄drag_shoot_tactical_task的_process_drag_shoot_tactics"""
@@ -392,32 +397,86 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id, current_time):
-        """敌方战术指令索引 - 回退逻辑，复制拖曳射击项目"""
-        # 检查是否应该执行short_skate
-        should_return = False
+        """敌方战术指令索引 - 修复版：确保敌方AI指令真正控制飞机"""
+        try:
+            # 导入拖曳射击项目的敌方AI
+            from enemy_tactical_ai import get_enemy_tactical_command
 
-        # 条件1：队友被击落
-        if agent_id == "B0200":
-            if "B0100" not in env.agents or not env.agents["B0100"].is_alive:
-                should_return = True
-        elif agent_id == "B0100":
-            if "B0200" not in env.agents or not env.agents["B0200"].is_alive:
-                should_return = True
+            # 调用完整的敌方AI系统
+            commands = get_enemy_tactical_command(env, agent_id, current_time)
 
-        # 条件2：DOR_DR阶段
-        if self.current_phase == TacticalPhase.DOR_DR:
-            should_return = True
+            # 验证指令格式
+            if isinstance(commands, tuple) and len(commands) == 3:
+                alt_cmd, hdg_cmd, vel_cmd = commands
 
-        # 条件3：已经开始short_skate机动（防止中断）- 只对敌方有效
-        if agent_id.startswith('B') and agent_id in self.short_skate_states:
-            should_return = True
+                # 记录敌方AI决策和实际指令
+                if not hasattr(self, '_last_enemy_log_time'):
+                    self._last_enemy_log_time = {}
 
-        if should_return:
-            # 执行short_skate机动
-            return self._execute_short_skate_precise(env, agent_id, "north")
-        else:
-            # 正常战术机动 - 朝向友方
-            return self._maintain_heading_precise(env, agent_id, 180.0)
+                if current_time - self._last_enemy_log_time.get(agent_id, 0) > 5.0:  # 每5秒记录一次
+                    aircraft = env.agents[agent_id]
+                    pos = aircraft.get_position()
+                    heading = np.rad2deg(aircraft.get_property_value(c.attitude_psi_rad))
+                    print(f"[敌方AI] {agent_id}: 位置=({pos[0]/1000:.1f}, {pos[1]/1000:.1f})km, 航向={heading:.1f}°")
+                    print(f"[敌方AI] {agent_id}: 指令=({alt_cmd}, {hdg_cmd}, {vel_cmd}) - 高度:{alt_cmd}, 航向:{hdg_cmd}, 速度:{vel_cmd}")
+                    self._last_enemy_log_time[agent_id] = current_time
+
+                # 确保指令在有效范围内
+                alt_cmd = max(0, min(14, alt_cmd))  # 高度指令 0-14
+                hdg_cmd = max(0, min(16, hdg_cmd))  # 航向指令 0-16
+                vel_cmd = max(0, min(6, vel_cmd))   # 速度指令 0-6
+
+                return alt_cmd, hdg_cmd, vel_cmd
+            else:
+                logging.warning(f"敌方AI返回无效指令格式: {commands}")
+                return self._simple_enemy_fallback(env, agent_id)
+
+        except Exception as e:
+            logging.error(f"敌方AI调用失败 {agent_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            # 回退到简单机动
+            return self._simple_enemy_fallback(env, agent_id)
+
+    def _simple_enemy_fallback(self, env, agent_id):
+        """简单的敌方回退机动 - 确保有真正的机动"""
+        # 获取敌机位置和状态
+        enemy_aircraft = env.agents[agent_id]
+        enemy_pos = enemy_aircraft.get_position()
+        current_heading = np.rad2deg(enemy_aircraft.get_property_value(c.attitude_psi_rad))
+
+        # 寻找最近的友方目标
+        min_distance = float('inf')
+        closest_friendly_pos = None
+        for friendly_id in ["A0100", "A0200"]:
+            if friendly_id in env.agents and env.agents[friendly_id].is_alive:
+                friendly_pos = env.agents[friendly_id].get_position()
+                distance = np.linalg.norm(friendly_pos - enemy_pos)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_friendly_pos = friendly_pos
+
+        if closest_friendly_pos is None:
+            return 7, 8, 3  # 保持当前状态
+
+        # 基于距离的真正机动逻辑
+        if min_distance > 40000:  # 40km以上：指向友方接敌
+            target_heading = self._calculate_bearing_to_target(enemy_pos, closest_friendly_pos)
+            print(f"[敌方回退] {agent_id}: 接敌机动，目标航向{target_heading:.1f}°")
+            return self._maintain_heading_precise(env, agent_id, target_heading)
+
+        elif min_distance > 25000:  # 25-40km：执行Crank机动
+            if agent_id == "B0100":
+                target_heading = (current_heading + 45) % 360  # 右转45°
+            else:
+                target_heading = (current_heading - 45) % 360  # 左转45°
+            print(f"[敌方回退] {agent_id}: Crank机动，当前{current_heading:.1f}° -> 目标{target_heading:.1f}°")
+            return self._maintain_heading_precise(env, agent_id, target_heading)
+
+        else:  # 25km以下：Cold Turn返航
+            target_heading = 0.0  # 敌方基地在北方
+            print(f"[敌方回退] {agent_id}: Cold Turn返航，目标航向{target_heading:.1f}°")
+            return self._maintain_heading_precise(env, agent_id, target_heading)
 
     # ========== 精确航向保持和机动方法 ==========
     def _maintain_heading_precise(self, env, agent_id, target_heading):
@@ -592,3 +651,214 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             infos[agent_id] = {"agent_id": agent_id, "alive": True, "phase": self.current_phase.value}
 
         return obs, share_obs, rewards, dones, infos
+
+    def _handle_missile_launch(self, env, agent_id: str, current_time: float):
+        """
+        处理导弹发射 - 修复版：更宽松的发射条件，参考拖曳射击项目
+        """
+        # 检查导弹数量
+        if env.agents[agent_id].num_missiles <= 0:
+            return
+
+        # 友方返航期间禁止发射导弹
+        if agent_id.startswith('A') and self.current_phase == TacticalPhase.DOR_DR:
+            logging.info(f"{agent_id} 返航期间禁止发射导弹")
+            return
+
+        # 检查冷却时间
+        last_launch = self.last_missile_launch_time.get(agent_id, -999)
+        if agent_id.startswith('A'):
+            cooldown = self.friendly_missile_cooldown
+        else:
+            cooldown = self.enemy_missile_cooldown
+
+        if current_time - last_launch < cooldown:
+            return
+
+        # 寻找目标
+        target = None
+        min_distance = float('inf')
+        for other_id, other_aircraft in env.agents.items():
+            if self._is_enemy_agent(agent_id, other_id) and other_aircraft.is_alive:
+                distance = self._calculate_distance(env.agents[agent_id], other_aircraft)
+                if distance < min_distance:
+                    min_distance = distance
+                    target = other_aircraft
+
+        if target is None:
+            return
+
+        # 修复版导弹发射逻辑：更宽松的条件
+        should_launch = False
+
+        if agent_id == "A0100":  # 友方长机
+            # 更宽松的发射条件：多个阶段都可以发射
+            if (self.current_phase in [TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR, TacticalPhase.TR_DOR] and
+                min_distance <= 60000):  # 60km内都可以发射
+                should_launch = True
+                logging.info(f"🚀 A0100长机发射: 阶段={self.current_phase.value}, 距离={min_distance/1000:.1f}km")
+
+        elif agent_id == "A0200":  # 友方僚机
+            # 僚机稍微滞后，但条件也很宽松
+            if (self.current_phase in [TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR, TacticalPhase.TR_DOR] and
+                min_distance <= 55000):  # 55km内可以发射
+                should_launch = True
+                logging.info(f"🚀 A0200僚机发射: 阶段={self.current_phase.value}, 距离={min_distance/1000:.1f}km")
+
+        elif agent_id.startswith('B'):  # 敌方
+            # 敌方也可以发射导弹
+            if min_distance <= 50000:  # 50km内发射
+                should_launch = True
+                logging.info(f"🚀 {agent_id}敌方发射: 阶段={self.current_phase.value}, 距离={min_distance/1000:.1f}km")
+
+        if should_launch:
+            # 执行发射
+            if agent_id.startswith('A'):
+                self._launch_friendly_missiles(env, agent_id, target, current_time)
+            else:
+                self._launch_missile(env, agent_id, target, current_time)
+
+    def _is_enemy_agent(self, agent_id1: str, agent_id2: str) -> bool:
+        """判断是否为敌方"""
+        return (agent_id1.startswith('A') and agent_id2.startswith('B')) or \
+               (agent_id1.startswith('B') and agent_id2.startswith('A'))
+
+    def _launch_friendly_missiles(self, env, agent_id: str, target, current_time: float):
+        """友方连续发射机制 - 复制拖曳射击项目的实现"""
+        aircraft = env.agents[agent_id]
+        distance = self._calculate_distance(aircraft, target)
+
+        # 确定发射数量
+        missiles_to_launch = 1  # 默认发射1枚
+
+        # 在MTR-TR阶段且距离合适时，考虑发射2枚导弹
+        if (self.current_phase == TacticalPhase.MTR_TR and
+            aircraft.num_missiles >= 2 and
+            41000 <= distance <= 45000):  # MTR-TR阶段最佳发射距离
+
+            # 检查是否已经进行过连续发射
+            if not hasattr(self, 'friendly_burst_launch'):
+                self.friendly_burst_launch = {"A0100": 0, "A0200": 0}
+
+            burst_count = self.friendly_burst_launch.get(agent_id, 0)
+            if burst_count == 0:  # 第一次连续发射机会
+                missiles_to_launch = 2
+                self.friendly_burst_launch[agent_id] = 1
+                logging.info(f"{agent_id} 钳形夹击积极发射策略：一次性发射2枚导弹")
+
+        # 执行发射
+        for i in range(missiles_to_launch):
+            if aircraft.num_missiles > 0:
+                self._launch_missile(env, agent_id, target, current_time)
+                if i < missiles_to_launch - 1:  # 不是最后一枚导弹
+                    # 短暂延迟，模拟连续发射
+                    current_time += 0.5  # 0.5秒间隔
+
+    def _launch_missile(self, env, agent_id: str, target, current_time: float):
+        """发射导弹 - 修复版：完全复制拖曳射击项目的导弹创建逻辑"""
+        try:
+            aircraft = env.agents[agent_id]
+
+            # 创建导弹ID - 使用正确的格式 A0100 → A1001, A1002
+            missile_count = 2 - aircraft.num_missiles + 1  # 第1枚或第2枚导弹
+            # A0100 → A100, B0100 → B100
+            base_id = agent_id[0] + agent_id[2:]  # A0100 → A100
+            missile_uid = f"{base_id}{missile_count}"  # A100 → A1001
+
+            # 根据发射平台选择导弹类型 - 完全复制拖曳射击项目
+            if agent_id.startswith('A'):  # 我方飞机 - 使用AIM-120C7
+                try:
+                    from envs.JSBSim.core.simulatior import MissileSimulator
+                    missile = MissileSimulator.create(
+                        parent=aircraft,
+                        target=target,
+                        uid=missile_uid
+                    )
+                    missile_type = "AIM-120C-7"
+
+                    # 添加到环境的临时模拟器 - 关键步骤！
+                    env.add_temp_simulator(missile)
+                    logging.info(f"✅ 友方导弹{missile_uid}已添加到环境")
+
+                except Exception as missile_error:
+                    logging.error(f"友方导弹创建失败: {missile_error}")
+                    missile_type = "AIM-120C-7"
+
+            else:  # 敌方飞机 - 使用R-27ER
+                try:
+                    from r27er_missile import R27ERMissileSimulator
+                    missile = R27ERMissileSimulator.create(
+                        parent=aircraft,
+                        target=target,
+                        uid=missile_uid
+                    )
+                    missile_type = "R-27ER"
+
+                    # 添加到环境的临时模拟器 - 关键步骤！
+                    env.add_temp_simulator(missile)
+                    logging.info(f"✅ 敌方导弹{missile_uid}已添加到环境")
+
+                except Exception as missile_error:
+                    logging.error(f"敌方导弹创建失败: {missile_error}")
+                    missile_type = "R-27ER"
+
+            # 初始化导弹记录系统 - 完全复制拖曳射击项目
+            if not hasattr(env, '_missile_records'):
+                env._missile_records = {}
+
+            # 记录导弹信息
+            env._missile_records[missile_uid] = {
+                'launcher': agent_id,
+                'target': target.uid,
+                'type': missile_type,
+                'status': 'LAUNCHED',
+                'launch_time': current_time,
+                'launch_position': aircraft.get_position().copy(),
+                'launch_velocity': aircraft.get_velocity().copy()
+            }
+
+            # 更新飞机状态
+            aircraft.num_missiles -= 1
+
+            # 更新发射时间记录
+            self.last_missile_launch_time[agent_id] = current_time
+
+            # 详细的导弹发射日志
+            distance_km = self._calculate_distance(aircraft, target)/1000
+            logging.info(f"🚀 MISSILE LAUNCH: {agent_id} -> {target.uid} at t={current_time:.1f}s, "
+                        f"distance={distance_km:.1f}km, missile_id={missile_uid}, remaining_missiles={aircraft.num_missiles}")
+
+            # 记录发射时间线
+            if not hasattr(self, 'missile_launch_timeline'):
+                self.missile_launch_timeline = {}
+            self.missile_launch_timeline[agent_id] = {
+                'launch_time': current_time,
+                'phase': self.current_phase.value,
+                'distance': distance_km,
+                'target': target.uid,
+                'missile_type': missile_type,
+                'missile_id': missile_uid
+            }
+
+            # 发射协调分析
+            if agent_id == "A0100":
+                logging.info(f"   🎯 长机A0100发射: {current_time:.1f}s, 阶段={self.current_phase.value}, 距离={distance_km:.1f}km")
+            elif agent_id == "A0200":
+                logging.info(f"   🎯 僚机A0200发射: {current_time:.1f}s, 阶段={self.current_phase.value}, 距离={distance_km:.1f}km")
+                # 检查与长机的协调
+                if "A0100" in self.missile_launch_timeline:
+                    leader_launch = self.missile_launch_timeline["A0100"]
+                    time_diff = current_time - leader_launch['launch_time']
+                    logging.info(f"   📊 僚机发射延迟: {time_diff:.1f}s (相对于长机)")
+            elif agent_id.startswith("B"):
+                logging.info(f"   🎯 敌方{agent_id}发射: {current_time:.1f}s, 阶段={self.current_phase.value}, 距离={distance_km:.1f}km")
+
+            # 打印发射状态汇总
+            logging.info(f"📊 导弹发射状态汇总:")
+            for launcher, data in self.missile_launch_timeline.items():
+                logging.info(f"   {launcher}: {data['launch_time']:.1f}s, {data['phase']}, {data['distance']:.1f}km -> {data['target']}")
+
+        except Exception as e:
+            logging.error(f"导弹发射失败 {agent_id}: {e}")
+            import traceback
+            traceback.print_exc()
