@@ -577,11 +577,9 @@ class R27ERMissileSimulator(BaseSimulator):
 
         # 阻力
         D = 0.5 * self._cD * self.S * self.rho * v ** 2
-
         # 轴向过载
         nx = (T - D) / (self._m * self._g) if self._m > 0 else 0
         ny, nz = action
-
         # 速度变化
         dv = self._g * (nx - np.sin(theta))
 

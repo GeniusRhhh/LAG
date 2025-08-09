@@ -69,12 +69,13 @@ class ThreatLevel(Enum):
     CRITICAL = 4
 
 class BVRPhase(Enum):
-    """BVR交战阶段"""
-    APPROACH = "approach"           # 接敌阶段
-    LAUNCH = "launch"              # 发射阶段
-    TURN_COLD = "turn_cold"        # 转冷阶段
-    RETURN = "return"              # 返航阶段
-    RE_ENGAGE = "re_engage"        # 重新接敌阶段
+    """BVR交战阶段 - 镜像友军拖曳射击逻辑"""
+    APPROACH = "approach"           # 接敌阶段 - 镜像友军NLT_MELD到MELD_MTR (>45km)
+    ENGAGE = "engage"              # 交战阶段 - 镜像友军MTR_TR发射窗口 (45-41km)
+    TURN_COLD = "turn_cold"        # 转冷阶段 - 镜像友军Short Skate Crank (6-18秒)
+    RETURN = "return"              # 返航阶段 - 镜像友军Short Skate Turn Cold (15-30秒)
+    ESCAPE = "escape"              # 脱离阶段 - 镜像友军Short Skate Escape (15-22秒)
+    RE_ENGAGE = "re_engage"        # 重新接敌阶段 - 重新开始循环
 
 class TacticalMode(Enum):
     """敌方战术模式"""
@@ -146,6 +147,39 @@ class EnemyTacticalAI:
             ThreatLevel.CRITICAL: 10000
         }
 
+        # 镜像友军拖曳射击的距离阈值 - 强化BVR距离控制
+        self.mirror_tactical_distances = {
+            'NLT_MELD_min': 81000,      # 81km - 镜像友军NLT_MELD阶段
+            'MELD_MTR_min': 50000,      # 50km - 镜像友军MELD_MTR阶段（提高到50km）
+            'MTR_TR_min': 45000,        # 45km - 镜像友军MTR_TR发射窗口（提高到45km）
+            'TR_DOR_min': 35000,        # 35km - 强制BVR距离（大幅提高）
+            'DOR_DR_min': 30000,        # 30km - 强制BVR距离（大幅提高）
+            'leader_launch_range': 50000,   # 长机50km发射 - 更远距离发射
+            'wingman_launch_range': 45000,  # 僚机45km发射 - 更远距离发射
+            'emergency_distance': 30000,    # 30km紧急转冷距离（提高）
+            'min_bvr_distance': 25000,      # 25km最小BVR距离（提高）
+            'ideal_bvr_distance': 40000,    # 40km理想BVR距离（提高）
+            'force_cold_turn_distance': 35000,  # 35km强制冷转距离
+        }
+
+        # 镜像友军Short Skate机动时间参数
+        self.mirror_short_skate_durations = {
+            'leader_crank': 6.0,        # 长机Crank 6秒 - 镜像友军
+            'leader_turn_cold': 15.0,   # 长机Turn Cold 15秒 - 镜像友军
+            'leader_escape': 15.0,      # 长机Escape 15秒 - 镜像友军
+            'wingman_crank': 18.0,      # 僚机Crank 18秒 - 镜像友军
+            'wingman_turn_cold': 30.0,  # 僚机Turn Cold 30秒 - 镜像友军
+            'wingman_escape': 22.0,     # 僚机Escape 22秒 - 镜像友军
+        }
+
+        # 编队协调属性
+        self.formation_coordination = {}  # 编队协调状态
+        self.last_coordination_check = {}  # 上次协调检查时间
+
+        # 镜像Short Skate状态管理
+        self.mirror_short_skate_states = {}  # 镜像友军的Short Skate状态
+        self.mirror_skate_start_time = {}    # 镜像Short Skate开始时间
+
         # 机动参数配置
         self.maneuver_params = {
             EnemyManeuverType.AGGRESSIVE_APPROACH: {"duration": 15.0, "priority": 3},
@@ -171,12 +205,152 @@ class EnemyTacticalAI:
             self.missile_launch_time[agent_id] = 0.0
             self.return_to_base_time[agent_id] = 0.0
             self.engagement_cycle[agent_id] = 0
+            self.formation_coordination[agent_id] = True
+            self.last_coordination_check[agent_id] = 0.0
+
+    def _check_formation_coordination(self, env, current_time: float) -> Dict[str, bool]:
+        """检查编队协调状态，确保两机协调行动"""
+        coordination_status = {}
+
+        # 获取两机状态
+        b0100_alive = "B0100" in env.agents and env.agents["B0100"].is_alive
+        b0200_alive = "B0200" in env.agents and env.agents["B0200"].is_alive
+
+        if not (b0100_alive and b0200_alive):
+            # 如果有飞机被击落，剩余飞机独立作战
+            for agent_id in ["B0100", "B0200"]:
+                if agent_id in env.agents and env.agents[agent_id].is_alive:
+                    coordination_status[agent_id] = False
+            return coordination_status
+
+        # 获取两机的BVR状态
+        b0100_phase = self.bvr_states.get("B0100", BVRPhase.APPROACH)
+        b0200_phase = self.bvr_states.get("B0200", BVRPhase.APPROACH)
+
+        # 协调规则：
+        # 1. 转冷阶段：僚机等待长机先转冷
+        # 2. 返航阶段：确保两机同时返航
+        # 3. 重新接敌：长机先接敌，僚机跟随
+
+        if b0100_phase == BVRPhase.TURN_COLD and b0200_phase == BVRPhase.APPROACH:
+            # 长机转冷，僚机继续接敌支援
+            coordination_status["B0100"] = True
+            coordination_status["B0200"] = True
+        elif b0100_phase == BVRPhase.RETURN and b0200_phase == BVRPhase.TURN_COLD:
+            # 长机返航，僚机转冷，协调正常
+            coordination_status["B0100"] = True
+            coordination_status["B0200"] = True
+        elif abs(self.return_to_base_time.get("B0100", 0) - self.return_to_base_time.get("B0200", 0)) > 10.0:
+            # 返航时间差超过10秒，需要协调
+            if self.return_to_base_time.get("B0100", 0) > self.return_to_base_time.get("B0200", 0):
+                coordination_status["B0100"] = True
+                coordination_status["B0200"] = False  # 僚机等待
+            else:
+                coordination_status["B0100"] = False  # 长机等待
+                coordination_status["B0200"] = True
+        else:
+            # 正常协调状态
+            coordination_status["B0100"] = True
+            coordination_status["B0200"] = True
+
+        return coordination_status
+
+    def _init_mirror_short_skate(self, agent_id: str, current_time: float):
+        """初始化镜像友军的Short Skate机动状态"""
+        self.mirror_short_skate_states[agent_id] = {
+            "phase": "crank",  # 开始阶段：Crank机动
+            "phase_start_time": current_time,
+            "initial_heading": None,
+            "initial_altitude": None,
+            "crank_angle": -40.0 if agent_id == "B0100" else 40.0,  # 长机左转，僚机右转
+        }
+        self.mirror_skate_start_time[agent_id] = current_time
+
+    def _execute_mirror_short_skate(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+        """执行镜像友军的Short Skate机动 - 完全对应友军逻辑"""
+        if agent_id not in self.mirror_short_skate_states:
+            self._init_mirror_short_skate(agent_id, current_time)
+
+        state = self.mirror_short_skate_states[agent_id]
+        agent = env.agents[agent_id]
+        current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
+
+        if state["initial_heading"] is None:
+            state["initial_heading"] = current_heading
+
+        phase_time = current_time - state["phase_start_time"]
+
+        # 镜像友军Short Skate时间参数
+        if agent_id == "B0100":  # 长机
+            crank_duration = self.mirror_short_skate_durations['leader_crank']
+            turn_cold_duration = self.mirror_short_skate_durations['leader_turn_cold']
+            escape_duration = self.mirror_short_skate_durations['leader_escape']
+        else:  # 僚机
+            crank_duration = self.mirror_short_skate_durations['wingman_crank']
+            turn_cold_duration = self.mirror_short_skate_durations['wingman_turn_cold']
+            escape_duration = self.mirror_short_skate_durations['wingman_escape']
+
+        # 阶段1：Crank机动 - 镜像友军左/右转40度
+        if state["phase"] == "crank":
+            if phase_time < crank_duration:
+                target_heading = state["initial_heading"] + state["crank_angle"]
+                target_heading = target_heading % 360
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3  # 左转或右转
+                else:
+                    # Crank完成，进入Turn Cold阶段
+                    state["phase"] = "turn_cold"
+                    state["phase_start_time"] = current_time
+                    state["initial_heading"] = current_heading
+                    print(f"🔄 {agent_id}: Crank完成，开始Turn Cold")
+
+        # 阶段2：Turn Cold机动 - 镜像友军转向0度（正北）
+        elif state["phase"] == "turn_cold":
+            if phase_time < turn_cold_duration:
+                target_heading = 0.0  # 正北方向
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3  # 左转或右转
+                else:
+                    # Turn Cold完成，进入Escape阶段
+                    state["phase"] = "escape"
+                    state["phase_start_time"] = current_time
+                    print(f"🏃 {agent_id}: Turn Cold完成，开始Escape")
+
+        # 阶段3：Escape机动 - 镜像友军保持北向脱离
+        elif state["phase"] == "escape":
+            if phase_time < escape_duration:
+                target_heading = 0.0  # 继续保持正北方向
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                if abs(heading_diff) > 5.0:
+                    return 7, 6 if heading_diff < 0 else 10, 3  # 左转或右转
+                else:
+                    # Escape完成，Short Skate机动结束
+                    state["phase"] = "complete"
+                    print(f"✅ {agent_id}: Short Skate机动完成")
+
+        return 7, 8, 3  # 默认保持航向
+
+    def _normalize_angle_diff(self, angle_diff: float) -> float:
+        """标准化角度差值到[-180, 180]范围"""
+        while angle_diff > 180:
+            angle_diff -= 360
+        while angle_diff < -180:
+            angle_diff += 360
+        return angle_diff
 
     def _update_bvr_state(self, agent_id: str, env, current_time: float):
-        """更新BVR战术状态 - 完全修复版本，基于时间和距离的自动状态转换"""
+        """更新BVR战术状态 - 长机僚机协调版本"""
         current_phase = self.bvr_states.get(agent_id, BVRPhase.APPROACH)
         agent = env.agents[agent_id]
         agent_pos = np.array(agent.get_position())
+
+        # 检查编队协调状态
+        if current_time - self.last_coordination_check.get(agent_id, 0) > 2.0:
+            coordination_status = self._check_formation_coordination(env, current_time)
+            self.formation_coordination[agent_id] = coordination_status.get(agent_id, True)
+            self.last_coordination_check[agent_id] = current_time
 
         # 战场边界检查 - 强制保持在合理范围内
         distance_to_center = np.linalg.norm(agent_pos[:2] - self.battlefield_center[:2])
@@ -190,41 +364,152 @@ class EnemyTacticalAI:
 
         # 计算到最近敌方的距离
         min_distance = float('inf')
+        nearest_enemy_id = None
         for other_id, other_agent in env.agents.items():
             if other_id != agent_id and other_agent.is_alive:
-                other_pos = np.array(other_agent.get_position())
-                distance = np.linalg.norm(agent_pos - other_pos)
-                if distance < min_distance:
-                    min_distance = distance
+                # 只计算与敌方的距离（A vs B）
+                if ((agent_id.startswith('A') and other_id.startswith('B')) or
+                    (agent_id.startswith('B') and other_id.startswith('A'))):
+                    other_pos = np.array(other_agent.get_position())
+                    distance = np.linalg.norm(agent_pos - other_pos)
+                    if distance < min_distance:
+                        min_distance = distance
+                        nearest_enemy_id = other_id
 
-        # 基于时间和距离的自动BVR状态转换逻辑
-        if current_phase == BVRPhase.APPROACH:
-            # 接敌阶段：当距离敌方30-50km且时间超过30秒时，自动转入转冷
-            if (min_distance <= 50000 and current_time > 30.0 and
-                current_time - self.missile_launch_time.get(agent_id, 0.0) > 20.0):
+        # 强制BVR距离控制 - 当距离<35km时必须执行冷转
+        if min_distance < self.mirror_tactical_distances['force_cold_turn_distance'] and current_phase in [BVRPhase.APPROACH, BVRPhase.ENGAGE]:
+            self.bvr_states[agent_id] = BVRPhase.TURN_COLD
+            self.missile_launch_time[agent_id] = current_time
+            self._init_mirror_short_skate(agent_id, current_time)
+            print(f"🔄 {agent_id}: 强制BVR冷转！距离: {min_distance/1000:.1f}km < 35km")
+            return
+
+        # 超视距距离强制控制 - 硬性距离阈值
+        if min_distance < self.mirror_tactical_distances['emergency_distance']:  # 25km紧急距离
+            # 强制执行紧急转冷脱离
+            if current_phase not in [BVRPhase.TURN_COLD, BVRPhase.RETURN, BVRPhase.ESCAPE]:
                 self.bvr_states[agent_id] = BVRPhase.TURN_COLD
                 self.missile_launch_time[agent_id] = current_time
-                print(f"🚀 {agent_id}: 接敌完成，转入转冷阶段 (距离: {min_distance/1000:.1f}km)")
+                self._init_mirror_short_skate(agent_id, current_time)
+                print(f"🚨 {agent_id}: 紧急转冷脱离！距离过近: {min_distance/1000:.1f}km < 25km")
+                return
+
+        # 最小BVR距离检查
+        if min_distance < self.mirror_tactical_distances['min_bvr_distance']:  # 20km最小距离
+            # 强制执行最大转向脱离
+            if current_phase not in [BVRPhase.ESCAPE]:
+                self.bvr_states[agent_id] = BVRPhase.ESCAPE
+                self.return_to_base_time[agent_id] = current_time
+                print(f"⚠️ {agent_id}: 违反BVR最小距离！强制脱离: {min_distance/1000:.1f}km < 20km")
+                return
+
+        # 镜像友军拖曳射击的BVR状态转换逻辑
+        if current_phase == BVRPhase.APPROACH:
+            # 接敌阶段：镜像友军NLT_MELD到MELD_MTR阶段 (>45km)
+            # 当距离接近友军发射窗口时，转入交战阶段
+            if min_distance <= self.mirror_tactical_distances['MELD_MTR_min']:  # 45km
+                self.bvr_states[agent_id] = BVRPhase.ENGAGE
+                print(f"⚔️ {agent_id}: 进入交战阶段，镜像友军MTR_TR (距离: {min_distance/1000:.1f}km)")
+
+        elif current_phase == BVRPhase.ENGAGE:
+            # 交战阶段：镜像友军MTR_TR发射窗口，但错位时机确保友军完整展现拖曳射击
+            launch_range = (self.mirror_tactical_distances['leader_launch_range'] if agent_id == "B0100"
+                          else self.mirror_tactical_distances['wingman_launch_range'])
+
+            # 战术时机协调：敌方与友军错位发射，形成持续对抗
+            # 分析友军发射时机，敌方在友军发射后适当延迟发射
+            min_engage_time = 20.0 if agent_id == "B0100" else 30.0  # 长机20秒，僚机30秒（延后发射）
+            missile_cooldown = 10.0  # 导弹发射冷却时间（与友军区分）
+
+            # 检查是否已经发射过导弹
+            has_launched = self.missile_launch_time.get(agent_id, 0.0) > 0
+
+            if (min_distance <= launch_range and current_time > min_engage_time and
+                current_time - self.missile_launch_time.get(agent_id, 0.0) > missile_cooldown and
+                not has_launched):
+
+                # 检查是否应该发射导弹
+                if self._check_missile_launch(agent_id, env, current_time):
+                    self.missile_launch_time[agent_id] = current_time
+                    role = "长机" if agent_id == "B0100" else "僚机"
+                    print(f"🚀 {agent_id}({role}): 镜像发射窗口，发射导弹 (距离: {min_distance/1000:.1f}km)")
+
+            # 发射导弹后5秒开始转冷 - 镜像友军逻辑，或者在交战阶段超过30秒后强制转冷
+            engage_duration = current_time - self.engagement_cycle.get(agent_id, current_time)
+            if ((has_launched and current_time - self.missile_launch_time.get(agent_id, 0.0) > 5.0) or
+                engage_duration > 30.0):  # 交战阶段最多30秒
+                self.bvr_states[agent_id] = BVRPhase.TURN_COLD
+                self._init_mirror_short_skate(agent_id, current_time)
+                role = "长机" if agent_id == "B0100" else "僚机"
+                reason = "发射后转冷" if has_launched else "交战超时转冷"
+                print(f"🔄 {agent_id}({role}): {reason}，镜像Short Skate (距离: {min_distance/1000:.1f}km)")
 
         elif current_phase == BVRPhase.TURN_COLD:
-            # 转冷阶段：转冷5秒后开始返航
-            if current_time - self.missile_launch_time[agent_id] > 5.0:
+            # 转冷阶段：镜像友军Short Skate Crank机动
+            crank_duration = (self.mirror_short_skate_durations['leader_crank'] if agent_id == "B0100"
+                            else self.mirror_short_skate_durations['wingman_crank'])
+            cold_turn_start = self.missile_launch_time.get(agent_id, current_time)
+            if current_time - cold_turn_start > crank_duration:
                 self.bvr_states[agent_id] = BVRPhase.RETURN
                 self.return_to_base_time[agent_id] = current_time
-                print(f"🔄 {agent_id}: 转冷完成，开始返航阶段")
+                role = "长机" if agent_id == "B0100" else "僚机"
+                print(f"🔄 {agent_id}({role}): Crank完成，开始Turn Cold阶段 (距离: {min_distance/1000:.1f}km)")
 
         elif current_phase == BVRPhase.RETURN:
-            # 返航阶段：延长返航时间到40秒，确保有足够时间完成180°转向
-            if current_time - self.return_to_base_time[agent_id] > 40.0:
+            # 返航阶段：镜像友军Short Skate Turn Cold机动
+            turn_cold_duration = (self.mirror_short_skate_durations['leader_turn_cold'] if agent_id == "B0100"
+                                else self.mirror_short_skate_durations['wingman_turn_cold'])
+            if current_time - self.return_to_base_time[agent_id] > turn_cold_duration:
+                self.bvr_states[agent_id] = BVRPhase.ESCAPE
+                role = "长机" if agent_id == "B0100" else "僚机"
+                print(f"🏃 {agent_id}({role}): Turn Cold完成，开始Escape阶段 (距离: {min_distance/1000:.1f}km)")
+
+        elif current_phase == BVRPhase.ESCAPE:
+            # 脱离阶段：镜像友军Short Skate Escape机动，确保达到BVR距离
+            escape_duration = (self.mirror_short_skate_durations['leader_escape'] if agent_id == "B0100"
+                             else self.mirror_short_skate_durations['wingman_escape'])
+
+            # 检查是否已经达到安全BVR距离
+            safe_bvr_distance = 50000  # 50km安全距离
+            escape_time_elapsed = current_time - self.return_to_base_time[agent_id]
+
+            if (escape_time_elapsed > escape_duration and min_distance > safe_bvr_distance) or escape_time_elapsed > 60.0:
+                # 重置状态，准备下一轮BVR循环
                 self.bvr_states[agent_id] = BVRPhase.RE_ENGAGE
-                self.engagement_cycle[agent_id] += 1
-                print(f"⚔️ {agent_id}: 返航完成，重新接敌，第{self.engagement_cycle[agent_id]}轮")
+                self.engagement_cycle[agent_id] = self.engagement_cycle.get(agent_id, 0) + 1
+                # 重置导弹发射时间，允许下一轮发射
+                self.missile_launch_time[agent_id] = 0.0
+                role = "长机" if agent_id == "B0100" else "僚机"
+                print(f"🔄 {agent_id}({role}): Escape完成，准备重新接敌 (距离: {min_distance/1000:.1f}km, 循环: {self.engagement_cycle[agent_id]})")
+                role = "长机" if agent_id == "B0100" else "僚机"
+                print(f"⚔️ {agent_id}({role}): Escape完成，重新接敌，第{self.engagement_cycle[agent_id]}轮")
 
         elif current_phase == BVRPhase.RE_ENGAGE:
-            # 重新接敌阶段：重新接敌20秒后回到接敌阶段
-            if current_time - self.return_to_base_time[agent_id] > 60.0:
+            # 重新接敌阶段：协调时机确保与友军形成持续BVR循环对抗
+            re_engage_start = self.return_to_base_time.get(agent_id, current_time)
+            re_engage_duration = current_time - re_engage_start
+
+            # 协调缓冲时间：确保友军有足够时间展现完整的拖曳射击循环
+            # 延长缓冲时间，给友军更多展示时间
+            coordination_buffer = 40.0 if agent_id == "B0100" else 50.0  # 长机40秒，僚机50秒
+
+            # 检查是否可以重新接敌
+            can_re_engage = (re_engage_duration > coordination_buffer and
+                           min_distance > 40000)  # 距离>40km才能重新接敌
+
+            if can_re_engage:
+                # 重新开始BVR循环
                 self.bvr_states[agent_id] = BVRPhase.APPROACH
-                print(f"🎯 {agent_id}: 重新接敌完成，回到接敌阶段")
+                self.engagement_cycle[agent_id] = current_time  # 记录新循环开始时间
+                role = "长机" if agent_id == "B0100" else "僚机"
+                print(f"🔄 {agent_id}({role}): 重新接敌，开始新的BVR循环 (距离: {min_distance/1000:.1f}km)")
+                if min_distance > self.mirror_tactical_distances['ideal_bvr_distance']:  # 35km理想距离
+                    self.bvr_states[agent_id] = BVRPhase.APPROACH
+                    role = "长机" if agent_id == "B0100" else "僚机"
+                    print(f"🎯 {agent_id}({role}): 重新接敌完成，回到接敌阶段，距离: {min_distance/1000:.1f}km")
+                else:
+                    # 距离仍然过近，继续脱离
+                    print(f"⏳ {agent_id}: 距离仍过近({min_distance/1000:.1f}km)，继续脱离等待重新接敌")
 
     def _check_missile_launch(self, agent_id: str, env, current_time: float) -> bool:
         """检查是否刚刚发射了导弹 - 修复版本"""
@@ -266,17 +551,9 @@ class EnemyTacticalAI:
         return False
 
     def _execute_bvr_turn_cold(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
-        """执行BVR转冷机动 - 根本修复版本，正确映射动作空间"""
-        agent = env.agents[agent_id]
-        agent_pos = np.array(agent.get_position())
-        current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
-
-        # 简化转冷逻辑：直接朝向北方（0°）转冷
-        target_heading = 0.0  # 统一朝北转冷
-
-        # 记录转冷状态
-        if current_time % 3.0 < 0.2:  # 每3秒记录一次
-            print(f"🚀 {agent_id}: 转冷中 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°")
+        """执行BVR转冷机动 - 镜像友军Short Skate Crank阶段"""
+        # 直接调用镜像Short Skate机动函数
+        return self._execute_mirror_short_skate(env, agent_id, current_time)
 
         # 计算转向指令 - 正确映射到动作空间
         heading_diff = (target_heading - current_heading + 180) % 360 - 180
@@ -319,6 +596,8 @@ class EnemyTacticalAI:
         else:
             turn_command = 8   # 0°保持航向
 
+
+
         # 高度和速度指令 - 修复高度控制
         # 获取当前高度进行安全检查
         try:
@@ -326,43 +605,32 @@ class EnemyTacticalAI:
         except:
             current_altitude = 6000.0
 
-        # 高度指令索引：7(0m保持), 8(+50m), 9(+150m), 11(+500m), 13(+1000m), 14(+1500m)
-        if current_altitude < 1000:
-            altitude_command = 14  # +1500m 紧急爬升
-        elif current_altitude < 3000:
-            altitude_command = 11  # +500m 适度爬升
-        elif current_altitude < 5000:
-            altitude_command = 9   # +150m 轻微爬升
-        else:
-            altitude_command = 7   # 0m 保持高度
-
-        velocity_command = 5  # 加速
+        # 长机僚机差异化高度和速度策略
+        if agent_id == "B0100":  # 长机
+            # 长机：保持高度优势，最大加速
+            if current_altitude < 1000:
+                altitude_command = 14  # +1500m 紧急爬升
+            elif current_altitude < 5000:
+                altitude_command = 8   # +50m 轻微爬升，保持高度优势
+            else:
+                altitude_command = 8   # +50m 继续爬升
+            velocity_command = 6  # 最大加速
+        else:  # 僚机 B0200
+            # 僚机：保持相对较低高度，高速机动
+            if current_altitude < 1000:
+                altitude_command = 11  # +500m 适度爬升
+            elif current_altitude < 3000:
+                altitude_command = 7   # 保持高度
+            else:
+                altitude_command = 6   # -50m 轻微下降，与长机形成高度差
+            velocity_command = 5  # 高速
 
         return altitude_command, turn_command, velocity_command  # 修复参数顺序：(高度, 航向, 速度)
 
     def _execute_bvr_return(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
-        """执行BVR返航机动 - 根本修复版本，强制转向北方"""
-        agent = env.agents[agent_id]
-        agent_pos = np.array(agent.get_position())
-        current_heading = np.rad2deg(safe_get_property(agent, c.attitude_psi_rad, 0.0))
-
-        # 获取当前高度，使用安全的方法
-        try:
-            current_altitude = safe_get_property(agent, c.position_h_sl_m, 6000.0)
-        except:
-            current_altitude = 6000.0  # 默认安全高度
-
-        # 目标航向：0°（北方）- 强制返航方向
-        target_heading = 0.0
-
-        # 计算转向指令 - 正确的航向差计算
-        heading_diff = (target_heading - current_heading + 180) % 360 - 180
-
-        # 记录返航状态
-        if current_time % 3.0 < 0.2:  # 每3秒记录一次
-            print(f"🔄 {agent_id}: 返航中 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°, 差值: {heading_diff:.1f}°, 高度: {current_altitude:.0f}m")
-
-        # 使用正确的动作空间映射进行转向
+        """执行BVR返航机动 - 镜像友军Short Skate Turn Cold阶段"""
+        # 直接调用镜像Short Skate机动函数
+        return self._execute_mirror_short_skate(env, agent_id, current_time)
         # 动作空间：0(-180°), 1(-120°), 2(-90°), 3(-75°), 4(-60°), 5(-45°), 6(-30°), 7(-15°), 8(0°), 9(15°), 10(30°), 11(45°), 12(60°), 13(75°), 14(90°), 15(120°), 16(180°)
 
         # 根据航向差选择最合适的转向指令
@@ -401,23 +669,80 @@ class EnemyTacticalAI:
         else:
             turn_command = 8   # 0°保持航向
 
-        # 高度控制 - 修复高度指令映射
-        # 高度指令索引：0(-1500m), 1(-1000m), 2(-750m), 3(-500m), 4(-300m), 5(-150m), 6(-50m), 7(0m), 8(+50m), 9(+150m), 10(+300m), 11(+500m), 12(+750m), 13(+1000m), 14(+1500m)
-        if current_altitude < 1000:
-            altitude_command = 14  # +1500m 紧急爬升
-        elif current_altitude < 2000:
-            altitude_command = 13  # +1000m 大幅爬升
-        elif current_altitude < 3000:
-            altitude_command = 11  # +500m 适度爬升
-        elif current_altitude < 5000:
-            altitude_command = 9   # +150m 轻微爬升
-        else:
-            altitude_command = 7   # 0m 保持高度
 
-        # 速度控制
-        velocity_command = 4  # 巡航速度
+
+        # 长机僚机差异化高度和速度策略
+        if agent_id == "B0100":  # 长机
+            # 长机：保持较高高度，中等速度返航
+            if current_altitude < 1000:
+                altitude_command = 14  # +1500m 紧急爬升
+            elif current_altitude < 5000:
+                altitude_command = 9   # +150m 轻微爬升
+            else:
+                altitude_command = 7   # 保持高度
+            velocity_command = 4  # 巡航速度
+        else:  # 僚机 B0200
+            # 僚机：保持相对较低高度，稍快速度保持编队
+            if current_altitude < 1000:
+                altitude_command = 11  # +500m 适度爬升
+            elif current_altitude < 3000:
+                altitude_command = 7   # 保持高度
+            else:
+                altitude_command = 6   # -50m 轻微下降
+            velocity_command = 5  # 稍快速度
 
         return altitude_command, turn_command, velocity_command  # 修复参数顺序：(高度, 航向, 速度)
+
+    def _execute_bvr_escape(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+        """执行BVR脱离机动 - 镜像友军Short Skate Escape阶段"""
+        # 直接调用镜像Short Skate机动函数
+        return self._execute_mirror_short_skate(env, agent_id, current_time)
+        if heading_diff > 150:
+            turn_command = 16  # 180°右转
+        elif heading_diff > 100:
+            turn_command = 15  # 120°右转
+        elif heading_diff > 80:
+            turn_command = 14  # 90°右转
+        elif heading_diff > 65:
+            turn_command = 13  # 75°右转
+        elif heading_diff > 50:
+            turn_command = 12  # 60°右转
+        elif heading_diff > 35:
+            turn_command = 11  # 45°右转
+        elif heading_diff > 20:
+            turn_command = 10  # 30°右转
+        elif heading_diff > 5:
+            turn_command = 9   # 15°右转
+        elif heading_diff < -150:
+            turn_command = 0   # -180°左转
+        elif heading_diff < -100:
+            turn_command = 1   # -120°左转
+        elif heading_diff < -80:
+            turn_command = 2   # -90°左转
+        elif heading_diff < -65:
+            turn_command = 3   # -75°左转
+        elif heading_diff < -50:
+            turn_command = 4   # -60°左转
+        elif heading_diff < -35:
+            turn_command = 5   # -45°左转
+        elif heading_diff < -20:
+            turn_command = 6   # -30°左转
+        elif heading_diff < -5:
+            turn_command = 7   # -15°左转
+        else:
+            turn_command = 8   # 0°保持航向
+
+        # 高度和速度控制 - 最大脱离
+        if current_altitude < 1000:
+            altitude_command = 14  # +1500m 紧急爬升
+        elif current_altitude < 5000:
+            altitude_command = 11  # +500m 适度爬升
+        else:
+            altitude_command = 8   # +50m 轻微爬升
+
+        velocity_command = 6  # 最大加速脱离
+
+        return altitude_command, turn_command, velocity_command
 
     def _execute_bvr_re_engage(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
         """执行BVR重新接敌机动 - 修复高度获取错误"""
@@ -433,20 +758,27 @@ class EnemyTacticalAI:
         except:
             current_altitude = 6000.0
 
-        # 重新接敌：朝向战场中心（0,0）
+        # 长机僚机差异化重新接敌策略
         target_direction = self.battlefield_center[:2] - agent_pos[:2]
         distance_to_center = np.linalg.norm(target_direction)
 
-        if distance_to_center > 1000:  # 距离战场中心超过1km
-            target_direction = target_direction / distance_to_center
-            target_heading = np.rad2deg(np.arctan2(target_direction[1], target_direction[0]))
-        else:
-            # 已在战场中心附近，朝南接敌（180°）
-            target_heading = 180.0
-
-        # 记录重新接敌状态
-        if current_time % 4.0 < 0.2:  # 每4秒记录一次
-            print(f"⚔️ {agent_id}: 重新接敌中 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°, 距离中心: {distance_to_center/1000:.1f}km, 高度: {current_altitude:.0f}m")
+        if agent_id == "B0100":  # 长机
+            # 长机：直接朝向战场中心，承担主攻击者角色
+            if distance_to_center > 1000:
+                target_direction = target_direction / distance_to_center
+                target_heading = np.rad2deg(np.arctan2(target_direction[1], target_direction[0]))
+            else:
+                target_heading = 180.0  # 朝南接敌
+            print(f"⚔️ {agent_id}(长机): 主攻接敌 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°, 距离中心: {distance_to_center/1000:.1f}km, 高度: {current_altitude:.0f}m")
+        else:  # 僚机 B0200
+            # 僚机：侧翼接敌，形成包抄态势
+            if distance_to_center > 1000:
+                target_direction = target_direction / distance_to_center
+                base_heading = np.rad2deg(np.arctan2(target_direction[1], target_direction[0]))
+                target_heading = base_heading - 30.0  # 偏西30°，形成侧翼
+            else:
+                target_heading = 210.0  # 朝西南接敌，形成夹击
+            print(f"⚔️ {agent_id}(僚机): 侧翼接敌 - 当前航向: {current_heading:.1f}°, 目标航向: {target_heading:.1f}°, 距离中心: {distance_to_center/1000:.1f}km, 高度: {current_altitude:.0f}m")
 
         # 计算转向指令 - 正确映射到动作空间
         heading_diff = (target_heading - current_heading + 180) % 360 - 180
@@ -489,20 +821,25 @@ class EnemyTacticalAI:
         else:
             turn_command = 8   # 0°保持航向
 
-        # 高度控制 - 修复高度指令映射
-        # 高度指令索引：0(-1500m), 1(-1000m), 2(-750m), 3(-500m), 4(-300m), 5(-150m), 6(-50m), 7(0m), 8(+50m), 9(+150m), 10(+300m), 11(+500m), 12(+750m), 13(+1000m), 14(+1500m)
-        if current_altitude < 1000:
-            altitude_command = 14  # +1500m 紧急爬升
-        elif current_altitude < 2000:
-            altitude_command = 13  # +1000m 大幅爬升
-        elif current_altitude < 3000:
-            altitude_command = 11  # +500m 适度爬升
-        elif current_altitude < 5000:
-            altitude_command = 9   # +150m 轻微爬升
-        else:
-            altitude_command = 7   # 0m 保持高度
-
-        velocity_command = 4  # 巡航速度
+        # 长机僚机差异化高度和速度策略
+        if agent_id == "B0100":  # 长机
+            # 长机：保持高度优势，积极接敌
+            if current_altitude < 1000:
+                altitude_command = 14  # +1500m 紧急爬升
+            elif current_altitude < 5000:
+                altitude_command = 11  # +500m 适度爬升
+            else:
+                altitude_command = 8   # +50m 轻微爬升，保持高度优势
+            velocity_command = 5  # 高速接敌
+        else:  # 僚机 B0200
+            # 僚机：保持机动性，侧翼支援
+            if current_altitude < 1000:
+                altitude_command = 11  # +500m 适度爬升
+            elif current_altitude < 3000:
+                altitude_command = 8   # +50m 轻微爬升
+            else:
+                altitude_command = 7   # 保持高度
+            velocity_command = 4  # 巡航速度，保持编队
 
         return altitude_command, turn_command, velocity_command  # 修复参数顺序：(高度, 航向, 速度)
 
@@ -1693,11 +2030,14 @@ def get_enemy_tactical_command(env, agent_id: str, current_time: float) -> Tuple
             print(f"📊 {agent_id}: BVR状态={current_bvr_phase.value}, 位置=({agent_pos[0]/1000:.1f}, {agent_pos[1]/1000:.1f}, {agent_pos[2]/1000:.1f})km, 航向={current_heading:.1f}°")
 
         if current_bvr_phase == BVRPhase.TURN_COLD:
-            # 转冷机动：快速转向并脱离
+            # 转冷机动：镜像友军Short Skate Crank阶段
             commands = enemy_ai._execute_bvr_turn_cold(env, agent_id, current_time)
         elif current_bvr_phase == BVRPhase.RETURN:
-            # 返航机动：朝向0°（北方）返航
+            # 返航机动：镜像友军Short Skate Turn Cold阶段
             commands = enemy_ai._execute_bvr_return(env, agent_id, current_time)
+        elif current_bvr_phase == BVRPhase.ESCAPE:
+            # 脱离机动：镜像友军Short Skate Escape阶段
+            commands = enemy_ai._execute_bvr_escape(env, agent_id, current_time)
         elif current_bvr_phase == BVRPhase.RE_ENGAGE:
             # 重新接敌机动：向战场中心机动
             commands = enemy_ai._execute_bvr_re_engage(env, agent_id, current_time)
