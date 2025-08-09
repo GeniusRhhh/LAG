@@ -588,54 +588,93 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
         for missile_id, missile_info in env._missile_records.items():
             # 检查导弹是否在当前时间步内发射
             if missile_info.get('launch_time') is not None and missile_info['launch_time'] <= current_time:
+                # 跳过已经标记为DESTROYED的导弹
+                if missile_info.get('status') in ['DESTROYED', 'HIT_RECORDED']:
+                    continue
+
                 # 尝试从临时模拟器中获取导弹的实时状态
                 missile_sim = env._tempsims.get(missile_id)
-                if missile_sim and missile_sim.is_alive:
+                if missile_sim:
                     # 获取导弹的实时位置和速度
                     missile_pos = missile_sim.get_position()
                     missile_vel = missile_sim.get_velocity()
                     missile_velocity = np.linalg.norm(missile_vel)
-                    
+
                     # 计算导弹到目标的距离
                     target_distance = 0.0
                     target_id = missile_info.get('target', 'Unknown')
                     if target_id in env._jsbsims and env._jsbsims[target_id].is_alive:
                         target_pos = env._jsbsims[target_id].get_position()
                         target_distance = np.linalg.norm(missile_pos - target_pos) / 1000.0  # km
-                    
-                    # 更新导弹状态
-                    missile_info['status'] = 'ACTIVE'
-                    missile_info['current_position'] = missile_pos.copy()
-                    missile_info['current_velocity'] = missile_vel.copy()
-                    missile_info['last_distance'] = target_distance
-                    
-                    # 检查是否击中
-                    if missile_sim.is_success:
-                        # 记录击中状态
-                        hit_info = missile_sim.get_hit_info()
-                        hit_time = hit_info.get('hit_time', current_time)
-                        hit_distance = hit_info.get('hit_distance', target_distance * 1000.0)  # 转换为米
-                        
+
+                    # 检查导弹是否击中目标
+                    target_aircraft = env._jsbsims.get(target_id)
+                    target_was_alive = missile_info.get('target_was_alive', True)
+                    target_is_alive = target_aircraft.is_alive if target_aircraft else False
+
+                    # 检查导弹的击中状态（多种方法）
+                    hit_detected = False
+                    hit_method = ""
+
+                    # 方法1: 检查is_success属性
+                    if hasattr(missile_sim, 'is_success') and missile_sim.is_success:
+                        hit_detected = True
+                        hit_method = "is_success"
+
+                    # 方法2: 检查导弹状态属性
+                    elif hasattr(missile_sim, '_status'):
+                        status = getattr(missile_sim, '_status', None)
+                        if status == 'HIT' or status == 2:  # 2通常表示HIT状态
+                            hit_detected = True
+                            hit_method = "_status"
+
+                    # 方法3: 检查目标被击落 + 距离很近
+                    elif (target_was_alive and not target_is_alive and
+                          target_distance < 0.1 and  # 距离小于100米
+                          missile_sim.is_alive):
+                        hit_detected = True
+                        hit_method = "target_killed_close"
+
+                    # 方法4: 检查导弹是否突然消失且距离很近
+                    elif (not missile_sim.is_alive and
+                          target_distance < 0.1 and  # 距离小于100米
+                          missile_info.get('last_distance', 999) > target_distance):  # 距离在减小
+                        hit_detected = True
+                        hit_method = "missile_disappeared_close"
+
+                    if hit_detected and not missile_info.get('hit_recorded', False):
+                        # 导弹击中目标
                         missile_data.append({
-                            'Time_s': current_time,  # 使用当前时间
+                            'Time_s': current_time,
                             'Missile_ID': missile_id,
                             'Launcher_ID': missile_info.get('launcher', 'Unknown'),
                             'Type': missile_info.get('type', 'Unknown'),
-                            'Status': 'HIT',  # 状态为HIT
+                            'Status': 'HIT',
                             'X_m': missile_pos[0],
                             'Y_m': missile_pos[1],
                             'Z_m': missile_pos[2],
                             'Velocity_m_s': missile_velocity,
                             'Target_ID': missile_info.get('target', 'Unknown'),
-                            'Distance_to_Target_km': hit_distance / 1000.0,  # 使用击中距离
-                            'Data_Type': 'Trajectory'  # 标记为轨迹数据
+                            'Distance_to_Target_km': target_distance,
+                            'Data_Type': 'Trajectory'
                         })
-                        
-                        # 标记导弹为已销毁
-                        missile_info['status'] = 'DESTROYED'
+
+                        print(f"🎯 CSV记录: 导弹 {missile_id} 击中目标 {target_id} at t={current_time:.1f}s, 距离={target_distance*1000:.1f}m, 方法={hit_method}")
+
+                        # 标记为已击中
+                        missile_info['status'] = 'HIT_RECORDED'
                         missile_info['destroy_time'] = current_time
-                    else:
-                        # 正常记录活跃状态
+                        missile_info['final_position'] = missile_pos.copy()
+                        missile_info['hit_recorded'] = True
+
+                    elif missile_sim.is_alive:
+                        # 导弹仍在飞行，记录活跃状态
+                        missile_info['status'] = 'ACTIVE'
+                        missile_info['current_position'] = missile_pos.copy()
+                        missile_info['current_velocity'] = missile_vel.copy()
+                        missile_info['last_distance'] = target_distance
+                        missile_info['target_was_alive'] = target_is_alive  # 记录目标当前状态
+
                         missile_data.append({
                             'Time_s': current_time,
                             'Missile_ID': missile_id,
@@ -648,8 +687,86 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
                             'Velocity_m_s': missile_velocity,
                             'Target_ID': missile_info.get('target', 'Unknown'),
                             'Distance_to_Target_km': target_distance,
-                            'Data_Type': 'Trajectory'  # 标记为轨迹数据
+                            'Data_Type': 'Trajectory'
                         })
+                    else:
+                        # 导弹已经销毁，检查是否是因为击中目标
+                        if (hasattr(missile_sim, '__status') and
+                            getattr(missile_sim, '__status', None) == getattr(missile_sim, 'HIT', 'HIT')):
+                            # 导弹状态为HIT
+                            missile_data.append({
+                                'Time_s': current_time,
+                                'Missile_ID': missile_id,
+                                'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                                'Type': missile_info.get('type', 'Unknown'),
+                                'Status': 'HIT',
+                                'X_m': missile_pos[0],
+                                'Y_m': missile_pos[1],
+                                'Z_m': missile_pos[2],
+                                'Velocity_m_s': missile_velocity,
+                                'Target_ID': missile_info.get('target', 'Unknown'),
+                                'Distance_to_Target_km': target_distance,
+                                'Data_Type': 'Trajectory'
+                            })
+
+                            print(f"🎯 导弹 {missile_id} 击中目标 {target_id} at t={current_time:.1f}s")
+                        else:
+                            # 导弹失效
+                            missile_data.append({
+                                'Time_s': current_time,
+                                'Missile_ID': missile_id,
+                                'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                                'Type': missile_info.get('type', 'Unknown'),
+                                'Status': 'MISS',
+                                'X_m': missile_pos[0],
+                                'Y_m': missile_pos[1],
+                                'Z_m': missile_pos[2],
+                                'Velocity_m_s': missile_velocity,
+                                'Target_ID': missile_info.get('target', 'Unknown'),
+                                'Distance_to_Target_km': target_distance,
+                                'Data_Type': 'Trajectory'
+                            })
+
+                            print(f"❌ 导弹 {missile_id} 未击中目标 {target_id} at t={current_time:.1f}s")
+
+                        # 标记为已销毁，准备在下一步记录DESTROYED状态
+                        missile_info['status'] = 'DESTROYED'
+                        missile_info['destroy_time'] = current_time
+                        missile_info['final_position'] = missile_pos.copy()
+
+                elif missile_info.get('status') not in ['DESTROYED']:
+                    # 导弹模拟器不存在但状态未标记为销毁，可能是系统错误
+                    print(f"⚠️ 警告：导弹 {missile_id} 模拟器不存在，标记为DESTROYED")
+                    missile_info['status'] = 'DESTROYED'
+                    missile_info['destroy_time'] = current_time
+
+        # 记录已销毁导弹的DESTROYED状态（在销毁后的第一个时间步）
+        for missile_id, missile_info in env._missile_records.items():
+            if (missile_info.get('status') == 'DESTROYED' and
+                missile_info.get('destroy_time') is not None and
+                abs(current_time - missile_info['destroy_time']) < 0.3 and  # 在销毁后0.3秒内
+                not missile_info.get('destroyed_recorded', False)):  # 还未记录过DESTROYED状态
+
+                # 记录DESTROYED状态
+                final_pos = missile_info.get('final_position', [0, 0, 0])
+                missile_data.append({
+                    'Time_s': current_time,
+                    'Missile_ID': missile_id,
+                    'Launcher_ID': missile_info.get('launcher', 'Unknown'),
+                    'Type': missile_info.get('type', 'Unknown'),
+                    'Status': 'DESTROYED',
+                    'X_m': final_pos[0],
+                    'Y_m': final_pos[1],
+                    'Z_m': final_pos[2],
+                    'Velocity_m_s': 0.0,  # 销毁后速度为0
+                    'Target_ID': missile_info.get('target', 'Unknown'),
+                    'Distance_to_Target_km': 0.0,  # 销毁后距离不再有意义
+                    'Data_Type': 'Trajectory'
+                })
+
+                # 标记已记录，避免重复记录
+                missile_info['destroyed_recorded'] = True
+                print(f"💥 导弹 {missile_id} 状态记录为DESTROYED at t={current_time:.1f}s")
 
 def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data):
     """保存CSV数据文件"""

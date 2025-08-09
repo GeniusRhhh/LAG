@@ -69,12 +69,12 @@ class ThreatLevel(Enum):
     CRITICAL = 4
 
 class BVRPhase(Enum):
-    """BVR交战阶段 - 镜像友军拖曳射击逻辑"""
-    APPROACH = "approach"           # 接敌阶段 - 镜像友军NLT_MELD到MELD_MTR (>45km)
-    ENGAGE = "engage"              # 交战阶段 - 镜像友军MTR_TR发射窗口 (45-41km)
-    TURN_COLD = "turn_cold"        # 转冷阶段 - 镜像友军Short Skate Crank (6-18秒)
-    RETURN = "return"              # 返航阶段 - 镜像友军Short Skate Turn Cold (15-30秒)
-    ESCAPE = "escape"              # 脱离阶段 - 镜像友军Short Skate Escape (15-22秒)
+    """BVR交战阶段 - 模仿友军拖曳射击逻辑"""
+    APPROACH = "approach"           # 接敌阶段 - NLT_MELD到MELD_MTR (>45km)
+    ENGAGE = "engage"              # 交战阶段 - MTR_TR发射窗口 (45-41km)
+    TURN_COLD = "turn_cold"        # 转冷阶段 - Short Skate Crank (6-18秒)
+    RETURN = "return"              # 返航阶段 - Short Skate Turn Cold (15-30秒)
+    ESCAPE = "escape"              # 脱离阶段 - Short Skate Escape (15-22秒)
     RE_ENGAGE = "re_engage"        # 重新接敌阶段 - 重新开始循环
 
 class TacticalMode(Enum):
