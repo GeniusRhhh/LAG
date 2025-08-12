@@ -1,2 +1,0 @@
-Missile_ID,Launcher_ID,Target_ID,Launch_Time_s,Destroy_Time_s,Flight_Duration_s,Max_Velocity_m_s,Avg_Velocity_m_s,Total_Distance_km,Min_Distance_to_Target_km,Final_Status
-A1001,A0100,B0100,61.0,219.8,158.8,2373.770989671121,240.6902704551206,38.145415913228874,0.06725701457469271,DESTROYED

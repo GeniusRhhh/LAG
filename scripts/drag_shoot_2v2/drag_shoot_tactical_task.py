@@ -1027,10 +1027,10 @@ class DragShootTacticalTask(MultipleCombatTask):
         return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
-        """敌方战术指令索引 - 使用智能AI系统"""
+        """敌方战术指令索引 - 使用重新设计的四阶段AI系统"""
         current_time = env.current_step * env.time_interval
 
-        # 导入并使用新的敌方AI系统
+        # 导入并使用重新设计的敌方AI系统
         try:
             import sys
             import os
@@ -1039,16 +1039,20 @@ class DragShootTacticalTask(MultipleCombatTask):
             if current_dir not in sys.path:
                 sys.path.insert(0, current_dir)
 
-            from enemy_tactical_ai import get_enemy_tactical_command
+            from enemy_tactical_ai_redesigned import get_enemy_tactical_command
             commands = get_enemy_tactical_command(env, agent_id, current_time)
-            logging.info(f"✅ {agent_id} 增强AI指令: {commands}")
+
+            # 每10秒记录一次敌方AI状态
+            if current_time % 10.0 < 0.2:
+                logging.info(f"✅ {agent_id} 重新设计AI指令: {commands}")
+
             return commands
         except ImportError as e:
-            logging.warning(f"❌ Enemy tactical AI import failed: {e}, using fallback logic")
+            logging.warning(f"❌ 重新设计的敌方AI导入失败: {e}, 使用回退逻辑")
             # 回退到原有逻辑
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
         except Exception as e:
-            logging.error(f"❌ {agent_id} 增强AI执行错误: {e}, using fallback logic")
+            logging.error(f"❌ {agent_id} 重新设计AI执行错误: {e}, 使用回退逻辑")
             import traceback
             logging.error(f"详细错误信息: {traceback.format_exc()}")
             # 回退到原有逻辑

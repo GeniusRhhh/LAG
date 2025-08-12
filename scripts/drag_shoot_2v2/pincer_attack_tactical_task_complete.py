@@ -147,6 +147,15 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         self.basic_maneuvers = BasicManeuvers()
         self.composite_executor = CompositeManeuverExecutor()
 
+        # 雷达管理器 - 修复雷达数据记录问题
+        try:
+            from radar_manager import RadarManager
+            self.radar_manager = RadarManager()
+            logging.info("雷达管理器初始化成功")
+        except ImportError as e:
+            logging.warning(f"雷达管理器导入失败: {e}")
+            self.radar_manager = None
+
         # 状态跟踪
         self.initial_heading = {}
         self.initial_altitude = {}
@@ -165,6 +174,30 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         self.last_missile_launch_time = {"A0100": -999, "A0200": -999, "B0100": -999, "B0200": -999}
         self.friendly_missile_cooldown = 2.0  # 友方2秒冷却
         self.enemy_missile_cooldown = 10.0    # 敌方10秒冷却
+
+        # ===== 敌方对抗机动参数 =====
+        # 角色分配：B0100为shooter，B0200为support
+        self.enemy_roles = {"B0100": "shooter", "B0200": "support"}
+        
+        # 敌方对抗阶段状态跟踪
+        self.enemy_combat_states = {}
+        
+        # 敌方对抗距离阈值（与我方战术阶段对应）
+        self.enemy_combat_thresholds = {
+            'OBSERVATION': 70000,    # 70km - 远距离观察阶段
+            'ENGAGEMENT': 50000,     # 50km - 中距离对抗阶段  
+            'ATTACK': 40000,         # 40km - 近距离攻击阶段
+            'DISENGAGE': 25000,      # 25km - 脱离阶段
+            'RTB': 15000,            # 15km - 返航阶段
+        }
+        
+        # 敌方机动时间参数
+        self.enemy_maneuver_times = {
+            'crank_duration': 25.0,      # Crank机动持续时间
+            'attack_duration': 30.0,     # 攻击阶段持续时间
+            'disengage_duration': 20.0,  # 脱离阶段持续时间
+            'rtb_duration': 40.0,        # 返航阶段持续时间
+        }
 
         logging.info("PincerAttackTacticalTask initialized")
 
@@ -369,190 +402,379 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             return self._maintain_heading_precise(env, agent_id, 180.0)
 
     def _get_enemy_command_indices(self, env, agent_id):
-        """敌方战术指令索引 - 直接复制拖曳射击项目的敌方AI逻辑"""
+        """敌方战术指令索引 - 强制使用内置简化BVR FSM"""
         current_time = env.current_step * env.time_interval
-
-        # 导入并使用拖曳射击项目的敌方AI系统
-        try:
-            import os
-            import sys
-            # 添加当前目录到Python路径
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
-
-            from enemy_tactical_ai import get_enemy_tactical_command
-            commands = get_enemy_tactical_command(env, agent_id, current_time)
-            logging.info(f"✅ {agent_id} 敌方AI指令: {commands}")
-            return commands
-        except ImportError as e:
-            logging.warning(f"❌ Enemy tactical AI import failed: {e}, using fallback logic")
-            # 回退到原有逻辑
-            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
-        except Exception as e:
-            logging.error(f"❌ {agent_id} 敌方AI执行错误: {e}, using fallback logic")
-            import traceback
-            logging.error(f"详细错误信息: {traceback.format_exc()}")
-            # 回退到原有逻辑
-            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+        return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id, current_time):
-        """敌方战术指令索引 - 强制使用完整BVR战术循环"""
-        # 强制使用我的新BVR循环，不再尝试调用拖曳射击项目的AI
-        print(f"🎯 {agent_id}: 使用新BVR战术循环 (时间: {current_time:.1f}s)")
-
-        # 初始化敌方BVR状态管理
-        if not hasattr(self, 'enemy_bvr_states'):
-            self.enemy_bvr_states = {}
-
-        if agent_id not in self.enemy_bvr_states:
-            self.enemy_bvr_states[agent_id] = {
-                'phase': 'approach',  # approach, engage, cold_turn, rtb, re_engage
+        """敌方对抗机动逻辑：真正模仿我方的控制距离时间线
+        与我方钳形战术形成真实对抗，每个阶段都有明确的航向控制"""
+        
+        # 确保敌方角色分配
+        self._ensure_enemy_roles(env)
+        
+        # 获取当前态势
+        my_ac = env.agents[agent_id]
+        my_pos = my_ac.get_position()
+        my_heading = np.rad2deg(my_ac.get_property_value(c.attitude_psi_rad))
+        my_alt = my_pos[2]
+        
+        # 计算到最近我方目标的距离和方位
+        closest_dist = float('inf')
+        closest_bearing = 0.0
+        closest_target = None
+        
+        for fid in ["A0100", "A0200"]:
+            if fid in env.agents and env.agents[fid].is_alive:
+                tgt_pos = env.agents[fid].get_position()
+                d = np.linalg.norm(tgt_pos - my_pos)
+                if d < closest_dist:
+                    closest_dist = d
+                    closest_bearing = self._calculate_bearing_to_target(my_pos, tgt_pos)
+                    closest_target = fid
+        
+        # 无目标时返航
+        if closest_dist == float('inf'):
+            return self._maintain_heading_precise(env, agent_id, 0.0)
+        
+        # 初始化敌方对抗状态
+        if agent_id not in self.enemy_combat_states:
+            # 固定侧向：shooter偏左(-1)，support偏右(+1)
+            role = self.enemy_roles.get(agent_id, 'support')
+            side_sign = -1 if role == 'shooter' else 1
+            self.enemy_combat_states[agent_id] = {
+                'phase': 'OBSERVATION',
                 'phase_start_time': current_time,
-                'engagement_count': 0,
-                'last_rtb_time': 0,
-                'rtb_completed': False
+                'initial_heading': my_heading,
+                'initial_altitude': my_alt,
+                'last_shot_time': -999.0,
+                'side_sign': side_sign,
+                'hold_heading': None,
+                'hold_until': 0.0,
+                'has_fired': False
             }
+        
+        state = self.enemy_combat_states[agent_id]
+        role = self.enemy_roles.get(agent_id, 'support')
+        side_sign = state.get('side_sign', -1 if role == 'shooter' else 1)
+        
+        # 若存在保持机动（notch/cold），在时间窗口内维持
+        if state.get('hold_heading') is not None and current_time < state.get('hold_until', 0.0):
+            return self._maintain_heading_precise(env, agent_id, state['hold_heading'])
 
-        # 获取敌机状态
+        # 检查来袭导弹威胁：触发一次notch并保持数秒，避免抖动
+        if self._check_missile_threat(env, agent_id):
+            # 动态notch保持：距离近保持更短，并加入轻微下降（通过低速俯仰由低层控制处理，这里仅做航向）
+            notch_heading = (closest_bearing + side_sign * 90.0) % 360.0
+            # 简单距离近似：用closest_dist估计，<30km -> 2s，30–60km -> 4s，>60km -> 6s
+            if closest_dist < 30000:
+                hold_time = 2.0
+            elif closest_dist < 60000:
+                hold_time = 4.0
+            else:
+                hold_time = 6.0
+            state['hold_heading'] = notch_heading
+            state['hold_until'] = current_time + hold_time
+            logging.debug(f"敌方{agent_id}执行notch规避，转向{notch_heading:.1f}°，保持{hold_time:.1f}s 至{state['hold_until']:.1f}s")
+            return self._maintain_heading_precise(env, agent_id, notch_heading)
+        
+        # 根据距离确定对抗阶段（与我方完全对应）
+        current_phase = self._determine_enemy_phase(closest_dist)
+        
+        # 阶段切换处理
+        if state['phase'] != current_phase:
+            state['phase'] = current_phase
+            state['phase_start_time'] = current_time
+            logging.info(f"敌方{agent_id}进入{current_phase}阶段，距离{closest_dist/1000:.1f}km")
+        
+        # 执行对应阶段的机动（真正模仿我方的逻辑）
+        if current_phase == 'OBSERVATION':
+            return self._execute_observation_phase(env, agent_id, current_time, state, closest_bearing, role)
+        elif current_phase == 'ENGAGEMENT':
+            return self._execute_engagement_phase(env, agent_id, current_time, state, closest_bearing, role)
+        elif current_phase == 'ATTACK':
+            return self._execute_attack_phase(env, agent_id, current_time, state, closest_bearing, role)
+        elif current_phase == 'DISENGAGE':
+            return self._execute_disengage_phase(env, agent_id, current_time, state, closest_bearing, role)
+        else:  # RTB阶段
+            return self._execute_rtb_phase(env, agent_id, current_time, state)
+    
+    def _determine_enemy_phase(self, distance):
+        """根据距离确定敌方对抗阶段（与我方战术阶段完全对应）"""
+        if distance >= 81000:  # 81km - 对应我方NLT_MELD
+            return 'OBSERVATION'
+        elif distance >= 45000:  # 45km - 对应我方MELD_MTR
+            return 'ENGAGEMENT'
+        elif distance >= 41000:  # 41km - 对应我方MTR_TR
+            return 'ATTACK'
+        elif distance >= 19600:  # 19.6km - 对应我方TR_DOR
+            return 'DISENGAGE'
+        else:
+            return 'RTB'
+    
+    def _check_missile_threat(self, env, agent_id):
+        """检查是否有来袭导弹威胁"""
+        if hasattr(env, '_missile_records'):
+            for mid, m in getattr(env, '_missile_records', {}).items():
+                if m.get('status') == 'LAUNCHED' and m.get('target') == agent_id:
+                    return True
+        return False
+    
+    # 旧的notch函数已删除，使用简单的notch规避逻辑
+    
+    def _execute_observation_phase(self, env, agent_id, current_time, state, closest_bearing, role):
+        """远距离观察阶段：朝向目标为主，混合初始航向，避免早期交叉和过度偏向"""
+        side_sign = state.get('side_sign', -1 if role == 'shooter' else 1)
+        # 混合初始航向与目标方位：初期占比更多初始航向，逐步向目标方位过渡
+        t = max(0.0, min((current_time - state['phase_start_time']) / 12.0, 1.0))  # 12秒内线性过渡
+        base_heading = (1 - t) * state['initial_heading'] + t * closest_bearing
+        target_heading = (base_heading + side_sign * 5.0) % 360.0
+        logging.debug(f"敌方{agent_id}观察阶段：blend={t:.2f}, 初始{state['initial_heading']:.1f}°, 目标{closest_bearing:.1f}°, 输出{target_heading:.1f}°")
+        return self._maintain_heading_precise(env, agent_id, target_heading)
+
+    def _execute_engagement_phase(self, env, agent_id, current_time, state, closest_bearing, role):
+        """中距离对抗阶段：固定侧向的crank（±30°），但相对目标方位进行限制，避免偏到不对称方向"""
+        side_sign = state.get('side_sign', -1 if role == 'shooter' else 1)
+        # 相对目标进行±30°，但限制与初始航向的偏差，避免交叉过大
+        desired = (closest_bearing + side_sign * 30.0) % 360.0
+        # 用最小角差向desired靠近，限制每步最大转向（平滑）
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+        turn_limit = 15.0  # 每阶段调用限制单步转向
+        diff = ((desired - current_heading + 540) % 360) - 180
+        target_heading = (current_heading + np.clip(diff, -turn_limit, turn_limit)) % 360.0
+        logging.debug(f"敌方{agent_id}对抗阶段：desired={desired:.1f}°, 当前{current_heading:.1f}°, 输出{target_heading:.1f}°")
+        return self._maintain_heading_precise(env, agent_id, target_heading)
+    
+    def _execute_attack_phase(self, env, agent_id, current_time, state, closest_bearing, role):
+        """近距离攻击阶段：收紧至±15–20°，shooter优先保持攻角；若刚发射则触发短cold保持"""
+        side_sign = state.get('side_sign', -1 if role == 'shooter' else 1)
+        desired = (closest_bearing + side_sign * 18.0) % 360.0
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+        turn_limit = 20.0
+        diff = ((desired - current_heading + 540) % 360) - 180
+        target_heading = (current_heading + np.clip(diff, -turn_limit, turn_limit)) % 360.0
+        logging.debug(f"敌方{agent_id}攻击阶段：desired={desired:.1f}°, 当前{current_heading:.1f}°, 输出{target_heading:.1f}°")
+        return self._maintain_heading_precise(env, agent_id, target_heading)
+    
+    def _execute_disengage_phase(self, env, agent_id, current_time, state, closest_bearing, role):
+        """脱离阶段：执行冷转向（cold）保持若干秒，然后转入RTB门槛逻辑"""
+        # 根据固定侧向执行冷转向：背离目标30–60°，并保持数秒避免来回摇摆
+        side_sign = state.get('side_sign', -1 if role == 'shooter' else 1)
+        desired = (closest_bearing + side_sign * 70.0) % 360.0
+        state['hold_heading'] = desired
+        state['hold_until'] = current_time + 8.0
+        logging.debug(f"敌方{agent_id}脱离阶段：cold至{desired:.1f}°，保持至{state['hold_until']:.1f}s")
+        return self._maintain_heading_precise(env, agent_id, desired)
+
+    def _execute_rtb_phase(self, env, agent_id, current_time, state):
+        """返航阶段（对应我方DOR_DR）：稳定返航"""
+        # 与我方相反：我方返航180°时，敌方返航0°
+        target_heading = 0.0  # 北向返航
+        
+        logging.debug(f"敌方{agent_id}返航阶段：转向{target_heading:.1f}°")
+        return self._maintain_heading_precise(env, agent_id, target_heading)
+
+    # 旧的FSM函数已删除，使用新的对抗阶段逻辑
+
+    def _ensure_enemy_roles(self, env):
+        """确保始终有一个shooter；若当前shooter阵亡则将support提升为shooter。"""
+        # 先确认现有分配是否有效
+        shooter_alive = False
+        for eid, role in list(self.enemy_roles.items()):
+            if role == 'shooter' and eid in env.agents and env.agents[eid].is_alive:
+                shooter_alive = True
+                break
+        if shooter_alive:
+            return
+        # shooter阵亡则寻找一个support接替
+        for eid in ['B0100', 'B0200']:
+            if eid in env.agents and env.agents[eid].is_alive:
+                # 设置该机为shooter，其余为support
+                for k in list(self.enemy_roles.keys()):
+                    self.enemy_roles[k] = 'support'
+                self.enemy_roles[eid] = 'shooter'
+                return
+
+    def _assess_enemy_threats(self, env, agent_id, current_time):
+        """评估敌方威胁等级"""
         enemy_aircraft = env.agents[agent_id]
         enemy_pos = enemy_aircraft.get_position()
-        current_heading = np.rad2deg(enemy_aircraft.get_property_value(c.attitude_psi_rad))
-
-        # 寻找最近的友方目标
-        min_distance = float('inf')
-        closest_friendly_pos = None
+        
+        # 检查导弹威胁
+        missile_threat = False
+        missile_distance = float('inf')
+        
+        # 检查环境中的导弹
+        if hasattr(env, '_missile_records'):
+            for missile_id, missile_data in env._missile_records.items():
+                if missile_data['status'] == 'LAUNCHED' and missile_data['target'] == agent_id:
+                    # 计算导弹距离和威胁
+                    missile_threat = True
+                    missile_distance = self._calculate_distance(enemy_aircraft, env.agents[missile_data['launcher']])
+                    break
+        
+        # 检查友方飞机威胁
+        friendly_threats = []
         for friendly_id in ["A0100", "A0200"]:
             if friendly_id in env.agents and env.agents[friendly_id].is_alive:
-                friendly_pos = env.agents[friendly_id].get_position()
-                distance = np.linalg.norm(friendly_pos - enemy_pos)
-                if distance < min_distance:
-                    min_distance = distance
-                    closest_friendly_pos = friendly_pos
+                distance = self._calculate_distance(enemy_aircraft, env.agents[friendly_id])
+                friendly_threats.append({
+                    'id': friendly_id,
+                    'distance': distance,
+                    'bearing': self._calculate_bearing_to_target(enemy_pos, env.agents[friendly_id].get_position())
+                })
+        
+        # 威胁等级评估
+        threat_level = 'low'
+        if missile_threat and missile_distance < 30000:  # 30km内有导弹威胁
+            threat_level = 'critical'
+        elif missile_threat:
+            threat_level = 'high'
+        elif friendly_threats and min([t['distance'] for t in friendly_threats]) < 25000:  # 25km内有敌机
+            threat_level = 'high'
+        elif friendly_threats and min([t['distance'] for t in friendly_threats]) < 40000:  # 40km内有敌机
+            threat_level = 'medium'
+        
+        # 攻击机会评估
+        attack_opportunity = False
+        if friendly_threats:
+            closest_friendly = min(friendly_threats, key=lambda x: x['distance'])
+            if closest_friendly['distance'] <= 50000:  # 50km内有攻击机会
+                attack_opportunity = True
+        
+        return {
+            'missile_threat': missile_threat,
+            'missile_distance': missile_distance,
+            'threat_level': threat_level,
+            'friendly_threats': friendly_threats,
+            'attack_opportunity': attack_opportunity,
+            'current_time': current_time
+        }
 
-        if closest_friendly_pos is None:
-            return 7, 8, 3  # 保持当前状态
-
-        # 获取当前BVR状态
-        bvr_state = self.enemy_bvr_states[agent_id]
-        phase_duration = current_time - bvr_state['phase_start_time']
-
-        print(f"🎯 {agent_id}: BVR状态={bvr_state['phase']}, 距离={min_distance/1000:.1f}km, 阶段时长={phase_duration:.1f}s")
-
-        # 执行完整的BVR战术循环
-        return self._execute_enemy_bvr_cycle(env, agent_id, current_time, min_distance, closest_friendly_pos, bvr_state, phase_duration)
-
-    def _execute_enemy_bvr_cycle(self, env, agent_id, current_time, distance, target_pos, bvr_state, phase_duration):
-        """执行敌方完整BVR战术循环 - 修复版：确保真正的0°北向RTB"""
+    def _execute_evasive_maneuver(self, env, agent_id, current_time, threat_assessment):
+        """执行规避机动"""
         enemy_aircraft = env.agents[agent_id]
-        enemy_pos = enemy_aircraft.get_position()
+        current_heading = np.rad2deg(enemy_aircraft.get_property_value(c.attitude_psi_rad))
+        current_altitude = self._safe_get_altitude(enemy_aircraft)
+        
+        # 根据威胁方向选择规避策略
+        if threat_assessment['friendly_threats']:
+            closest_threat = min(threat_assessment['friendly_threats'], key=lambda x: x['distance'])
+            threat_bearing = closest_threat['bearing']
+            
+            # 计算规避航向（远离威胁）
+            evasive_heading = (threat_bearing + 180) % 360
+            
+            # 高度变化：随机上下机动
+            altitude_change = np.random.choice([-500, 500, -1000, 1000])
+            target_altitude = current_altitude + altitude_change
+            
+            # 执行规避机动
+            print(f"🚶 {agent_id}: 执行规避机动 - 威胁距离{closest_threat['distance']/1000:.1f}km, 规避航向{evasive_heading:.1f}°")
+            
+            # 转换为动作索引
+            alt_cmd = self._convert_altitude_to_index(target_altitude - current_altitude)
+            hdg_cmd = self._convert_heading_to_index(np.deg2rad(evasive_heading - current_heading))
+            vel_cmd = 3  # 保持当前速度
+            
+            return alt_cmd, hdg_cmd, vel_cmd
+        
+        # 默认规避动作
+        return 7, 8, 3
+
+    def _execute_defensive_tactics(self, env, agent_id, current_time, threat_assessment):
+        """执行防御战术"""
+        enemy_aircraft = env.agents[agent_id]
         current_heading = np.rad2deg(enemy_aircraft.get_property_value(c.attitude_psi_rad))
 
-        current_phase = bvr_state['phase']
+        # 执行Notch机动（90度侧向规避）
+        if threat_assessment['friendly_threats']:
+            closest_threat = min(threat_assessment['friendly_threats'], key=lambda x: x['distance'])
+            threat_bearing = closest_threat['bearing']
+            
+            # Notch机动：侧向90度
+            notch_heading = (threat_bearing + 90) % 360
+            if np.random.random() < 0.5:
+                notch_heading = (threat_bearing - 90) % 360
+            
+            print(f"🛡️ {agent_id}: 执行Notch防御机动 - 威胁方向{threat_bearing:.1f}°, Notch航向{notch_heading:.1f}°")
+            
+            # 转换为动作索引
+            hdg_cmd = self._convert_heading_to_index(np.deg2rad(notch_heading - current_heading))
+            return 7, hdg_cmd, 3
+        
+        return 7, 8, 3
 
-        # 强制RTB条件检查 - 优先级最高
-        force_rtb = False
-        if distance < 15000:  # 15km以下强制RTB
-            force_rtb = True
-            print(f"🚨 {agent_id}: 距离过近强制RTB - 距离{distance/1000:.1f}km")
-        elif bvr_state['engagement_count'] >= 2:  # 2轮交战后强制RTB
-            force_rtb = True
-            print(f"🚨 {agent_id}: 交战轮数达到上限强制RTB - 第{bvr_state['engagement_count']}轮")
-        elif current_time > 180.0:  # 3分钟后强制RTB
-            force_rtb = True
-            print(f"🚨 {agent_id}: 时间到强制RTB - {current_time:.1f}s")
+    def _execute_attack_tactics(self, env, agent_id, current_time, threat_assessment):
+        """执行攻击战术"""
+        enemy_aircraft = env.agents[agent_id]
+        current_heading = np.rad2deg(enemy_aircraft.get_property_value(c.attitude_psi_rad))
+        
+        if threat_assessment['friendly_threats']:
+            closest_target = min(threat_assessment['friendly_threats'], key=lambda x: x['distance'])
+            target_bearing = closest_target['bearing']
+            
+            # 攻击机动：Crank + 高度变化
+            crank_angle = np.random.choice([30, -30, 45, -45])
+            attack_heading = (target_bearing + crank_angle) % 360
+            
+            # 高度变化：随机上下
+            altitude_change = np.random.choice([-300, 300, -600, 600])
+            current_altitude = self._safe_get_altitude(enemy_aircraft)
+            target_altitude = current_altitude + altitude_change
+            
+            print(f"⚔️ {agent_id}: 执行攻击机动 - 目标距离{closest_target['distance']/1000:.1f}km, 攻击航向{attack_heading:.1f}°")
+            
+            # 转换为动作索引
+            alt_cmd = self._convert_altitude_to_index(target_altitude - current_altitude)
+            hdg_cmd = self._convert_heading_to_index(np.deg2rad(attack_heading - current_heading))
+            vel_cmd = 3  # 保持当前速度
+            
+            return alt_cmd, hdg_cmd, vel_cmd
+        
+        return 7, 8, 3
 
-        if force_rtb:
-            bvr_state['phase'] = 'final_rtb'
-            bvr_state['phase_start_time'] = current_time
-            target_heading = 0.0  # 强制北向返航
-            print(f"🏠 {agent_id}: 强制RTB返航 - 目标航向{target_heading:.1f}°")
-            return self._maintain_heading_precise(env, agent_id, target_heading)
+    def _execute_standard_bvr(self, env, agent_id, current_time, threat_assessment):
+        """简化默认：指向最近友机航向，避免复杂逻辑"""
+        my_ac = env.agents[agent_id]
+        my_pos = my_ac.get_position()
+        closest_dist = float('inf')
+        closest_bearing = 0.0
+        for fid in ["A0100", "A0200"]:
+            if fid in env.agents and env.agents[fid].is_alive:
+                tgt_pos = env.agents[fid].get_position()
+                d = np.linalg.norm(tgt_pos - my_pos)
+                if d < closest_dist:
+                    closest_dist = d
+                    closest_bearing = self._calculate_bearing_to_target(my_pos, tgt_pos)
+        if closest_dist == float('inf'):
+            return 7, 8, 3
+        return self._maintain_heading_precise(env, agent_id, closest_bearing)
 
-        # 阶段1：接敌阶段 (Approach Phase)
-        if current_phase == 'approach':
-            if distance > 40000:  # 40km以上：继续接敌
-                target_heading = self._calculate_bearing_to_target(enemy_pos, target_pos)
-                print(f"🎯 {agent_id}: 接敌阶段 - 距离{distance/1000:.1f}km，目标航向{target_heading:.1f}°")
-                return self._maintain_heading_precise(env, agent_id, target_heading)
-            else:  # 进入交战阶段
-                bvr_state['phase'] = 'engage'
-                bvr_state['phase_start_time'] = current_time
-                print(f"⚔️ {agent_id}: 进入交战阶段 - 距离{distance/1000:.1f}km")
+    def _convert_altitude_to_index(self, altitude_change_m):
+        """将高度变化转换为动作索引"""
+        altitude_change_km = altitude_change_m / 1000.0
+        
+        # 找到最接近的高度变化索引
+        differences = np.abs(self.norm_delta_altitude - altitude_change_km)
+        return np.argmin(differences)
 
-        # 阶段2：交战阶段 (Engagement Phase)
-        elif current_phase == 'engage':
-            if distance < 25000:  # 25km以下：立即Cold Turn
-                bvr_state['phase'] = 'cold_turn'
-                bvr_state['phase_start_time'] = current_time
-                print(f"🚨 {agent_id}: 距离过近，执行Cold Turn - 距离{distance/1000:.1f}km")
-            elif phase_duration > 20.0:  # 交战20秒后主动Cold Turn
-                bvr_state['phase'] = 'cold_turn'
-                bvr_state['phase_start_time'] = current_time
-                print(f"🔄 {agent_id}: 交战时间到，执行Cold Turn - 距离{distance/1000:.1f}km")
-            else:  # 继续BVR交战机动
-                # 执行Crank机动保持雷达照射
-                if agent_id == "B0100":
-                    crank_angle = 45.0  # 右Crank
-                else:
-                    crank_angle = -45.0  # 左Crank
-                target_heading = (current_heading + crank_angle) % 360
-                print(f"⚔️ {agent_id}: BVR交战机动 - Crank{crank_angle:.0f}°，目标航向{target_heading:.1f}°")
-                return self._maintain_heading_precise(env, agent_id, target_heading)
-
-        # 阶段3：Cold Turn阶段 (Cold Turn Phase)
-        elif current_phase == 'cold_turn':
-            if phase_duration < 10.0:  # Cold Turn持续10秒
-                target_heading = 0.0  # 转向北方（敌方基地方向）
-                print(f"❄️ {agent_id}: Cold Turn机动 - 目标航向{target_heading:.1f}°，持续{phase_duration:.1f}s")
-                return self._maintain_heading_precise(env, agent_id, target_heading)
-            else:  # Cold Turn完成，进入RTB
-                bvr_state['phase'] = 'rtb'
-                bvr_state['phase_start_time'] = current_time
-                bvr_state['last_rtb_time'] = current_time
-                print(f"🏃 {agent_id}: Cold Turn完成，开始RTB返航")
-
-        # 阶段4：返航基地阶段 (RTB Phase)
-        elif current_phase == 'rtb':
-            if phase_duration < 30.0:  # RTB持续30秒
-                target_heading = 0.0  # 持续北向返航
-                print(f"🏠 {agent_id}: RTB返航 - 目标航向{target_heading:.1f}°，返航{phase_duration:.1f}s")
-                return self._maintain_heading_precise(env, agent_id, target_heading)
-            else:  # RTB完成，考虑重新接敌
-                bvr_state['rtb_completed'] = True
-                bvr_state['engagement_count'] += 1
-
-                if bvr_state['engagement_count'] < 2 and distance > 40000:  # 最多2轮，距离足够远
-                    bvr_state['phase'] = 're_engage'
-                    bvr_state['phase_start_time'] = current_time
-                    print(f"🔄 {agent_id}: RTB完成，准备重新接敌 - 第{bvr_state['engagement_count']}轮")
-                else:  # 继续返航
-                    bvr_state['phase'] = 'final_rtb'
-                    target_heading = 0.0
-                    print(f"🏠 {agent_id}: 交战结束，最终返航基地 - 目标航向{target_heading:.1f}°")
-                    return self._maintain_heading_precise(env, agent_id, target_heading)
-
-        # 阶段5：重新接敌阶段 (Re-engagement Phase)
-        elif current_phase == 're_engage':
-            if distance > 45000:  # 距离足够远，重新接敌
-                bvr_state['phase'] = 'approach'
-                bvr_state['phase_start_time'] = current_time
-                print(f"⚔️ {agent_id}: 重新接敌开始，第{bvr_state['engagement_count']}轮")
-            else:  # 距离不够，继续返航
-                target_heading = 0.0
-                print(f"🏃 {agent_id}: 距离不够，继续返航 - 距离{distance/1000:.1f}km，目标航向{target_heading:.1f}°")
-                return self._maintain_heading_precise(env, agent_id, target_heading)
-
-        # 阶段6：最终返航阶段 (Final RTB Phase)
-        elif current_phase == 'final_rtb':
-            target_heading = 0.0  # 持续北向返航
-            print(f"🏠 {agent_id}: 最终返航基地 - 目标航向{target_heading:.1f}°")
-            return self._maintain_heading_precise(env, agent_id, target_heading)
-
-        # 默认返航
-        target_heading = 0.0
-        print(f"🏠 {agent_id}: 默认返航 - 目标航向{target_heading:.1f}°")
-        return self._maintain_heading_precise(env, agent_id, target_heading)
+    def _safe_get_altitude(self, agent):
+        """安全获取飞机高度"""
+        try:
+            position = agent.get_position()
+            if hasattr(position, '__len__') and len(position) >= 3:
+                return float(position[2])
+        except:
+            pass
+        
+        try:
+            from envs.JSBSim.core.catalog import ExtraCatalog
+            return agent.get_property_value(ExtraCatalog.position_h_sl_m)
+        except:
+            pass
+        
+        return 6000.0  # 默认高度
 
     # ========== 精确航向保持和机动方法 ==========
     def _maintain_heading_precise(self, env, agent_id, target_heading):
@@ -628,9 +850,11 @@ class PincerAttackTacticalTask(MultipleCombatTask):
 
     def _calculate_bearing_to_target(self, my_pos, target_pos):
         """计算指向目标的方位角"""
-        dx = target_pos[0] - my_pos[0]
-        dy = target_pos[1] - my_pos[1]
-        bearing = np.rad2deg(np.arctan2(dx, dy))
+        # 坐标为NEU: [North, East, Up]
+        d_north = target_pos[0] - my_pos[0]
+        d_east = target_pos[1] - my_pos[1]
+        # 航向以北为0°，顺时针为正，因此使用atan2(East, North)
+        bearing = np.rad2deg(np.arctan2(d_east, d_north))
         return bearing % 360
 
     def _convert_heading_to_index(self, heading_diff_rad):
@@ -782,24 +1006,46 @@ class PincerAttackTacticalTask(MultipleCombatTask):
                 logging.info(f"🚀 A0200僚机发射: 阶段={self.current_phase.value}, 距离={min_distance/1000:.1f}km")
 
         elif agent_id.startswith('B'):  # 敌方
-            # 敌方智能发射逻辑：基于BVR状态
-            if hasattr(self, 'enemy_bvr_states') and agent_id in self.enemy_bvr_states:
-                bvr_state = self.enemy_bvr_states[agent_id]
-                current_bvr_phase = bvr_state['phase']
-
-                # 敌方在交战阶段发射导弹
-                if current_bvr_phase in ['approach', 'engage'] and min_distance <= 50000:
-                    should_launch = True
-                    logging.info(f"🚀 {agent_id}敌方发射: BVR阶段={current_bvr_phase}, 距离={min_distance/1000:.1f}km")
-                # 敌方在接敌阶段也可以发射
-                elif current_bvr_phase == 'approach' and min_distance <= 45000:
-                    should_launch = True
-                    logging.info(f"🚀 {agent_id}敌方接敌发射: BVR阶段={current_bvr_phase}, 距离={min_distance/1000:.1f}km")
+            # shooter-only：只有shooter可以开火（若shooter阵亡会自动移交）
+            self._ensure_enemy_roles(env)
+            shooter_id = None
+            for eid, role in self.enemy_roles.items():
+                if role == 'shooter':
+                    shooter_id = eid
+                    break
+            if shooter_id is not None and agent_id != shooter_id:
+                should_launch = False
             else:
-                # 回退逻辑：简单的距离判断
-                if min_distance <= 45000:
-                    should_launch = True
-                    logging.info(f"🚀 {agent_id}敌方发射: 距离={min_distance/1000:.1f}km")
+                # 根据新的对抗阶段逻辑：ENGAGEMENT/ATTACK阶段内发射（提高对抗性）
+                if agent_id in self.enemy_combat_states:
+                    combat_state = self.enemy_combat_states[agent_id]
+                    can_fire = False
+                    if (combat_state['phase'] == 'ATTACK' and 40000.0 <= min_distance <= 45000.0):
+                        can_fire = True
+                    elif (combat_state['phase'] == 'ENGAGEMENT' and 50000.0 <= min_distance <= 60000.0):
+                        can_fire = True
+                    if can_fire:
+                        should_launch = True
+                        logging.info(f"🚀 {agent_id} 敌方shooter发射: 阶段={combat_state['phase']}, 距离={min_distance/1000:.1f}km")
+                        # 发射后短暂cold
+                        combat_state['has_fired'] = True
+                        current_time = env.current_step * env.time_interval
+                        closest_bearing = 0.0
+                        # 计算最近友机方位
+                        my_pos = env.agents[agent_id].get_position()
+                        min_d = float('inf')
+                        for fid in ["A0100", "A0200"]:
+                            if fid in env.agents and env.agents[fid].is_alive:
+                                d = np.linalg.norm(env.agents[fid].get_position() - my_pos)
+                                if d < min_d:
+                                    min_d = d
+                                    closest_bearing = self._calculate_bearing_to_target(my_pos, env.agents[fid].get_position())
+                        side_sign = combat_state.get('side_sign', -1 if self.enemy_roles.get(agent_id,'support')=='shooter' else 1)
+                        cold_heading = (closest_bearing + side_sign * 110.0) % 360.0
+                        combat_state['hold_heading'] = cold_heading
+                        combat_state['hold_until'] = current_time + 6.0
+                    else:
+                        logging.debug(f"敌方{agent_id}不满足发射条件: 阶段={combat_state['phase']}, 距离={min_distance/1000:.1f}km")
 
         if should_launch:
             # 执行发射

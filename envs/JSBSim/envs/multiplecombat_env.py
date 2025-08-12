@@ -230,6 +230,8 @@ class MultipleCombatEnv(BaseEnv):
             ])
             logging.debug(f"Reset {sim.uid} at position: Long={state[0]}, Lat={state[1]}, Alt={state[2]} ft")
         self._tempsims.clear()  # 清空临时模拟器（如导弹）
+        if hasattr(self, '_finished_missiles'):
+            self._finished_missiles.clear()  # 清空已结束的导弹
         logging.info("All simulators reset")
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:

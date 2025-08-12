@@ -669,6 +669,10 @@ class MissileSimulator(BaseSimulator):
         # 继承发射平台的运动参数
         self.parent_aircraft = parent
         self.parent_aircraft.launch_missiles.append(self)
+
+        # 设置数据记录所需的属性
+        self.launcher_id = parent.uid  # 添加发射者ID属性
+        self.parent_uid = parent.uid   # 备用属性名
         self._geodetic[:] = parent.get_geodetic()
         self._position[:] = parent.get_position()
         self._velocity[:] = parent.get_velocity()
@@ -682,8 +686,10 @@ class MissileSimulator(BaseSimulator):
         self._dtheta, self._dphi = 0, 0
         self.__status = MissileSimulator.LAUNCHED
         self._distance_pre = np.inf
-        self._distance_increment = deque(maxlen=int(10 / self.dt))  # 10s距离增量检查
-        self._left_t = int(1 / self.dt)
+        # 确保dt是数值类型
+        dt_value = float(self.dt) if isinstance(self.dt, str) else self.dt
+        self._distance_increment = deque(maxlen=int(10 / dt_value))  # 10s距离增量检查
+        self._left_t = int(1 / dt_value)
         self._phase = MissileSimulator.BOOST_PHASE
         self._phase_changed = False
 
@@ -703,6 +709,10 @@ class MissileSimulator(BaseSimulator):
     def target(self, target: AircraftSimulator):
         self.target_aircraft = target
         self.target_aircraft.under_missiles.append(self)
+
+        # 设置数据记录所需的属性
+        self.target_id = target.uid    # 添加目标ID属性
+        self.target_uid = target.uid   # 备用属性名
 
     def run(self):
         self._t += self.dt

@@ -195,7 +195,11 @@ class R27ERMissileSimulator(BaseSimulator):
         """发射导弹"""
         self.parent_aircraft = parent
         self.parent_aircraft.launch_missiles.append(self)
-        
+
+        # 设置数据记录所需的属性
+        self.launcher_id = parent.uid  # 添加发射者ID属性
+        self.parent_uid = parent.uid   # 备用属性名
+
         # 继承发射平台的运动参数
         self._geodetic[:] = parent.get_geodetic()
         self._position[:] = parent.get_position()
@@ -229,6 +233,10 @@ class R27ERMissileSimulator(BaseSimulator):
         """设置目标"""
         self.target_aircraft = target
         self.target_aircraft.under_missiles.append(self)
+
+        # 设置数据记录所需的属性
+        self.target_id = target.uid    # 添加目标ID属性
+        self.target_uid = target.uid   # 备用属性名
         
         # 设置目标后，调整初始姿态对准目标
         velocity_norm = np.linalg.norm(self._velocity)

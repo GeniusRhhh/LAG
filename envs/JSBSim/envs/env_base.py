@@ -89,6 +89,7 @@ class BaseEnv(gymnasium.Env):
                     sim.enemies.append(s)
 
         self._tempsims = {}  # type: Dict[str, BaseSimulator]
+        self._finished_missiles = {}  # type: Dict[str, BaseSimulator] - 保存已结束的导弹
 
     def add_temp_simulator(self, sim: BaseSimulator):
         self._tempsims[sim.uid] = sim
@@ -104,6 +105,7 @@ class BaseEnv(gymnasium.Env):
         for sim in self._jsbsims.values():
             sim.reload()
         self._tempsims.clear()
+        self._finished_missiles.clear()
         # reset task
         self.task.reset(self)
         obs = self.get_obs()
@@ -136,8 +138,23 @@ class BaseEnv(gymnasium.Env):
         for _ in range(self.agent_interaction_steps):
             for sim in self._jsbsims.values():
                 sim.run()
-            for sim in self._tempsims.values():
+
+            # 运行导弹并处理已结束的导弹
+            finished_missiles = []
+            for missile_id, sim in list(self._tempsims.items()):
                 sim.run()
+                # 检查导弹是否已结束（击中或未击中）
+                if not sim.is_alive:
+                    finished_missiles.append((missile_id, sim))
+
+            # 将已结束的导弹移动到finished_missiles中
+            for missile_id, sim in finished_missiles:
+                if missile_id not in self._finished_missiles:
+                    self._finished_missiles[missile_id] = sim
+                    # 从活跃导弹中移除
+                    if missile_id in self._tempsims:
+                        del self._tempsims[missile_id]
+
         self.task.step(self)
 
         obs = self.get_obs()
