@@ -1707,7 +1707,7 @@ class EnemyTacticalAI:
                 return 7, 8, 4  # 保持高度，直飞，加速
 
         elif maneuver_type == EnemyManeuverType.BARREL_ROLL:
-            # 桶滚机动：复杂的三维机动 - 增强版
+            # 桶滚机动：高级的三维机动 - 增强版
             if progress < 0.2:
                 return 10, 6, 5  # 大幅爬升，左转，高速
             elif progress < 0.4:
@@ -1865,7 +1865,7 @@ class EnemyTacticalAI:
             potential_energy = 9.81 * current_altitude
             total_energy = kinetic_energy + potential_energy
 
-            # 与敌机比较能量状态
+            # 与敌机对比能量状态
             enemy_energies = []
             for friendly_id in ["A0100", "A0200"]:
                 if friendly_id in env.agents and env.agents[friendly_id].is_alive:
@@ -2524,7 +2524,7 @@ def _determine_tactical_role(agent_id: str, situation: Dict[str, Any]) -> str:
 
 
 def _select_intelligent_behavior(situation: Dict[str, Any], role: str, agent) -> str:
-    """选择智能战斗行为 - 基于角色和威胁的复杂决策"""
+    """选择智能战斗行为 - 基于角色和威胁的高级决策"""
     distance = situation['target_distance']
     missile_threat = situation['immediate_missile_threat']
     threat_urgency = situation['threat_urgency']
@@ -2590,7 +2590,7 @@ def _select_intelligent_behavior(situation: Dict[str, Any], role: str, agent) ->
 
 
 def _generate_intelligent_commands(behavior: str, situation: Dict[str, Any], role: str, agent) -> Tuple[int, int, int]:
-    """生成智能战斗指令 - 基于行为、角色和威胁的复杂指令生成"""
+    """生成智能战斗指令 - 基于行为、角色和威胁的高级指令生成"""
     # 动作空间: [高度(0-14), 航向(0-16), 速度(0-6)]
 
     # 紧急规避指令 - 最高优先级
@@ -2745,9 +2745,9 @@ def _calculate_opportunity_score(target: Dict[str, Any], battlefield_awareness: 
     elif 10000 <= distance <= 50000:
         score += 3.0
     elif distance < 10000:
-        score += 1.0  # 太近危险
+        score += 1.0  # 距离过近存在危险
     else:
-        score += 0.5  # 太远效果差
+        score += 0.5  # 距离过远效果差
 
     # 高度优势
     if target['altitude_advantage'] > 2000:
@@ -2774,7 +2774,7 @@ def _calculate_opportunity_score(target: Dict[str, Any], battlefield_awareness: 
     elif aspect > 150:
         score += 1.0  # 尾追
 
-    # 目标导弹数量（导弹少的目标更容易攻击）
+    # 目标导弹数量（导弹少的目标更适合攻击）
     if target['missiles'] == 0:
         score += 3.0
     elif target['missiles'] == 1:

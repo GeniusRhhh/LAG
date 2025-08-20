@@ -210,12 +210,12 @@ class BasicManeuvers:
 
     @staticmethod
     def high_g_turn(time_sec: float, initial_heading: float, turn_angle: float = 180.0,
-                   g_force: float = 7.0, turn_rate: float = 8.0, initial_roll: float = 0.0):
-        """高G力转弯 - 在当前滚转姿态下进行水平转弯"""
+                   turn_rate: float = 8.0, initial_roll: float = 0.0):
+        """快速转弯 - 在当前滚转姿态下进行水平转弯"""
         turn_duration = abs(turn_angle) / turn_rate
 
         if time_sec <= turn_duration:
-            # 高G转弯：快速改变航向，保持高度
+            # 快速转弯：快速改变航向，保持高度
             progress = time_sec / turn_duration
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
 
@@ -233,11 +233,11 @@ class BasicManeuvers:
             else:
                 altitude_offset = 0.0
 
-            return "HIGH_G_TURNING", current_heading, altitude_offset, None, current_roll
+            return "FAST_TURNING", current_heading, altitude_offset, None, current_roll
         else:
             final_heading = normalize_heading(initial_heading + turn_angle)
             # 转弯完成后，保持初始滚转角
-            return "HIGH_G_TURN_COMPLETE", final_heading, None, None, initial_roll
+            return "FAST_TURN_COMPLETE", final_heading, None, None, initial_roll
 
     @staticmethod
     def enter_inverted_flight(time_sec: float, initial_heading: float, duration: float = 5.0):
@@ -263,7 +263,7 @@ class BasicManeuvers:
 
     @staticmethod
     def vertical_loop(time_sec: float, initial_heading: float, loop_type: str = "full",
-                      g_force: float = 6.0, initial_roll: float = 0.0):
+                      initial_roll: float = 0.0):
         """垂直回旋 - 在当前滚转姿态下进行垂直机动"""
         if loop_type == "full":
             # 完整垂直回旋：上升-倒飞-下降-恢复
@@ -322,7 +322,7 @@ class BasicManeuvers:
         angle_to_enemy = normalize_heading(enemy_heading - initial_heading)
 
         # 大幅增大Crank角度和时间
-        base_crank_angle = 120.0  # 从90度增加到120度！
+        base_crank_angle = 120.0  # 从90度增加到120度
 
         # 根据时间进行超大角度超长时间摆动
         if time_sec < 25.0:
@@ -550,7 +550,6 @@ class CompositeManeuverExecutor:
             # 阶段1：直接使用vertical_loop从倒飞状态开始
             ManeuverStep("vertical_loop", {
                 "loop_type": "half",  # 半回旋（180度垂直）
-                "g_force": 6.0,  # 高G力6G
                 "initial_roll": 135.0  # 从倒飞状态开始
             }, 12.0),  # vertical_loop的half模式需要12秒
 
@@ -811,12 +810,11 @@ class CompositeManeuverExecutor:
                 step_time,
                 state["step_initial_heading"],
                 current_step.params.get("turn_angle", 180.0),
-                current_step.params.get("g_force", 7.0),
                 current_step.params.get("turn_rate", 8.0),
                 current_roll  # 传递当前滚转角
             )
             # 更新最终状态
-            if result[0] in ["HIGH_G_TURNING", "HIGH_G_TURN_COMPLETE"]:
+            if result[0] in ["FAST_TURNING", "FAST_TURN_COMPLETE"]:
                 state["final_heading"] = result[1] if result[1] is not None else state["final_heading"]
                 # 保存滚转角状态
                 if len(result) > 4 and result[4] is not None:
@@ -830,7 +828,6 @@ class CompositeManeuverExecutor:
                 step_time,
                 state["step_initial_heading"],
                 current_step.params.get("loop_type", "half"),
-                current_step.params.get("g_force", 6.0),
                 current_roll  # 传递当前滚转角
             )
             # 更新最终状态

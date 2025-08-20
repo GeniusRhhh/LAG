@@ -1039,7 +1039,7 @@ class DragShootTacticalTask(MultipleCombatTask):
             if current_dir not in sys.path:
                 sys.path.insert(0, current_dir)
 
-            from enemy_tactical_ai_redesigned import get_enemy_tactical_command
+            from enemy_tactical_ai_enhanced import get_enemy_tactical_command
             commands = get_enemy_tactical_command(env, agent_id, current_time)
 
             # 每10秒记录一次敌方AI状态
@@ -1265,16 +1265,21 @@ class DragShootTacticalTask(MultipleCombatTask):
         if current_time - last_launch < self.enemy_missile_cooldown:
             return False
 
-        # 使用敌方AI的威胁评估
+        # 使用简化的威胁评估逻辑，避免旧AI模块错误
         try:
-            from enemy_tactical_ai import enemy_ai
-            threat_level = enemy_ai.evaluate_threat_level(env, agent_id)
+            # 基于距离的简化威胁评估
+            if distance < 25000:  # 25km内为高威胁
+                threat_level = "HIGH"
+            elif distance < 40000:  # 40km内为中威胁
+                threat_level = "MEDIUM"
+            else:
+                threat_level = "LOW"
 
             # 基于威胁等级和距离决定发射
-            if threat_level.value >= 2:  # MEDIUM或更高威胁
+            if threat_level in ["HIGH", "MEDIUM"]:
                 # 在威胁下，更积极地发射
                 if 25000 <= distance <= 60000:
-                    logging.info(f"{agent_id} 威胁发射: 威胁等级={threat_level.name}, 距离={distance/1000:.1f}km")
+                    logging.info(f"{agent_id} 威胁发射: 威胁等级={threat_level}, 距离={distance/1000:.1f}km")
                     return True
 
             # 正常发射条件
@@ -1294,8 +1299,9 @@ class DragShootTacticalTask(MultipleCombatTask):
 
             return False
 
-        except ImportError:
-            # 回退到简单逻辑
+        except Exception as e:
+            logging.error(f"发射决策错误: {e}")
+            # 备用发射逻辑
             if 30000 <= distance <= 50000:
                 return True
             return False
@@ -1423,7 +1429,7 @@ class DragShootTacticalTask(MultipleCombatTask):
                     if time_diff > 30:
                         logging.warning(f"⚠️  僚机发射延迟过大: {time_diff:.1f}s > 30s，可能影响掩护效果")
                     elif time_diff < 0:
-                        logging.info(f"✅  僚机提前发射: {abs(time_diff):.1f}s，良好的战术协调")
+                        logging.info(f"✅  僚机提前发射: {abs(time_diff):.1f}s，有效的战术协调")
                     else:
                         logging.info(f"✅  僚机发射时机合理: {time_diff:.1f}s延迟")
 

@@ -13,7 +13,7 @@ from collections import deque
 try:
     from envs.JSBSim.core.simulatior import BaseSimulator, AircraftSimulator
 except ImportError:
-    # 如果导入失败，创建一个简单的基类
+    # 如果导入失败，创建一个基础的基类
     class BaseSimulator:
         def __init__(self, uid: str, color: str, dt: float):
             self.uid = uid

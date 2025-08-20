@@ -402,9 +402,31 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             return self._maintain_heading_precise(env, agent_id, 180.0)
 
     def _get_enemy_command_indices(self, env, agent_id):
-        """敌方战术指令索引 - 强制使用内置简化BVR FSM"""
+        """敌方战术指令索引 - 使用新的统一敌方AI系统"""
         current_time = env.current_step * env.time_interval
-        return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+
+        try:
+            # 尝试使用新的敌方AI系统
+            import os
+            import sys
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+
+            from enemy_tactical_ai_enhanced import get_enemy_tactical_command
+            commands = get_enemy_tactical_command(env, agent_id, current_time)
+            if commands:
+                logging.debug(f"✅ {agent_id} 新敌方AI指令: {commands}")
+                return commands
+            else:
+                return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+
+        except ImportError as e:
+            logging.warning(f"新敌方AI导入失败，使用内置策略: {e}")
+            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+        except Exception as e:
+            logging.error(f"新敌方AI执行错误: {e}")
+            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id, current_time):
         """敌方对抗机动逻辑：真正模仿我方的控制距离时间线
@@ -466,7 +488,7 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         if self._check_missile_threat(env, agent_id):
             # 动态notch保持：距离近保持更短，并加入轻微下降（通过低速俯仰由低层控制处理，这里仅做航向）
             notch_heading = (closest_bearing + side_sign * 90.0) % 360.0
-            # 简单距离近似：用closest_dist估计，<30km -> 2s，30–60km -> 4s，>60km -> 6s
+            # 基础距离近似：用closest_dist估计，<30km -> 2s，30–60km -> 4s，>60km -> 6s
             if closest_dist < 30000:
                 hold_time = 2.0
             elif closest_dist < 60000:
@@ -519,8 +541,8 @@ class PincerAttackTacticalTask(MultipleCombatTask):
                 if m.get('status') == 'LAUNCHED' and m.get('target') == agent_id:
                     return True
         return False
-    
-    # 旧的notch函数已删除，使用简单的notch规避逻辑
+
+    # 旧的notch函数已删除，使用基础的notch规避逻辑
     
     def _execute_observation_phase(self, env, agent_id, current_time, state, closest_bearing, role):
         """远距离观察阶段：朝向目标为主，混合初始航向，避免早期交叉和过度偏向"""
@@ -735,7 +757,7 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         return 7, 8, 3
 
     def _execute_standard_bvr(self, env, agent_id, current_time, threat_assessment):
-        """简化默认：指向最近友机航向，避免复杂逻辑"""
+        """基础默认：指向最近友机航向，避免高级逻辑"""
         my_ac = env.agents[agent_id]
         my_pos = my_ac.get_position()
         closest_dist = float('inf')

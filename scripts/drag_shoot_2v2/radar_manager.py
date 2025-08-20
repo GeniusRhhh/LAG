@@ -1,6 +1,6 @@
 """
 拖曳射击项目雷达管理系统
-保持现有功能的简单性，我方雷达为简单状态转换器，敌方雷达稍微复杂但贴合实际
+保持现有功能的基础性，我方雷达为基础状态转换器，敌方雷达具有更多功能以贴合实际
 """
 
 import logging
@@ -12,7 +12,7 @@ from enum import Enum
 try:
     from envs.JSBSim.core.catalog import Catalog as c
 except ImportError:
-    # 如果导入失败，创建一个简单的catalog类
+    # 如果导入失败，创建一个基础的catalog类
     class c:
         attitude_psi_rad = "attitude/psi-rad"
         position_h_sl_m = "position/h-sl-m"
@@ -26,11 +26,11 @@ class RadarStatus(Enum):
 
 
 class RadarManager:
-    """雷达管理器 - 保持现有功能的简单性"""
+    """雷达管理器 - 保持现有功能的基础性"""
     
     def __init__(self):
         """初始化雷达管理器"""
-        # 我方雷达状态 - 简单的状态转换器
+        # 我方雷达状态 - 基础的状态转换器
         self.friendly_radar_states = {
             "A0100": RadarStatus.SEARCH,
             "A0200": RadarStatus.SEARCH
@@ -42,7 +42,7 @@ class RadarManager:
             "B0200": RadarStatus.SEARCH
         }
         
-        # 敌方雷达数据 - 稍微复杂一些，贴合实际型号
+        # 敌方雷达数据 - 功能更多，贴合实际型号
         self.enemy_radar_data = {
             "B0100": self._get_default_enemy_radar_data(),
             "B0200": self._get_default_enemy_radar_data()
@@ -60,19 +60,19 @@ class RadarManager:
         }
     
     def update_friendly_radar_states(self, env, current_time: float):
-        """更新我方雷达状态 - 简单的状态转换器"""
+        """更新我方雷达状态 - 基础的状态转换器"""
         for agent_id in self.friendly_radar_states.keys():
             if agent_id in env.agents and env.agents[agent_id].is_alive:
                 self._update_single_friendly_radar(env, agent_id, current_time)
     
     def update_enemy_radar_states(self, env, current_time: float):
-        """更新敌方雷达状态 - 稍微复杂一些"""
+        """更新敌方雷达状态 - 功能更多"""
         for agent_id in self.enemy_radar_states.keys():
             if agent_id in env.agents and env.agents[agent_id].is_alive:
                 self._update_single_enemy_radar(env, agent_id, current_time)
     
     def _update_single_friendly_radar(self, env, agent_id: str, current_time: float):
-        """更新单个我方雷达状态 - 保持原有的简单逻辑"""
+        """更新单个我方雷达状态 - 保持原有的基础逻辑"""
         # 找到最近的敌机
         target = self._find_target(env, agent_id)
         if not target:
@@ -81,7 +81,7 @@ class RadarManager:
 
         distance = self._calculate_distance(env.agents[agent_id], target)
 
-        # 根据距离确定雷达状态 - 保持原有的简单逻辑
+        # 根据距离确定雷达状态 - 保持原有的基础逻辑
         if distance > 90000:  # 90km
             self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
         elif distance > 81000:  # 81km
@@ -92,7 +92,7 @@ class RadarManager:
             self.friendly_radar_states[agent_id] = RadarStatus.LOCK
     
     def _update_single_enemy_radar(self, env, agent_id: str, current_time: float):
-        """更新单个敌方雷达状态 - 稍微复杂一些，贴合实际型号"""
+        """更新单个敌方雷达状态 - 功能更多，贴合实际型号"""
         # 找到目标
         target = self._find_target(env, agent_id)
         if not target:
@@ -312,7 +312,7 @@ class RadarManager:
         """记录雷达数据到CSV格式"""
         radar_data = []
         
-        # 记录我方雷达数据 - 简单状态
+        # 记录我方雷达数据 - 基础状态
         for agent_id, radar_state in self.friendly_radar_states.items():
             if agent_id in env._jsbsims and env._jsbsims[agent_id].is_alive:
                 # 找到目标

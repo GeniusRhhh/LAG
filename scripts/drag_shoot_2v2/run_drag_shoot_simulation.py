@@ -225,7 +225,7 @@ def execute_maneuver_command(aircraft, maneuver_type: str, **params):
 
     except Exception as e:
         logging.warning(f"Failed to execute maneuver {maneuver_type} for {aircraft.uid}: {e}")
-        # 回退到简单控制
+        # 回退到基础控制模式
         set_simple_control(aircraft, current_heading, target_altitude, target_velocity)
 
 
@@ -270,7 +270,7 @@ def execute_high_level_command(aircraft, target_heading: float, target_altitude:
 
     except Exception as e:
         logging.warning(f"Failed to execute high level command for {aircraft.uid}: {e}")
-        # 回退到简单控制
+        # 回退到基础控制模式
         set_simple_control(aircraft, target_heading, target_altitude, target_velocity)
 
 
@@ -388,7 +388,7 @@ def get_aircraft_obs(aircraft):
 
 
 def set_simple_control(aircraft, target_heading: float, target_altitude: float, target_velocity: float):
-    """简单控制逻辑 - 作为baseline模型的备用方案"""
+    """基础控制逻辑 - 作为baseline模型的备用方案"""
     try:
         current_heading = np.rad2deg(aircraft.get_property_value(c.attitude_psi_rad))
         current_altitude = aircraft.get_property_value(c.position_h_sl_ft) * 0.3048
@@ -865,7 +865,7 @@ def run_simulation():
         # 加载baseline模型
         print("加载baseline模型...")
         if not load_baseline_model():
-            print("⚠️ Baseline模型加载失败，使用简单控制备用方案")
+            print("⚠️ Baseline模型加载失败，使用基础控制备用方案")
         else:
             print("✅ Baseline模型加载成功")
 
