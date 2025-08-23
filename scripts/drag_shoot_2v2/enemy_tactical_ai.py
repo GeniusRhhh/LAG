@@ -3447,7 +3447,13 @@ def _determine_tactical_mode(agent_id: str, threat_assessment: Dict[str, Any],
     coordination_opportunities = threat_assessment['coordination_opportunities']
 
     if not primary_target:
-        return "搜索模式"
+        # Check if all enemies are eliminated
+        alive_enemies = sum(1 for eid in ["A0100", "A0200"]
+                           if eid in env.agents and env.agents[eid].is_alive)
+        if alive_enemies == 0:
+            return "任务完成-返航模式"
+        else:
+            return "搜索模式"
 
     # 3. 进攻模式条件评估
     offensive_score = 0
@@ -3576,6 +3582,9 @@ def _select_tactical_behavior(tactical_mode: str, threat_assessment: Dict[str, A
     elif tactical_mode == "搜索模式":
         return "搜索接敌"
 
+    elif tactical_mode == "任务完成-返航模式":
+        return "任务完成返航"
+
     # 默认行为
     return "标准机动"
 
@@ -3668,6 +3677,10 @@ def _generate_combat_commands(tactical_behavior: str, threat_assessment: Dict[st
     elif tactical_behavior == "搜索接敌":
         # 搜索接敌：保持搜索态势
         return (8, 8, 4)   # 轻微爬升+直飞+加速
+
+    elif tactical_behavior == "任务完成返航":
+        # 任务完成返航：转向北方返回基地
+        return (7, 0, 5)   # 保持高度+转向北方+高速返航
 
     # 4. 默认指令
     else:

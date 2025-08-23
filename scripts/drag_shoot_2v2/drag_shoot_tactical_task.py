@@ -135,9 +135,10 @@ class DragShootTacticalTask(MultipleCombatTask):
         # 友方连续发射管理
         self.friendly_burst_launch = {"A0100": 0, "A0200": 0}  # 记录连续发射次数
 
-        # 雷达状态管理 - 使用雷达管理器
-        from radar_manager import get_radar_manager
-        self.radar_manager = get_radar_manager()
+        # 雷达状态管理 - 使用统一雷达管理器
+        from radar_manager import get_unified_radar_manager
+        self.radar_manager = get_unified_radar_manager()
+        logging.info("📡 统一雷达管理系统已集成到拖曳射击任务")
 
         # 初始状态记录 - 学习pure_maneuver_task
         self.initial_heading = {}
@@ -478,9 +479,9 @@ class DragShootTacticalTask(MultipleCombatTask):
             if env._jsbsims[agent_id].is_alive:
                 self._handle_missile_launch(env, agent_id, current_time)
 
-        # 更新雷达状态
-        from radar_manager import update_all_radars
-        update_all_radars(env, current_time)
+        # 更新统一雷达系统状态
+        self.radar_manager.update_friendly_radar_states(env, current_time)
+        self.radar_manager.update_enemy_radar_states(env, current_time)
 
         # 详细状态信息 - 每5秒打印一次
         if env.current_step % 25 == 0:
@@ -1620,8 +1621,16 @@ class DragShootTacticalTask(MultipleCombatTask):
 
 
     def get_radar_states(self):
-        """获取雷达状态 - 使用雷达管理器"""
-        from radar_manager import get_friendly_radar_states, get_enemy_radar_states
-        friendly_states = get_friendly_radar_states()
-        enemy_states = get_enemy_radar_states()
-        return {**friendly_states, **enemy_states}
+        """获取雷达状态 - 使用统一雷达管理器"""
+        try:
+            radar_summary = self.radar_manager.get_radar_performance_summary()
+            # 转换为兼容格式
+            states = {}
+            for agent_id, radar_info in radar_summary["friendly_radars"].items():
+                states[agent_id] = radar_info["status"]
+            for agent_id, radar_info in radar_summary["enemy_radars"].items():
+                states[agent_id] = radar_info["status"]
+            return states
+        except Exception as e:
+            logging.error(f"❌ 获取雷达状态错误: {e}")
+            return {"A0100": "SEARCH", "A0200": "SEARCH", "B0100": "SEARCH", "B0200": "SEARCH"}

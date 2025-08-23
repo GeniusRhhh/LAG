@@ -147,13 +147,13 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         self.basic_maneuvers = BasicManeuvers()
         self.composite_executor = CompositeManeuverExecutor()
 
-        # 雷达管理器 - 修复雷达数据记录问题
+        # 统一雷达管理器 - 支持多项目复用
         try:
-            from radar_manager import RadarManager
-            self.radar_manager = RadarManager()
-            logging.info("雷达管理器初始化成功")
+            from radar_manager import get_unified_radar_manager
+            self.radar_manager = get_unified_radar_manager()
+            logging.info("📡 统一雷达管理系统已集成到钳形夹击任务")
         except ImportError as e:
-            logging.warning(f"雷达管理器导入失败: {e}")
+            logging.warning(f"❌ 统一雷达管理器导入失败: {e}")
             self.radar_manager = None
 
         # 状态跟踪
