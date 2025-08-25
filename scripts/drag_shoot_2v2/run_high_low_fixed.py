@@ -22,7 +22,7 @@ sys.path.append(parent_dir)
 # 导入必要模块
 from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
 from envs.JSBSim.core.catalog import Catalog as c
-from high_low_attack_fixed import HighLowAttackTacticalTask
+from scripts.drag_shoot_2v2.high_low_attack_fixed import HighLowAttackTacticalTask
 
 
 def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
