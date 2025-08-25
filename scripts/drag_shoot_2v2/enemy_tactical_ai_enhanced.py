@@ -18,16 +18,6 @@ import numpy as np
 import random
 import math
 import time
-
-# 尝试导入JSBSim常量，如果失败则使用fallback
-try:
-    from envs.JSBSim.core.catalog import Catalog as c
-except ImportError:
-    # Fallback: 创建一个简单的常量类
-    class MockCatalog:
-        attitude_psi_rad = "attitude/psi-rad"
-        position_h_sl_m = "position/h-sl-m"
-    c = MockCatalog()
 from typing import Tuple, Dict, Any, Optional, List
 from enum import Enum
 from dataclasses import dataclass
@@ -1490,8 +1480,8 @@ class EnhancedEnemyTacticalAI:
             # CRITICAL FIX: Implement realistic turn rate limiting
             heading_diff = self._calculate_heading_difference(current_heading, desired_heading)
 
-            # Limit turn rate to realistic values for RTB (much faster for large angle turns)
-            max_turn_rate = 15.0 * 0.2  # 3.0° per 0.2s step (fast RTB turn rate for 180° turns)
+            # Limit turn rate to realistic values (3°/sec max)
+            max_turn_rate = 3.0 * 0.2  # 0.6° per 0.2s step
             if abs(heading_diff) > max_turn_rate:
                 if heading_diff > 0:
                     target_heading = current_heading + max_turn_rate
@@ -1637,116 +1627,49 @@ class EnhancedEnemyTacticalAI:
             logging.error(f"❌ {agent_id} 拦截航向计算错误: {e}")
             return None
 
-    # ==================== Utility Methods ====================
-
-    def _normalize_angle_diff(self, angle_diff: float) -> float:
-        """Normalize angle difference to [-180, 180] range"""
-        while angle_diff > 180:
-            angle_diff -= 360
-        while angle_diff < -180:
-            angle_diff += 360
-        return angle_diff
-
     # ==================== Placeholder Maneuver Methods ====================
 
     def _init_short_skate(self, agent_id: str, current_time: float):
-        """Initialize Short Skate maneuver - 镜像友方AI逻辑"""
+        """Initialize Short Skate maneuver - placeholder"""
         try:
             randomness = self.tactical_randomness[agent_id]
-
-            # 敌方Short Skate角度：镜像友方但有所区别
-            if agent_id == "B0100":  # 敌方长机：右侧Crank
-                crank_angle = 40.0   # 右转40度（友方长机左转-40度）
-                turn_cold_angle = -100.0  # 左转100度返回
-            else:  # B0200 敌方僚机：左侧Crank
-                crank_angle = -40.0  # 左转40度（友方僚机右转40度）
-                turn_cold_angle = 100.0   # 右转100度返回
-
             self.short_skate_states[agent_id] = ManeuverState(
                 maneuver_type=ManeuverType.SHORT_SKATE,
                 phase="crank",
                 phase_start_time=current_time,
                 total_start_time=current_time,
-                initial_heading=None,  # 将在执行时动态设置
+                initial_heading=180.0,
                 initial_altitude=8000.0,
-                crank_angle=crank_angle,
-                turn_cold_angle=turn_cold_angle
+                crank_angle=randomness.crank_angle,
+                turn_cold_angle=randomness.turn_cold_angle
             )
-            logging.info(f"🎯 {agent_id} Initiated Short Skate maneuver (crank: {crank_angle}°, turn_cold: {turn_cold_angle}°)")
+            logging.info(f"🎯 {agent_id} Initiated Short Skate maneuver")
         except Exception as e:
             logging.error(f"❌ {agent_id} Short Skate initialization error: {e}")
 
     def _execute_short_skate(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
-        """Execute Short Skate maneuver - 镜像友方AI逻辑"""
+        """Execute Short Skate maneuver - simplified version"""
         try:
             if agent_id not in self.short_skate_states:
-                self._init_short_skate(agent_id, current_time)
+                return 7, 8, 3
 
             state = self.short_skate_states[agent_id]
-            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            elapsed_time = current_time - state.total_start_time
 
-            if state.initial_heading is None:
-                state.initial_heading = current_heading
-
-            phase_time = current_time - state.phase_start_time
-
-            # 敌方机动时间：镜像友方但略有差异
-            if agent_id == "B0200":  # 敌方僚机
-                crank_duration = 16.0    # 友方僚机18s，敌方略短
-                turn_cold_duration = 28.0  # 友方僚机30s，敌方略短
-                escape_duration = 20.0   # 友方僚机22s，敌方略短
-            else:  # B0100 敌方长机
-                crank_duration = 8.0     # 友方长机6s，敌方略长
-                turn_cold_duration = 18.0  # 友方长机15s，敌方略长
-                escape_duration = 16.0   # 友方长机15s，敌方略长
-
-            # 阶段1：Crank机动 - 镜像友方但方向相反
-            if state.phase == "crank":
-                if phase_time < crank_duration:
-                    target_heading = state.initial_heading + state.crank_angle
-                    target_heading = target_heading % 360
-                    heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                    if abs(heading_diff) > 5.0:
-                        return 7, 6 if heading_diff < 0 else 10, 3  # 左转或右转
-                    else:
-                        return 7, 8, 3  # 保持航向
-                else:
-                    # 进入turn_cold阶段
-                    state.phase = "turn_cold"
-                    state.phase_start_time = current_time
-                    state.turn_cold_start_heading = current_heading
-                    logging.info(f"🔄 {agent_id} Short Skate: Crank完成，开始Turn Cold")
-
-            # 阶段2：Turn Cold - 快速掉头
-            elif state.phase == "turn_cold":
-                if phase_time < turn_cold_duration:
-                    target_heading = state.turn_cold_start_heading + state.turn_cold_angle
-                    target_heading = target_heading % 360
-                    heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-                    if abs(heading_diff) > 5.0:
-                        return 7, 6 if heading_diff < 0 else 10, 3  # 快速转弯
-                    else:
-                        return 7, 8, 3  # 保持航向
-                else:
-                    # 进入escape阶段
-                    state.phase = "escape"
-                    state.phase_start_time = current_time
-                    logging.info(f"🔄 {agent_id} Short Skate: Turn Cold完成，开始Escape")
-
-            # 阶段3：加速逃离
-            elif state.phase == "escape":
-                if phase_time < escape_duration:
-                    return 7, 8, 5  # 保持航向，加速
-                else:
-                    # Short Skate完成，清理状态并启动返航
-                    del self.short_skate_states[agent_id]
-                    logging.info(f"✅ {agent_id} Short Skate maneuver complete, initiating RTB")
-
-                    # 启动返航状态
-                    self._init_return_to_base(agent_id, current_time)
-                    return self._execute_return_to_base(env, agent_id)
-
-            return 7, 8, 3  # 默认保持航向
+            # Simple 3-phase execution
+            if elapsed_time < 8.0:  # Crank phase
+                target_heading = 180.0 + state.crank_angle
+                return self._maintain_heading_precise(env, agent_id, target_heading)
+            elif elapsed_time < 20.0:  # Turn Cold phase
+                target_heading = 180.0 + state.turn_cold_angle
+                return self._maintain_heading_precise(env, agent_id, target_heading)
+            elif elapsed_time < 30.0:  # Escape phase
+                return self._maintain_heading_precise(env, agent_id, 180.0)
+            else:
+                # Maneuver complete
+                del self.short_skate_states[agent_id]
+                logging.info(f"✅ {agent_id} Short Skate maneuver complete")
+                return 7, 8, 3
 
         except Exception as e:
             logging.error(f"❌ {agent_id} Short Skate execution error: {e}")
