@@ -111,9 +111,9 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             'DOR_DR_min': 14500,     # 14.5km - 返航阶段
         }
 
-        # 钳形夹击战术参数 - 确保敌机保持在雷达照射范围内
+        # 钳形夹击战术参数 - 增大crank角度形成更明显的钳形包围态势
         self.pincer_config = {
-            'crank_angle_moderate': 30.0,   # 适中的Crank角度，确保雷达照射
+            'crank_angle_moderate': 45.0,   # 增大的Crank角度，形成更明显的钳形态势
             'leader_left_crank': True,      # 长机执行左侧Crank
             'wingman_right_crank': True,    # 僚机执行右侧Crank
             'short_skate_angle': 45.0,      # Short Skate转弯角度
@@ -360,8 +360,8 @@ class PincerAttackTacticalTask(MultipleCombatTask):
     def _get_friendly_leader_command_indices(self, env, agent_id):
         """友方长机钳形夹击指令"""
         if self.current_phase == TacticalPhase.NLT_MELD:
-            # 阶段1 (90-81km): 长机执行LEFT crank机动
-            return self._maintain_heading_precise(env, agent_id, 330.0)  # 左转30°
+            # 阶段1 (90-81km): 长机执行LEFT crank机动 - 增大角度形成更明显的钳形态势
+            return self._maintain_heading_precise(env, agent_id, 315.0)  # 左转45°
 
         elif self.current_phase == TacticalPhase.MELD_MTR:
             # 阶段2 (81-45km): Crank恢复，指向敌机方向，平行飞行0°
@@ -382,8 +382,8 @@ class PincerAttackTacticalTask(MultipleCombatTask):
     def _get_friendly_wingman_command_indices(self, env, agent_id):
         """友方僚机钳形夹击指令"""
         if self.current_phase == TacticalPhase.NLT_MELD:
-            # 阶段1 (90-81km): 僚机执行RIGHT crank机动
-            return self._maintain_heading_precise(env, agent_id, 30.0)  # 右转30°
+            # 阶段1 (90-81km): 僚机执行RIGHT crank机动 - 增大角度形成更明显的钳形态势
+            return self._maintain_heading_precise(env, agent_id, 45.0)  # 右转45°
 
         elif self.current_phase == TacticalPhase.MELD_MTR:
             # 阶段2 (81-45km): Crank恢复，指向敌机方向，平行飞行0°
