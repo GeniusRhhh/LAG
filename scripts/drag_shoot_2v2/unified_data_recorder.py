@@ -11,6 +11,7 @@ import pandas as pd
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from envs.JSBSim.core.catalog import Catalog as c
+from tactical_action_extractor import TacticalActionExtractor
 
 
 class UnifiedDataRecorder:
@@ -19,7 +20,7 @@ class UnifiedDataRecorder:
     def __init__(self, project_name: str = "tactical_simulation"):
         """
         初始化统一数据记录器
-        
+
         Args:
             project_name: 项目名称，用于文件命名前缀
         """
@@ -27,6 +28,9 @@ class UnifiedDataRecorder:
         self.trajectory_data = []
         self.radar_data = []
         self.missile_data = []
+
+        # 战术动作提取系统
+        self.action_extractor = TacticalActionExtractor()
         
         # 标准化状态值
         self.MISSILE_STATES = {
@@ -56,8 +60,8 @@ class UnifiedDataRecorder:
             'UNKNOWN': 'UNKNOWN'
         }
     
-    def record_aircraft_trajectory(self, env, current_time: float):
-        """记录飞机轨迹数据 - 进一步简化格式（移除Phase和Altitude_m列）"""
+    def record_aircraft_trajectory(self, env, current_time: float, tactical_task=None):
+        """记录飞机轨迹数据 - 包含动作标注"""
         for agent_id, aircraft in env._jsbsims.items():
             if aircraft.is_alive:
                 pos = aircraft.get_position()
@@ -66,6 +70,34 @@ class UnifiedDataRecorder:
                 roll = np.rad2deg(aircraft.get_property_value(c.attitude_phi_rad))
                 velocity_vector = aircraft.get_velocity()
                 velocity = np.linalg.norm(velocity_vector)
+
+                # 基于战术代码的动作提取
+                try:
+                    # 获取战术指令索引
+                    if tactical_task and hasattr(tactical_task, '_get_tactical_command_indices'):
+                        altitude_cmd, heading_cmd, velocity_cmd = tactical_task._get_tactical_command_indices(env, agent_id)
+                    else:
+                        # 默认平稳飞行指令
+                        altitude_cmd, heading_cmd, velocity_cmd = 7, 8, 3
+
+                    # 构建当前状态字典
+                    current_state = {
+                        'time': current_time,
+                        'heading': np.rad2deg(aircraft.get_property_value(c.attitude_psi_rad)),
+                        'altitude': aircraft.get_property_value(c.position_h_sl_m),
+                        'velocity': np.linalg.norm(aircraft.get_velocity()),
+                        'latitude': aircraft.get_property_value(c.position_lat_geod_deg),
+                        'longitude': aircraft.get_property_value(c.position_long_gc_deg)
+                    }
+
+                    # 从战术指令中提取真实动作
+                    action_type, direction = self.action_extractor.extract_action_from_command_indices(
+                        agent_id, altitude_cmd, heading_cmd, velocity_cmd,
+                        current_time, current_state, tactical_task
+                    )
+                except Exception as e:
+                    logging.warning(f"动作提取失败 {agent_id}: {e}")
+                    action_type, direction = "平飞", "无"
 
                 self.trajectory_data.append({
                     'Time_s': current_time,
@@ -76,7 +108,9 @@ class UnifiedDataRecorder:
                     'Velocity_m_s': velocity,
                     'Heading_deg': heading,
                     'Pitch_deg': pitch,
-                    'Roll_deg': roll
+                    'Roll_deg': roll,
+                    'Action_Type': action_type,
+                    'Direction': direction
                 })
 
     def record_radar_data(self, env, current_time: float):
@@ -346,9 +380,9 @@ class UnifiedDataRecorder:
         
         return 0.0
     
-    def record_all_data(self, env, current_time: float):
+    def record_all_data(self, env, current_time: float, tactical_task=None):
         """记录所有类型的数据"""
-        self.record_aircraft_trajectory(env, current_time)
+        self.record_aircraft_trajectory(env, current_time, tactical_task)
         self.record_radar_data(env, current_time)
         self.record_missile_data(env, current_time)
     
@@ -364,7 +398,7 @@ class UnifiedDataRecorder:
         if self.trajectory_data:
             trajectory_df = pd.DataFrame(self.trajectory_data)
             trajectory_file = os.path.join(output_dir, f"{self.project_name}_trajectory_{timestamp}.csv")
-            trajectory_df.to_csv(trajectory_file, index=False)
+            trajectory_df.to_csv(trajectory_file, index=False, encoding='utf-8-sig')
             saved_files['trajectory'] = trajectory_file
             print(f"飞机轨迹数据已保存: {trajectory_file}")
         
@@ -372,7 +406,7 @@ class UnifiedDataRecorder:
         if self.radar_data:
             radar_df = pd.DataFrame(self.radar_data)
             radar_file = os.path.join(output_dir, f"{self.project_name}_radar_status_{timestamp}.csv")
-            radar_df.to_csv(radar_file, index=False)
+            radar_df.to_csv(radar_file, index=False, encoding='utf-8-sig')
             saved_files['radar'] = radar_file
             print(f"雷达数据已保存: {radar_file}")
         
@@ -380,7 +414,7 @@ class UnifiedDataRecorder:
         if self.missile_data:
             missile_df = pd.DataFrame(self.missile_data)
             missile_file = os.path.join(output_dir, f"{self.project_name}_missile_trajectory_{timestamp}.csv")
-            missile_df.to_csv(missile_file, index=False)
+            missile_df.to_csv(missile_file, index=False, encoding='utf-8-sig')
             saved_files['missile'] = missile_file
             print(f"导弹轨迹数据已保存: {missile_file}")
             
@@ -492,7 +526,7 @@ class UnifiedDataRecorder:
             if missile_analysis:
                 analysis_df = pd.DataFrame(missile_analysis)
                 analysis_file = os.path.join(output_dir, f"{self.project_name}_missile_analysis_{timestamp}.csv")
-                analysis_df.to_csv(analysis_file, index=False)
+                analysis_df.to_csv(analysis_file, index=False, encoding='utf-8-sig')
                 print(f"导弹分析数据已保存: {analysis_file}")
                 
                 # 生成摘要报告

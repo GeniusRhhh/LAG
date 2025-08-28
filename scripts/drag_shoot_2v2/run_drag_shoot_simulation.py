@@ -541,23 +541,23 @@ def check_termination(env) -> bool:
     # 继续仿真 - 不因为单架飞机被击落而终止
     return False
 
-def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
-    """记录仿真数据到CSV格式 - 使用统一数据记录器"""
-    # 使用统一数据记录器
-    from unified_data_recorder import UnifiedDataRecorder
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder):
+    """记录仿真数据到CSV格式 - 使用统一数据记录器，包含动作标注"""
+    # 记录当前数据长度，用于确定新增数据
+    prev_traj_len = len(data_recorder.trajectory_data)
+    prev_radar_len = len(data_recorder.radar_data)
+    prev_missile_len = len(data_recorder.missile_data)
 
-    # 创建临时记录器实例
-    temp_recorder = UnifiedDataRecorder("drag_shoot")
+    # 使用传入的持久记录器实例，避免重复创建导致历史数据丢失
+    tactical_task = getattr(env, 'task', None)
+    data_recorder.record_aircraft_trajectory(env, current_time, tactical_task)
+    data_recorder.record_radar_data(env, current_time)
+    data_recorder.record_missile_data(env, current_time)
 
-    # 记录所有数据
-    temp_recorder.record_aircraft_trajectory(env, current_time)
-    temp_recorder.record_radar_data(env, current_time)
-    temp_recorder.record_missile_data(env, current_time)
-
-    # 将数据添加到现有列表中
-    trajectory_data.extend(temp_recorder.trajectory_data)
-    radar_data.extend(temp_recorder.radar_data)
-    missile_data.extend(temp_recorder.missile_data)
+    # 只添加新增的数据到现有列表中
+    trajectory_data.extend(data_recorder.trajectory_data[prev_traj_len:])
+    radar_data.extend(data_recorder.radar_data[prev_radar_len:])
+    missile_data.extend(data_recorder.missile_data[prev_missile_len:])
 
 
 def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None):
@@ -915,6 +915,10 @@ def run_simulation():
         radar_data = []
         missile_data = []
 
+        # 创建持久的数据记录器实例 - 避免重复创建导致历史数据丢失
+        from unified_data_recorder import UnifiedDataRecorder
+        data_recorder = UnifiedDataRecorder("drag_shoot")
+
         # 仿真循环
         step_count = 0
         while step_count < env.max_steps:
@@ -935,8 +939,8 @@ def run_simulation():
             except Exception as e:
                 logging.warning(f"Failed to render step {step_count}: {e}")
 
-            # 记录数据
-            record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data)
+            # 记录数据 - 使用持久的数据记录器
+            record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder)
 
             # 打印状态
             print_status(env)
