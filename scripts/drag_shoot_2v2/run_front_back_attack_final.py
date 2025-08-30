@@ -24,6 +24,12 @@ from envs.JSBSim.core.catalog import Catalog as c
 from front_back_attack_final_task import FrontBackAttackFinalTask
 
 
+def generate_front_back_action_analysis_report(trajectory_df, output_dir, timestamp):
+    """生成前后攻击动作标注分析报告 - 已禁用"""
+    # 动作分析报告已禁用
+    return
+
+
 def run_front_back_attack_simulation():
     """运行前后攻击仿真 - 完全基于拖曳射击架构"""
     print("=" * 60)
@@ -54,7 +60,9 @@ def run_front_back_attack_simulation():
 
         # 准备ACMI文件路径和数据记录 - 前后攻击战术
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = "front_back_attack_results"
+        # 使用脚本所在目录的绝对路径，避免相对路径问题
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(script_dir, "front_back_attack_results")
         os.makedirs(output_dir, exist_ok=True)
         acmi_filepath = os.path.join(output_dir, f"front_back_attack_{timestamp}.acmi")
 
@@ -160,6 +168,9 @@ def run_front_back_attack_simulation():
             print(f"数据文件已保存:")
             for file_path in saved_files:
                 print(f"  {file_path}")
+
+            # 动作标注系统已禁用 - 生成纯净轨迹数据
+            print("✅ 前后攻击纯净轨迹数据生成完成")
 
         except Exception as e:
             print(f"数据保存失败: {e}")

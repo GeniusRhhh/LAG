@@ -11,7 +11,7 @@ import pandas as pd
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from envs.JSBSim.core.catalog import Catalog as c
-from tactical_action_extractor import TacticalActionExtractor
+# from tactical_action_extractor import TacticalActionExtractor  # 已禁用动作标注系统
 
 
 class UnifiedDataRecorder:
@@ -29,8 +29,8 @@ class UnifiedDataRecorder:
         self.radar_data = []
         self.missile_data = []
 
-        # 战术动作提取系统
-        self.action_extractor = TacticalActionExtractor()
+        # 战术动作提取系统 - 已禁用
+        # self.action_extractor = TacticalActionExtractor()
         
         # 标准化状态值
         self.MISSILE_STATES = {
@@ -61,7 +61,7 @@ class UnifiedDataRecorder:
         }
     
     def record_aircraft_trajectory(self, env, current_time: float, tactical_task=None):
-        """记录飞机轨迹数据 - 包含动作标注"""
+        """记录飞机轨迹数据 - 纯净轨迹数据"""
         for agent_id, aircraft in env._jsbsims.items():
             if aircraft.is_alive:
                 pos = aircraft.get_position()
@@ -90,14 +90,10 @@ class UnifiedDataRecorder:
                         'longitude': aircraft.get_property_value(c.position_long_gc_deg)
                     }
 
-                    # 从战术指令中提取真实动作
-                    action_type, direction = self.action_extractor.extract_action_from_command_indices(
-                        agent_id, altitude_cmd, heading_cmd, velocity_cmd,
-                        current_time, current_state, tactical_task
-                    )
+                    # 动作标注系统已禁用 - 不再提取动作信息
+                    pass
                 except Exception as e:
-                    logging.warning(f"动作提取失败 {agent_id}: {e}")
-                    action_type, direction = "平飞", "无"
+                    logging.warning(f"数据记录异常 {agent_id}: {e}")
 
                 self.trajectory_data.append({
                     'Time_s': current_time,
@@ -108,9 +104,8 @@ class UnifiedDataRecorder:
                     'Velocity_m_s': velocity,
                     'Heading_deg': heading,
                     'Pitch_deg': pitch,
-                    'Roll_deg': roll,
-                    'Action_Type': action_type,
-                    'Direction': direction
+                    'Roll_deg': roll
+                    # 动作标注列已移除：Action_Type, Direction
                 })
 
     def record_radar_data(self, env, current_time: float):

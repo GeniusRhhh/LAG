@@ -92,9 +92,10 @@ def record_pincer_simulation_data(env, current_time, trajectory_data, radar_data
     missile_data.extend(temp_recorder.missile_data)
 
 
-def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None):
-    """保存钳形夹击CSV数据文件 - 使用统一数据记录器"""
+def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None, tactical_task=None):
+    """保存钳形夹击CSV数据文件 - 纯净轨迹数据"""
     from unified_data_recorder import UnifiedDataRecorder
+    # from pincer_tactical_action_extractor import PincerTacticalActionExtractor  # 已禁用动作标注系统
 
     # 创建统一数据记录器
     recorder = UnifiedDataRecorder("pincer_attack")
@@ -107,7 +108,16 @@ def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, mis
     # 使用统一格式保存文件 - 传入仿真日志
     saved_files = recorder.save_csv_files(output_dir, timestamp, simulation_log)
 
+    # 动作标注系统已禁用 - 生成纯净轨迹数据
+    print("✅ 钳形攻击纯净轨迹数据生成完成")
+
     return saved_files
+
+
+def generate_pincer_action_analysis_report(trajectory_df, output_dir, timestamp):
+    """生成钳形攻击动作标注分析报告 - 已禁用"""
+    # 动作分析报告已禁用
+    return
 
 
 def get_missile_final_status_and_time(missile_traj):
@@ -319,8 +329,10 @@ def run_pincer_attack_simulation():
         logging.info("重置环境...")
         obs = env.reset()
 
-        # 创建输出目录
-        output_dir = "pincer_attack_results"
+        # 创建输出目录 - 修正问题1：使用正确的目录结构
+        # 使用脚本所在目录的绝对路径，避免相对路径问题
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(script_dir, "pincer_attack_results")
         os.makedirs(output_dir, exist_ok=True)
 
         # 仿真参数
@@ -399,8 +411,8 @@ def run_pincer_attack_simulation():
         sys.stdout = original_stdout
         simulation_log = captured_output.getvalue()
 
-        # 保存CSV数据 - 传入仿真日志
-        save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log)
+        # 保存CSV数据 - 传入仿真日志和战术任务
+        save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log, tactical_task)
 
         # 保存基本结果摘要
         save_simulation_results(env, step_count, current_time)
@@ -512,8 +524,10 @@ def print_final_status(env):
 def save_simulation_results(env, step_count: int, simulation_time: float):
     """保存仿真结果"""
     try:
-        # 创建结果目录
-        results_dir = "pincer_attack_results"
+        # 创建结果目录 - 修正问题1：使用正确的目录结构
+        # 使用脚本所在目录的绝对路径，避免相对路径问题
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        results_dir = os.path.join(script_dir, "pincer_attack_results")
         os.makedirs(results_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

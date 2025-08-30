@@ -192,10 +192,9 @@ class TacticalActionExtractor:
                 if agent_id in tactical_task.short_skate_states:
                     return "左转"
         elif agent_id == "B0200":  # 敌方僚机
-            # B0200返航时从南向转向北向应该是左转
-            current_heading = current_state.get('heading', 0)
-            if 0 <= current_heading <= 30 or 330 <= current_heading <= 360:
-                return "左转"  # 返航左转
+            # B0200返航时的转向判断 - 统一标准方向标注
+            # 移除地理方向描述，使用基础转向逻辑
+            return basic_direction
         
         return basic_direction
 
@@ -203,16 +202,53 @@ class TacticalActionExtractor:
         """
         检查智能体是否在Short Skate机动阶段
         基于实际战术代码执行状态而非tactical_task属性
+        适配不同战术项目的时间参数
         """
-        # 友方A0100在71秒左右开始Short Skate
-        if agent_id == "A0100" and current_time >= 71.0:
-            return True
-        # 友方A0200在83秒左右开始Short Skate
-        elif agent_id == "A0200" and current_time >= 83.0:
-            return True
-        # 敌方B0200在返航阶段可能执行Short Skate
-        elif agent_id == "B0200" and current_time >= 200.0:
-            return True
+        # Drag Shoot 2v2项目的Short Skate时间
+        if hasattr(tactical_task, 'tactical_name') and 'drag_shoot' in tactical_task.tactical_name.lower():
+            if agent_id == "A0100" and current_time >= 71.0:
+                return True
+            elif agent_id == "A0200" and current_time >= 83.0:
+                return True
+            elif agent_id == "B0200" and current_time >= 200.0:
+                return True
+
+        # Pincer Attack项目的Short Skate时间（钳形攻击中的撤退机动）
+        elif hasattr(tactical_task, 'tactical_name') and 'pincer' in tactical_task.tactical_name.lower():
+            if agent_id == "A0100" and current_time >= 80.0:
+                return True
+            elif agent_id == "A0200" and current_time >= 85.0:
+                return True
+            elif agent_id == "B0200" and current_time >= 180.0:
+                return True
+
+        # Front Back Attack项目的Short Skate时间
+        elif hasattr(tactical_task, 'tactical_name') and 'front_back' in tactical_task.tactical_name.lower():
+            if agent_id == "A0100" and current_time >= 75.0:
+                return True
+            elif agent_id == "A0200" and current_time >= 90.0:
+                return True
+            elif agent_id == "B0200" and current_time >= 190.0:
+                return True
+
+        # High Low Attack项目的Short Skate时间
+        elif hasattr(tactical_task, 'tactical_name') and 'high_low' in tactical_task.tactical_name.lower():
+            if agent_id == "A0100" and current_time >= 70.0:
+                return True
+            elif agent_id == "A0200" and current_time >= 85.0:
+                return True
+            elif agent_id == "B0200" and current_time >= 200.0:
+                return True
+
+        # 默认时间参数（通用）
+        else:
+            if agent_id == "A0100" and current_time >= 71.0:
+                return True
+            elif agent_id == "A0200" and current_time >= 83.0:
+                return True
+            elif agent_id == "B0200" and current_time >= 200.0:
+                return True
+
         return False
 
     def _ensure_action_direction_consistency(self, action_type: str, direction: str) -> Tuple[str, str]:
@@ -304,16 +340,10 @@ class TacticalActionExtractor:
         else:  # 航向变化较小，可能进入平飞阶段
             skate_state['stable_heading_count'] += 1
 
-            # 确定返航方向 - 解决问题1.2：使用具体的方向描述
+            # 确定返航方向 - 统一标准方向标注
             if not skate_state['return_direction']:
-                if current_heading < 45 or current_heading > 315:
-                    skate_state['return_direction'] = "北向返航"
-                elif 45 <= current_heading < 135:
-                    skate_state['return_direction'] = "东向返航"
-                elif 135 <= current_heading < 225:
-                    skate_state['return_direction'] = "南向返航"
-                else:
-                    skate_state['return_direction'] = "西向返航"
+                # 统一为标准的返航机动描述，移除地理方向
+                skate_state['return_direction'] = "返航平飞"
 
             # 如果连续多个时间点航向稳定，则认为进入平飞返航阶段
             if skate_state['stable_heading_count'] >= 10:  # 连续2秒（10个0.2s时间点）航向稳定

@@ -84,8 +84,9 @@ def run_high_low_attack_simulation():
         logging.info("重置环境...")
         obs = env.reset()
         
-        # 创建输出目录
-        output_dir = "high_low_attack_results"
+        # 创建输出目录 - 修复路径问题，使用绝对路径
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(script_dir, "high_low_attack_results")
         os.makedirs(output_dir, exist_ok=True)
         
         # 仿真参数
@@ -182,6 +183,10 @@ def run_high_low_attack_simulation():
             print("CSV数据文件已保存:")
             for file_type, file_path in saved_files.items():
                 print(f"  {file_type}: {file_path}")
+
+            # 动作标注系统已禁用 - 生成纯净轨迹数据
+            print("✅ 上下夹击纯净轨迹数据生成完成")
+
         except Exception as e:
             print(f"CSV数据保存失败: {e}")
         
