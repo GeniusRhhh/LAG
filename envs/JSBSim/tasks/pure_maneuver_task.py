@@ -131,6 +131,10 @@ class PureManeuverTask(MultipleCombatTask):
                 default_params["min_altitude"] = 2000.0
         elif maneuver_name == "diagonal_flight":
             default_params = {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 15.0}
+        elif maneuver_name == "notch_back":
+            default_params = {"duration": 25.0, "altitude_loss": 1500.0, "turn_angle": 90.0, "min_altitude": 2500.0}
+        elif maneuver_name == "short_skate":
+            default_params = {"duration": 35.0, "crank_angle": 40.0, "escape_angle": 140.0, "acceleration": 40.0}
         elif maneuver_name == "high_g_turn":
             default_params = {"turn_angle": 180.0, "g_force": 7.0, "turn_rate": 8.0, "duration": 25.0}
         elif maneuver_name == "accelerate_escape":
@@ -524,6 +528,26 @@ class PureManeuverTask(MultipleCombatTask):
                 initial_heading,
                 params.get("loop_type", "half"),
                 params.get("g_force", 6.0)
+            )
+        elif basic_maneuver_name == "notch_back":
+            return BasicManeuvers.notch_back(
+                current_time,
+                initial_heading,
+                initial_altitude,
+                params.get("duration", 25.0),
+                params.get("altitude_loss", 1500.0),
+                params.get("turn_angle", 90.0),
+                params.get("min_altitude", 2500.0)
+            )
+        elif basic_maneuver_name == "short_skate":
+            return BasicManeuvers.short_skate(
+                current_time,
+                initial_heading,
+                initial_altitude,
+                params.get("duration", 35.0),
+                params.get("crank_angle", 40.0),
+                params.get("escape_angle", 140.0),
+                params.get("acceleration", 40.0)
             )
         else:
             return (None, None, None, None, None)

@@ -786,36 +786,94 @@ class EnhancedEnemyTacticalAI:
             return self._maintain_heading_precise(env, agent_id, 180.0)
 
     def _maintain_heading_precise(self, env, agent_id: str, target_heading: float) -> Tuple[int, int, int]:
-        """精确航向保持 - 基于我方系统的实现"""
+        """精确航向保持 - 敌方AI安全飞行版本"""
         try:
             if agent_id not in env.agents or not env.agents[agent_id].is_alive:
                 return 7, 8, 3
 
-            # 获取当前航向（弧度转角度）
+            # 获取当前状态
             current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            current_velocity = env.agents[agent_id].get_property_value(c.velocities_v_north_mps)
 
             # 计算航向差
             heading_diff = target_heading - current_heading
-
-            # 规范化角度差到[-180, 180]范围
             while heading_diff > 180:
                 heading_diff -= 360
             while heading_diff < -180:
                 heading_diff += 360
 
-            # 选择航向指令
-            if abs(heading_diff) < 3:
-                heading_cmd = 8  # 保持航向
-            elif abs(heading_diff) < 10:
-                heading_cmd = 12 if heading_diff > 0 else 4  # 小幅转弯
-            elif abs(heading_diff) < 30:
-                heading_cmd = 13 if heading_diff > 0 else 3  # 中等转弯
-            else:
-                heading_cmd = 14 if heading_diff > 0 else 2  # 大幅转弯
+            # 默认索引：安全飞行
+            altitude_cmd = 7  # 高度索引7 = 0m变化（保持高度）
+            heading_cmd = 8   # 航向索引8 = 0°变化（保持航向）
+            velocity_cmd = 3  # 速度索引3 = 0m/s变化（保持速度）
 
-            # 高度和速度保持
-            altitude_cmd = 7  # 保持高度
-            velocity_cmd = 3  # 保持速度
+            # 🚨 关键修复：强制高度控制，防止坠毁
+            target_altitude = 5700.0  # 目标高度5700米
+            altitude_diff = current_altitude - target_altitude
+
+            # 高度控制优先级最高
+            if current_altitude < 1000:  # 紧急情况：高度低于1000米
+                altitude_cmd = 14  # 最大上升
+                logging.warning(f"🚨 {agent_id} 敌方AI紧急拉升！当前高度: {current_altitude:.1f}m")
+            elif current_altitude < 3000:  # 危险情况：高度低于3000米
+                altitude_cmd = 13  # 大幅上升
+                logging.warning(f"⚠️ {agent_id} 敌方AI危险高度，拉升中: {current_altitude:.1f}m")
+            elif abs(altitude_diff) > 200:  # 正常高度调整
+                if altitude_diff > 500:
+                    altitude_cmd = 2   # 下降
+                elif altitude_diff > 200:
+                    altitude_cmd = 3   # 小幅下降
+                elif altitude_diff < -500:
+                    altitude_cmd = 12  # 上升
+                elif altitude_diff < -200:
+                    altitude_cmd = 11  # 小幅上升
+
+            # 🚨 关键修复：强化速度控制，防止失速坠毁，确保索引在有效范围内
+            if abs(current_velocity) < 100:  # 极危险速度（包括负速度），紧急加速
+                velocity_cmd = 6   # 最大加速（索引6，动作空间0-6）
+                logging.warning(f"🚨 {agent_id} 敌方AI极危险速度，紧急加速！当前速度: {current_velocity:.1f}m/s")
+            elif abs(current_velocity) < 200:  # 危险速度，大幅加速
+                velocity_cmd = 5   # 大幅加速
+                logging.warning(f"⚠️ {agent_id} 敌方AI危险速度，大幅加速: {current_velocity:.1f}m/s")
+            elif current_velocity < 280:  # 速度偏低，加速
+                velocity_cmd = 4   # 加速
+            elif current_velocity > 450:  # 速度过高，减速
+                velocity_cmd = 0   # 减速
+            elif current_velocity > 380:  # 速度偏高，小幅减速
+                velocity_cmd = 1   # 小幅减速
+            else:
+                velocity_cmd = 3   # 保持速度
+
+            # 航向控制：只有在高度和速度安全的情况下才进行精确调整
+            if current_altitude > 2000 and 280 < current_velocity < 380:
+                if abs(heading_diff) > 2.0:  # 放宽航向控制精度，优先保证安全
+                    if heading_diff > 30:
+                        heading_cmd = 14  # +45°
+                    elif heading_diff > 15:
+                        heading_cmd = 13  # +30°
+                    elif heading_diff > 8:
+                        heading_cmd = 12  # +20°
+                    elif heading_diff > 4:
+                        heading_cmd = 11  # +10°
+                    elif heading_diff > 2:
+                        heading_cmd = 10  # +5°
+                    elif heading_diff < -30:
+                        heading_cmd = 2   # -45°
+                    elif heading_diff < -15:
+                        heading_cmd = 3   # -30°
+                    elif heading_diff < -8:
+                        heading_cmd = 4   # -20°
+                    elif heading_diff < -4:
+                        heading_cmd = 5   # -10°
+                    elif heading_diff < -2:
+                        heading_cmd = 6   # -5°
+
+            # 调试日志
+            if env.current_step % 100 == 0:
+                logging.info(f"🛩️ {agent_id} 敌方AI飞行状态: 高度{current_altitude:.1f}m, "
+                            f"速度{current_velocity:.1f}m/s, 航向{current_heading:.1f}°, "
+                            f"指令({altitude_cmd},{heading_cmd},{velocity_cmd})")
 
             return altitude_cmd, heading_cmd, velocity_cmd
 
