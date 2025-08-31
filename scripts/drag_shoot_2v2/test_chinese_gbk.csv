@@ -1,0 +1,4 @@
+Agent_ID,Action_Type,Direction,Time_s
+A0100,战术crank,左转,10.0
+A0200,平飞,无,20.0
+B0100,Crank,右转,30.0

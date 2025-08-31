@@ -387,6 +387,103 @@ class BasicManeuvers:
         return "CONTINUOUS_TRACKING", target_heading, None, None, None
 
     @staticmethod
+    def notch_back(time_sec: float, initial_heading: float, initial_altitude: float,
+                   duration: float = 25.0, altitude_loss: float = 1500.0,
+                   turn_angle: float = 90.0, min_altitude: float = 2500.0):
+        """Notch back - 后撤规避机动：下降+转弯+保持低高度"""
+
+        # 阶段1：下降阶段 (前40%时间)
+        descent_duration = duration * 0.4
+        # 阶段2：转弯阶段 (中间40%时间)
+        turn_duration = duration * 0.4
+        # 阶段3：保持阶段 (最后20%时间)
+
+        target_final_altitude = max(initial_altitude - altitude_loss, min_altitude)
+        actual_altitude_loss = initial_altitude - target_final_altitude
+
+        if time_sec <= descent_duration:
+            # 阶段1：快速下降
+            progress = time_sec / descent_duration
+            target_altitude = initial_altitude - actual_altitude_loss * progress
+            target_altitude = max(target_altitude, min_altitude)
+
+            return "NOTCH_DESCENDING", initial_heading, target_altitude, 0.0, None
+
+        elif time_sec <= descent_duration + turn_duration:
+            # 阶段2：在低高度转弯
+            turn_time = time_sec - descent_duration
+            turn_progress = turn_time / turn_duration
+
+            current_turn = turn_angle * turn_progress
+            current_heading = normalize_heading(initial_heading + current_turn)
+
+            # 保持低高度
+            target_altitude = target_final_altitude
+
+            # 转弯滚转角
+            target_roll = 20.0 * (1 if turn_angle > 0 else -1) * math.sin(turn_progress * math.pi)
+
+            return "NOTCH_TURNING", current_heading, target_altitude, 0.0, target_roll
+
+        else:
+            # 阶段3：保持低高度和新航向
+            final_heading = normalize_heading(initial_heading + turn_angle)
+            return "NOTCH_MAINTAINING", final_heading, target_final_altitude, 0.0, 0.0
+
+    @staticmethod
+    def short_skate(time_sec: float, initial_heading: float, initial_altitude: float,
+                    duration: float = 35.0, crank_angle: float = 40.0,
+                    escape_angle: float = 140.0, acceleration: float = 40.0):
+        """Short skate - 短距离机动：Crank维持锁定 + 快速脱离 + 加速逃离"""
+
+        # 阶段1：Crank机动 (前30%时间)
+        crank_duration = duration * 0.3
+        # 阶段2：快速脱离转弯 (中间40%时间)
+        escape_duration = duration * 0.4
+        # 阶段3：加速逃离 (最后30%时间)
+
+        if time_sec <= crank_duration:
+            # 阶段1：Crank机动 - 偏离角度维持雷达锁定
+            progress = time_sec / crank_duration
+            current_turn = crank_angle * progress
+            current_heading = normalize_heading(initial_heading + current_turn)
+
+            # Crank转弯滚转角
+            target_roll = 15.0 * (1 if crank_angle > 0 else -1) * math.sin(progress * math.pi)
+
+            return "SHORT_SKATE_CRANK", current_heading, initial_altitude, 0.0, target_roll
+
+        elif time_sec <= crank_duration + escape_duration:
+            # 阶段2：快速脱离 - 大角度转弯脱离威胁
+            escape_time = time_sec - crank_duration
+            escape_progress = escape_time / escape_duration
+
+            # 从Crank角度继续转向逃离角度
+            total_turn = crank_angle + escape_angle
+            current_turn = crank_angle + escape_angle * escape_progress
+            current_heading = normalize_heading(initial_heading + current_turn)
+
+            # 快速转弯滚转角
+            target_roll = 25.0 * (1 if escape_angle > 0 else -1) * math.sin(escape_progress * math.pi)
+
+            return "SHORT_SKATE_ESCAPE", current_heading, initial_altitude, 0.0, target_roll
+
+        else:
+            # 阶段3：加速逃离 - 保持逃离航向并加速
+            final_heading = normalize_heading(initial_heading + crank_angle + escape_angle)
+
+            # 加速逃离
+            accel_time = time_sec - crank_duration - escape_duration
+            accel_duration = duration - crank_duration - escape_duration
+
+            if accel_time <= accel_duration:
+                progress = accel_time / accel_duration
+                velocity_offset = acceleration * progress
+                return "SHORT_SKATE_ACCELERATING", final_heading, initial_altitude, velocity_offset, 0.0
+            else:
+                return "SHORT_SKATE_COMPLETE", final_heading, initial_altitude, acceleration, 0.0
+
+    @staticmethod
     def adaptive_turn_to_enemy(time_sec: float, initial_heading: float, turn_rate: float = 5.0,
                                enemy_heading: float = 180.0):
         """自适应转向敌机 - WVR阶段激进追击敌方"""
