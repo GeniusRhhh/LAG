@@ -231,14 +231,23 @@ class PureManeuverTask(MultipleCombatTask):
         velocity_cmd_id = 3  # 7个值的中间索引，对应0m/s变化
         # 高度控制 - 增强稳定性，抑制JSBSim的自动升力补偿
         if basic_maneuver_name in ["turn", "turn_level", "accelerate", "decelerate", "level_flight"]:
-            # 对于转弯等机动，强制保持初始高度，抑制高度上升
+            # 对于水平飞行机动，强制严格保持初始高度
             altitude_diff = initial_altitude - current_altitude
-            if abs(altitude_diff) > 5.0:  # 进一步降低阈值到5米，更敏感地控制高度
-                # 如果高度上升，给予更强的下降指令
-                if current_altitude > initial_altitude + 30.0:  # 高度上升超过30米就强制下降
-                    altitude_diff = altitude_diff * 2.0  # 增强下降控制到200%
-                elif current_altitude > initial_altitude + 15.0:  # 高度上升超过15米
-                    altitude_diff = altitude_diff * 1.5  # 增强下降控制到150%
+            if abs(altitude_diff) > 3.0:  # 降低阈值到3米，更严格控制高度
+                # 对于加速/减速动作，使用更强的高度控制
+                if basic_maneuver_name in ["accelerate", "decelerate"]:
+                    if current_altitude > initial_altitude + 20.0:  # 高度上升超过20米就强制下降
+                        altitude_diff = altitude_diff * 3.0  # 增强下降控制到300%
+                    elif current_altitude > initial_altitude + 10.0:  # 高度上升超过10米
+                        altitude_diff = altitude_diff * 2.0  # 增强下降控制到200%
+                    elif abs(altitude_diff) > 5.0:
+                        altitude_diff = altitude_diff * 1.5  # 一般情况增强到150%
+                else:
+                    # 转弯动作的高度控制
+                    if current_altitude > initial_altitude + 30.0:  # 高度上升超过30米就强制下降
+                        altitude_diff = altitude_diff * 2.0  # 增强下降控制到200%
+                    elif current_altitude > initial_altitude + 15.0:  # 高度上升超过15米
+                        altitude_diff = altitude_diff * 1.5  # 增强下降控制到150%
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         elif target_altitude is not None:
             altitude_diff = target_altitude - current_altitude
@@ -437,18 +446,22 @@ class PureManeuverTask(MultipleCombatTask):
                 current_velocity=current_velocity
             )
         elif basic_maneuver_name == "accelerate":
+            # 支持新的参数名称 velocity_increase，同时保持向后兼容
+            velocity_change = params.get("velocity_increase", params.get("velocity_change", 50.0))
             return BasicManeuvers.accelerate(
                 current_time,
                 current_velocity,
                 params.get("duration", 20.0),
-                params.get("velocity_change", 50.0)
+                velocity_change
             )
         elif basic_maneuver_name == "decelerate":
+            # 支持新的参数名称 velocity_decrease，同时保持向后兼容
+            velocity_change = params.get("velocity_decrease", params.get("velocity_change", 50.0))
             return BasicManeuvers.decelerate(
                 current_time,
                 current_velocity,
                 params.get("duration", 20.0),
-                params.get("velocity_change", 50.0)
+                velocity_change
             )
         elif basic_maneuver_name == "turn":
             turn_angle = params.get("turn_angle", 45.0)
@@ -470,28 +483,43 @@ class PureManeuverTask(MultipleCombatTask):
                 turn_rate
             )
         elif basic_maneuver_name == "pull_up":
+            # 支持新的参数名称 altitude_gain，同时保持向后兼容
+            altitude_change = params.get("altitude_gain", params.get("altitude_change", 1500.0))
             return BasicManeuvers.pull_up(
                 current_time,
                 initial_altitude,
                 params.get("duration", 15.0),
-                params.get("altitude_change", 1500.0)
+                altitude_change
             )
         elif basic_maneuver_name == "dive":
+            # 支持新的参数名称 altitude_loss，同时保持向后兼容
+            altitude_change = params.get("altitude_loss", params.get("altitude_change", 1500.0))
             return BasicManeuvers.dive(
                 current_time,
                 initial_altitude,
                 params.get("duration", 15.0),
-                params.get("altitude_change", 1500.0),
+                altitude_change,
                 params.get("min_altitude", 2000.0)
             )
         elif basic_maneuver_name == "diagonal_flight":
+            # 支持组合机动的参数名称，同时保持向后兼容
+            turn_angle = params.get("turn_angle", 45.0)
+
+            # 正确处理高度变化参数
+            if "altitude_gain" in params:
+                altitude_change = abs(params.get("altitude_gain", 1000.0))  # 爬升为正值
+            elif "altitude_loss" in params:
+                altitude_change = -abs(params.get("altitude_loss", 1000.0))  # 俯冲为负值
+            else:
+                altitude_change = params.get("altitude_change", 1000.0)  # 向后兼容
+
             return BasicManeuvers.diagonal_flight(
                 current_time,
                 initial_heading,
                 initial_altitude,
                 params.get("duration", 15.0),
-                params.get("turn_angle", 45.0),
-                params.get("altitude_change", 1000.0),
+                turn_angle,
+                altitude_change,
                 params.get("min_altitude", 3000.0)
             )
         elif basic_maneuver_name == "maintain_heading_flight":

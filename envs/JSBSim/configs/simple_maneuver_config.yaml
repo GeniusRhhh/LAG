@@ -1,19 +1,23 @@
 # envs/JSBSim/configs/simple_maneuver_config.yaml
+# 修复坐标系统：使用与拖曳射击项目相同的战场中心点和坐标配置
 task: pure_maneuver
 sim_freq: 60
 agent_interaction_steps: 12
 max_steps: 3000
+
+# 战场中心 (longitude, latitude, altitude) - 与拖曳射击项目完全一致
+battle_field_center: [120.0, 60.4, 0.0]  # 中点位置
 
 aircraft_configs: {
   A0100: {
     color: Red,
     model: f16,
     init_state: {
-      ic_long_gc_deg: 120.0,
-      ic_lat_geod_deg: 60.0,
-      ic_h_sl_ft: 20000,
-      ic_psi_true_deg: 0.0,
-      ic_u_fps: 800.0
+      ic_long_gc_deg: 120.0,      # 与拖曳射击项目A0100完全一致
+      ic_lat_geod_deg: 60.0,      # 与拖曳射击项目A0100完全一致
+      ic_h_sl_ft: 20000,          # 修复：使用与拖曳射击项目相同的20,000英尺
+      ic_psi_true_deg: 0.0,       # 朝北
+      ic_u_fps: 1200.0            # 1200英尺/秒
     },
     missile: 0
   },
@@ -21,11 +25,11 @@ aircraft_configs: {
     color: Blue,
     model: f16,
     init_state: {
-      ic_long_gc_deg: 120.05,
-      ic_lat_geod_deg: 60.8,
-      ic_h_sl_ft: 20000,
-      ic_psi_true_deg: 180.0,
-      ic_u_fps: 800.0
+      ic_long_gc_deg: 120.0,      # 修复：与拖曳射击项目B0100完全一致
+      ic_lat_geod_deg: 60.8,      # 修复：与拖曳射击项目B0100完全一致（90km距离）
+      ic_h_sl_ft: 20000,          # 修复：使用与拖曳射击项目相同的20,000英尺
+      ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
+      ic_u_fps: 1200.0            # 1200英尺/秒
     },
     missile: 0
   }

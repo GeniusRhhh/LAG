@@ -58,36 +58,56 @@ class BasicManeuvers:
 
     @staticmethod
     def turn(time_sec: float, initial_heading: float, turn_angle: float = 45.0, turn_rate: float = 3.0):
-        """转弯 - 基于目标角度的精确控制版本"""
-        # 计算目标航向
-        target_final_heading = normalize_heading(initial_heading + turn_angle)
+        """转弯 - 修复大角度转弯处理，确保精确转弯角度"""
+        # 修复大角度转弯：确保实际转弯角度与参数匹配
+        # 对于大于180度的转弯，需要特殊处理以确保转弯方向正确
 
-        # 基础转弯时间 + 足够的调整时间
-        base_turn_time = abs(turn_angle) / turn_rate
-        max_turn_time = base_turn_time + 15.0  # 给足够时间确保达到目标
+        # 计算实际需要转弯的角度（考虑最短路径 vs 指定角度）
+        if abs(turn_angle) <= 180:
+            # 小角度转弯：直接使用指定角度
+            actual_turn_angle = turn_angle
+        else:
+            # 大角度转弯：按照指定方向进行完整转弯
+            actual_turn_angle = turn_angle
+
+        # 计算目标航向：使用累积转弯而非简单相加
+        target_final_heading = initial_heading + actual_turn_angle
+        # 不立即规范化，保持完整的转弯角度信息
+
+        # 动态计算转弯时间：确保大角度转弯有足够时间
+        base_turn_time = abs(actual_turn_angle) / turn_rate
+        # 大角度转弯需要更多调整时间
+        extra_time = min(20.0, abs(actual_turn_angle) / 15.0 + 8.0)  # 8-20秒的调整时间
+        max_turn_time = base_turn_time + extra_time
 
         if time_sec <= max_turn_time:
-            # 转弯阶段：直接返回目标角度，让控制系统处理实时反馈
+            # 转弯阶段：使用累积角度计算进度
             progress = min(time_sec / base_turn_time, 1.0)
 
             # 使用平滑的进度曲线
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
-            current_target = initial_heading + turn_angle * smooth_progress
+
+            # 计算当前目标航向：累积转弯角度
+            current_turn_amount = actual_turn_angle * smooth_progress
+            current_target = initial_heading + current_turn_amount
+            # 只在最后规范化，保持转弯的连续性
             current_target = normalize_heading(current_target)
 
-            # 计算滚转角 - 减小以降低高度变化
+            # 计算滚转角 - 根据转弯率和角度动态调整，支持大角度转弯
             if progress < 1.0:
-                required_roll = abs(turn_rate) * 6.0  # 降低滚转角强度
-                roll_magnitude = min(required_roll, 25.0)  # 限制最大滚转角
-                target_roll = roll_magnitude * (1 if turn_angle > 0 else -1) * math.sin(progress * math.pi)
+                # 大角度转弯需要更大的滚转角
+                base_roll = min(abs(turn_rate) * 5.0, abs(actual_turn_angle) / 8.0)
+                roll_magnitude = min(base_roll, 45.0)  # 增加最大滚转角到45度支持大角度转弯
+                target_roll = roll_magnitude * (1 if actual_turn_angle > 0 else -1) * math.sin(progress * math.pi)
             else:
                 target_roll = 0.0  # 转弯完成后归零滚转角
 
             phase = "TURNING" if progress < 0.95 else "TURN_ADJUSTING"
             return phase, current_target, None, None, target_roll
         else:
-            # 转弯完成
-            return "TURN_FINISHED", target_final_heading, None, None, 0.0
+            # 转弯完成：确保最终航向正确
+            final_heading = normalize_heading(target_final_heading)
+            return "TURN_FINISHED", final_heading, None, None, 0.0
 
     @staticmethod
     def turn_level(time_sec: float, initial_heading: float, initial_altitude: float,

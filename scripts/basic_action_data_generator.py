@@ -72,9 +72,8 @@ class BasicActionDataGenerator:
         # 为每种基础动作创建独立的子目录
         self.action_dirs = {}
         action_names = [
-            "level_flight", "accelerate", "decelerate", "climb", "dive",
-            "turn", "Crank", "tactical_crank", "tactical_climb",
-            "tactical_dive", "notch_back", "short_skate"
+            "level_flight", "accelerate", "decelerate", "turn_left", "turn_right",
+            "climb", "climb_left", "climb_right", "dive", "dive_left", "dive_right"
         ]
 
         for action_name in action_names:
@@ -88,152 +87,148 @@ class BasicActionDataGenerator:
         """设置11种标准基础动作配置"""
         configs = {}
 
-        # 1. 平飞 (level_flight)
+        # 1. 平飞 (level_flight) - 基础参考动作
         configs["level_flight"] = ActionConfig(
             name="level_flight",
             function_name="level_flight",
             param_ranges={
-                "duration": (15.0, 25.0),  # 基础动作：15-25秒
-                "current_velocity": (200.0, 300.0)
+                "duration": (20.0, 30.0),  # 平飞持续时间
             },
-            duration_range=(15.0, 25.0),
-            samples_count=10  # 每种动作10个样本
+            duration_range=(20.0, 30.0),
+            samples_count=5  # 减少到5个高质量样本
         )
 
-        # 2. 加速 (accelerate)
+        # 2. 加速 (accelerate) - 极端差异化
         configs["accelerate"] = ActionConfig(
             name="accelerate",
             function_name="accelerate",
             param_ranges={
-                "velocity_increase": (40.0, 100.0),
-                "duration": (15.0, 25.0)  # 基础动作：15-25秒
+                "velocity_increase": (100.0, 400.0),  # 极端差异化：100-400 m/s增速
+                "duration": (15.0, 25.0)  # 加速持续时间
             },
             duration_range=(15.0, 25.0),
-            samples_count=10  # 每种动作10个样本
+            samples_count=5  # 减少到5个高质量样本
         )
 
-        # 3. 减速 (decelerate)
+        # 3. 减速 (decelerate) - 极端差异化
         configs["decelerate"] = ActionConfig(
             name="decelerate",
             function_name="decelerate",
             param_ranges={
-                "velocity_decrease": (40.0, 100.0),
-                "duration": (15.0, 25.0)  # 基础动作：15-25秒
+                "velocity_decrease": (100.0, 400.0),  # 极端差异化：100-400 m/s减速
+                "duration": (15.0, 25.0)  # 减速持续时间
             },
             duration_range=(15.0, 25.0),
-            samples_count=10  # 每种动作10个样本
+            samples_count=5  # 减少到5个高质量样本
         )
 
-        # 4. 爬升 (climb/pull_up)
+        # 4. 左转 (turn_left) - 小角度范围修复
+        configs["turn_left"] = ActionConfig(
+            name="turn_left",
+            function_name="turn",
+            param_ranges={
+                "turn_angle": (-90.0, -15.0),  # 修复为小角度：15-90度左转
+                "turn_rate": (2.0, 6.0),  # 合理转弯速率：2.0-6.0度/秒
+            },
+            duration_range=(15.0, 25.0),  # 小角度转弯时间范围
+            samples_count=5  # 每种动作5个高质量样本
+        )
+
+        # 5. 右转 (turn_right) - 小角度范围修复
+        configs["turn_right"] = ActionConfig(
+            name="turn_right",
+            function_name="turn",
+            param_ranges={
+                "turn_angle": (15.0, 90.0),  # 修复为小角度：15-90度右转
+                "turn_rate": (2.0, 6.0),  # 合理转弯速率：2.0-6.0度/秒
+            },
+            duration_range=(15.0, 25.0),  # 小角度转弯时间范围
+            samples_count=5  # 每种动作5个高质量样本
+        )
+
+        # 6. 爬升 (climb/pull_up) - 物理可行的参数差异化
         configs["climb"] = ActionConfig(
             name="climb",
             function_name="pull_up",
             param_ranges={
-                "altitude_gain": (1000.0, 2500.0),
-                "duration": (15.0, 25.0)  # 基础动作：15-25秒
+                "altitude_gain": (1000.0, 4000.0),  # 物理可行：1000-4000米爬升（初始高度10000m）
+                "duration": (15.0, 25.0)  # 爬升持续时间
             },
             duration_range=(15.0, 25.0),
-            samples_count=10  # 每种动作10个样本
+            samples_count=5  # 减少到5个高质量样本
         )
 
-        # 5. 下降 (dive)
+        # 7. 俯冲 (dive) - 物理可行的参数差异化
         configs["dive"] = ActionConfig(
             name="dive",
             function_name="dive",
             param_ranges={
-                "altitude_loss": (1000.0, 2500.0),
-                "duration": (15.0, 25.0),  # 基础动作：15-25秒
-                "min_altitude": (2000.0, 3500.0)
+                "altitude_loss": (1000.0, 7000.0),  # 物理可行：1000-7000米俯冲（初始高度10000m，最低3000m）
+                "duration": (15.0, 25.0),  # 俯冲持续时间
+                "min_altitude": (2000.0, 3000.0)  # 安全最小高度范围
             },
             duration_range=(15.0, 25.0),
-            samples_count=10  # 每种动作10个样本
+            samples_count=5  # 减少到5个高质量样本
         )
 
-        # 6. 转弯 (turn) - 包含左转和右转
-        configs["turn"] = ActionConfig(
-            name="turn",
-            function_name="turn",
+        # 8. 左爬升 (climb_left) - 小角度组合机动修复
+        configs["climb_left"] = ActionConfig(
+            name="climb_left",
+            function_name="diagonal_flight",  # 使用组合机动函数
             param_ranges={
-                "turn_angle": (-90.0, 90.0),  # 负值左转，正值右转
-                "turn_rate": (2.5, 6.0)
+                "altitude_gain": (1000.0, 3000.0),  # 物理可行：1000-3000米爬升
+                "turn_angle": (-90.0, -15.0),  # 修复为小角度：15-90度左转
+                "turn_rate": (2.0, 6.0),  # 合理转弯率：2-6度/秒
+                "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
-            duration_range=(15.0, 25.0),  # 基础动作：15-25秒
-            samples_count=10  # 每种动作10个样本
+            duration_range=(20.0, 30.0),
+            samples_count=5  # 每种动作5个高质量样本
         )
 
-        # 7. Crank (标准规避机动)
-        configs["Crank"] = ActionConfig(
-            name="Crank",
-            function_name="turn",
+        # 9. 右爬升 (climb_right) - 小角度组合机动修复
+        configs["climb_right"] = ActionConfig(
+            name="climb_right",
+            function_name="diagonal_flight",  # 使用组合机动函数
             param_ranges={
-                "turn_angle": (-70.0, 70.0),   # 包含左右Crank
-                "turn_rate": (2.5, 6.0)
+                "altitude_gain": (1000.0, 3000.0),  # 物理可行：1000-3000米爬升
+                "turn_angle": (15.0, 90.0),  # 修复为小角度：15-90度右转
+                "turn_rate": (2.0, 6.0),  # 合理转弯率：2-6度/秒
+                "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
-            duration_range=(20.0, 35.0),  # 战术动作：20-35秒
-            samples_count=10  # 每种动作10个样本
+            duration_range=(20.0, 30.0),
+            samples_count=5  # 每种动作5个高质量样本
         )
 
-        # 8. 战术Crank (tactical_crank)
-        configs["tactical_crank"] = ActionConfig(
-            name="tactical_crank",
-            function_name="turn",  # 使用基础turn函数
+
+
+        # 10. 左俯冲 (dive_left) - 小角度组合机动修复
+        configs["dive_left"] = ActionConfig(
+            name="dive_left",
+            function_name="diagonal_flight",  # 使用组合机动函数
             param_ranges={
-                "turn_angle": (-80.0, 80.0),   # 战术Crank更大角度
-                "turn_rate": (3.0, 6.0)
+                "altitude_loss": (1500.0, 4000.0),  # 物理可行：1500-4000米俯冲
+                "turn_angle": (-90.0, -15.0),  # 修复为小角度：15-90度左转
+                "turn_rate": (2.0, 6.0),  # 合理转弯率：2-6度/秒
+                "min_altitude": (2000.0, 3000.0),  # 安全最小高度范围
+                "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
-            duration_range=(20.0, 35.0),  # 战术动作：20-35秒
-            samples_count=10  # 每种动作10个样本
+            duration_range=(20.0, 30.0),
+            samples_count=5  # 每种动作5个高质量样本
         )
 
-        # 9. 战术爬升 (tactical_climb)
-        configs["tactical_climb"] = ActionConfig(
-            name="tactical_climb",
-            function_name="pull_up",
+        # 11. 右俯冲 (dive_right) - 小角度组合机动修复
+        configs["dive_right"] = ActionConfig(
+            name="dive_right",
+            function_name="diagonal_flight",  # 使用组合机动函数
             param_ranges={
-                "altitude_gain": (1500.0, 3000.0),  # 战术爬升更大高度
-                "duration": (20.0, 35.0)  # 战术动作：20-35秒
+                "altitude_loss": (1500.0, 4000.0),  # 物理可行：1500-4000米俯冲
+                "turn_angle": (15.0, 90.0),  # 修复为小角度：15-90度右转
+                "turn_rate": (2.0, 6.0),  # 合理转弯率：2-6度/秒
+                "min_altitude": (2000.0, 3000.0),  # 安全最小高度范围
+                "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
-            duration_range=(20.0, 35.0),
-            samples_count=10  # 每种动作10个样本
-        )
-
-        # 10. 战术下降 (tactical_dive)
-        configs["tactical_dive"] = ActionConfig(
-            name="tactical_dive",
-            function_name="dive",
-            param_ranges={
-                "altitude_loss": (1500.0, 3000.0),  # 战术下降更大高度
-                "duration": (20.0, 35.0),  # 战术动作：20-35秒
-                "min_altitude": (2000.0, 3500.0)
-            },
-            duration_range=(20.0, 35.0),
-            samples_count=10  # 每种动作10个样本
-        )
-
-        # 11. Notch back (后撤规避)
-        configs["notch_back"] = ActionConfig(
-            name="notch_back",
-            function_name="turn",  # 使用基础turn函数
-            param_ranges={
-                "turn_angle": (-110.0, 110.0),  # 包含左右Notch
-                "turn_rate": (2.0, 5.0),
-                "duration": (20.0, 35.0)  # 战术动作：20-35秒
-            },
-            duration_range=(20.0, 35.0),
-            samples_count=10  # 每种动作10个样本
-        )
-
-        # 12. Short skate (短距离规避)
-        configs["short_skate"] = ActionConfig(
-            name="short_skate",
-            function_name="turn",  # 使用基础turn函数
-            param_ranges={
-                "turn_angle": (-45.0, 45.0),  # 短距离规避角度较小
-                "turn_rate": (3.0, 7.0),  # 转弯速率较快
-                "duration": (20.0, 35.0)  # 战术动作：20-35秒
-            },
-            duration_range=(20.0, 35.0),
-            samples_count=10  # 每种动作10个样本
+            duration_range=(20.0, 30.0),
+            samples_count=5  # 每种动作5个高质量样本
         )
 
         return configs
@@ -253,12 +248,11 @@ class BasicActionDataGenerator:
         # 确定动作标注名称（用于CSV数据标注）
         actual_action_name = self._determine_action_label(action_name, params)
 
-        # 生成参数化文件名
-        date_str = datetime.now().strftime("%m%d")  # 简化时间戳为MMDD格式
+        # 生成规范化文件名（移除冗余前缀和时间戳）
         param_str = self._format_filename_parameters(action_name, params)
 
-        # 新的参数化文件命名格式
-        base_filename = f"basic_maneuver_{action_name}_{param_str}_{sample_index:03d}_{date_str}"
+        # 新的简洁文件命名格式：{动作类型}_{关键参数值}_{样本编号}
+        base_filename = f"{action_name}_{param_str}_{sample_index:03d}"
         acmi_filename = f"{base_filename}.acmi"
         csv_filename = f"{base_filename}.csv"
 
@@ -306,73 +300,65 @@ class BasicActionDataGenerator:
             return action_name
 
     def _format_filename_parameters(self, action_name: str, params: Dict[str, Any]) -> str:
-        """根据动作类型和参数生成格式化的文件名参数部分"""
+        """根据动作类型和参数生成格式化的文件名参数部分 - 新规范"""
         param_parts = []
 
-        if action_name in ["Crank", "turn"]:
-            # 转弯类动作：{direction}_{angle}deg_{rate}dps
-            direction = "left" if params.get("turn_angle", 0) < 0 else "right"
+        # 基础动作命名规范
+        if action_name in ["turn_left", "turn_right"]:
+            # 转弯动作：{angle}deg
             angle = int(abs(params.get("turn_angle", 0)))
-            rate = round(params.get("turn_rate", 0), 1)
-            param_parts = [direction, f"{angle}deg", f"{rate}dps"]
+            param_parts = [f"{angle}deg"]
 
-        elif action_name == "tactical_crank":
-            # 战术Crank：{direction}_{angle}deg_{rate}dps
-            direction = "left" if params.get("crank_angle", 0) < 0 else "right"
-            angle = int(abs(params.get("crank_angle", 0)))
-            rate = round(params.get("turn_rate", 0), 1)
-            param_parts = [direction, f"{angle}deg", f"{rate}dps"]
-
-        elif action_name in ["climb", "tactical_climb"]:
-            # 爬升类动作：{altitude}m_{duration}s
+        elif action_name == "climb":
+            # 爬升动作：{altitude}m
             altitude = int(params.get("altitude_gain", 0))
-            duration = int(params.get("duration", 0))
-            param_parts = [f"{altitude}m", f"{duration}s"]
+            param_parts = [f"{altitude}m"]
 
-        elif action_name in ["dive", "tactical_dive"]:
-            # 下降类动作：{altitude}m_{duration}s
+        elif action_name == "dive":
+            # 俯冲动作：{altitude}m
             altitude = int(params.get("altitude_loss", 0))
-            duration = int(params.get("duration", 0))
-            param_parts = [f"{altitude}m", f"{duration}s"]
+            param_parts = [f"{altitude}m"]
 
         elif action_name == "accelerate":
-            # 加速动作：{speed}mps_{duration}s
+            # 加速动作：{speed}mps
             speed = int(params.get("velocity_increase", 0))
-            duration = int(params.get("duration", 0))
-            param_parts = [f"{speed}mps", f"{duration}s"]
+            param_parts = [f"{speed}mps"]
 
         elif action_name == "decelerate":
-            # 减速动作：{speed}mps_{duration}s
+            # 减速动作：{speed}mps
             speed = int(params.get("velocity_decrease", 0))
-            duration = int(params.get("duration", 0))
-            param_parts = [f"{speed}mps", f"{duration}s"]
+            param_parts = [f"{speed}mps"]
 
         elif action_name == "level_flight":
-            # 平飞动作：{speed}mps_{duration}s
+            # 平飞动作：{speed}mps
             speed = int(params.get("current_velocity", 250))
-            duration = int(params.get("duration", 0))
-            param_parts = [f"{speed}mps", f"{duration}s"]
+            param_parts = [f"{speed}mps"]
 
-        elif action_name == "notch_back":
-            # Notch back：{direction}_{angle}deg_{altitude}m
-            direction = "left" if params.get("turn_angle", 0) < 0 else "right"
+        # 组合动作命名规范
+        elif action_name in ["climb_left", "climb_right", "dive_left", "dive_right"]:
+            # 组合动作：{高度参数}_{转弯参数}
+            if "climb" in action_name:
+                altitude = int(params.get("altitude_gain", 0))
+                param_parts.append(f"{altitude}m")
+            else:  # dive
+                altitude = int(params.get("altitude_loss", 0))
+                param_parts.append(f"{altitude}m")
+
             angle = int(abs(params.get("turn_angle", 0)))
-            altitude = int(params.get("altitude_loss", 0))
-            param_parts = [direction, f"{angle}deg", f"{altitude}m"]
+            param_parts.append(f"{angle}deg")
 
         else:
-            # 默认格式：使用第一个数值参数
+            # 默认格式：自动识别关键参数
             for key, value in params.items():
                 if isinstance(value, (int, float)):
                     if "angle" in key.lower():
                         param_parts.append(f"{int(abs(value))}deg")
-                    elif "duration" in key.lower() or "time" in key.lower():
-                        param_parts.append(f"{int(value)}s")
                     elif "altitude" in key.lower():
                         param_parts.append(f"{int(abs(value))}m")
                     elif "velocity" in key.lower() or "speed" in key.lower():
                         param_parts.append(f"{int(abs(value))}mps")
-                    break
+                    if len(param_parts) >= 2:  # 最多两个关键参数
+                        break
 
         return "_".join(param_parts) if param_parts else "default"
 
@@ -404,6 +390,14 @@ class BasicActionDataGenerator:
 
             # 重置轨迹数据
             self.trajectory_data = []
+
+            # 重置坐标参考点（每次仿真重新初始化相对坐标系）
+            if hasattr(self, 'reference_lon'):
+                delattr(self, 'reference_lon')
+            if hasattr(self, 'reference_lat'):
+                delattr(self, 'reference_lat')
+            if hasattr(self, 'reference_z'):
+                delattr(self, 'reference_z')
 
             # 运行仿真
             obs, share_obs = env.reset()
@@ -592,13 +586,14 @@ class BasicActionDataGenerator:
             logging.error(f"ACMI帧写入失败: {e}")
 
     def _record_trajectory_data(self, env, current_time: float):
-        """记录轨迹数据用于CSV输出"""
+        """记录轨迹数据用于CSV输出 - 只记录A0100代理数据，使用拖曳射击项目完全相同的坐标系统"""
         for agent_id, agent in env.agents.items():
-            if agent.is_alive:
-                # 获取位置数据
-                pos_x = agent.get_property_value(c.position_long_gc_deg) * 111320  # 转换为米
-                pos_y = agent.get_property_value(c.position_lat_geod_deg) * 111320  # 转换为米
-                pos_z = agent.get_property_value(c.position_h_sl_m)
+            # 只记录A0100代理数据，排除B0100（敌方）数据
+            if agent.is_alive and agent_id == "A0100":
+                # 使用与拖曳射击项目完全相同的坐标计算方法
+                # 直接使用agent.get_position()，这已经是基于battle_field_center的LLA2NEU转换后的NEU坐标
+                # 现在battle_field_center已设置为[120.0, 60.4, 0.0]，与拖曳射击项目完全一致
+                pos = agent.get_position()  # 这返回基于战场中心的NEU坐标系[N, E, U]
 
                 # 获取速度和姿态数据
                 velocity = agent.get_property_value(c.velocities_u_mps)
@@ -606,13 +601,14 @@ class BasicActionDataGenerator:
                 pitch = np.rad2deg(agent.get_property_value(c.attitude_theta_rad))
                 roll = np.rad2deg(agent.get_property_value(c.attitude_phi_rad))
 
-                # 记录数据点
+                # 记录数据点（使用拖曳射击项目完全相同的坐标格式）
+                # 现在坐标应该与拖曳射击项目一致：A0100在X≈-44535m，Z≈5940m
                 data_point = {
                     'Time_s': current_time,
                     'Agent_ID': agent_id,
-                    'X_m': pos_x,
-                    'Y_m': pos_y,
-                    'Z_m': pos_z,
+                    'X_m': pos[0],  # NEU坐标系的North分量（基于战场中心）
+                    'Y_m': pos[1],  # NEU坐标系的East分量（基于战场中心）
+                    'Z_m': pos[2],  # NEU坐标系的Up分量（基于战场中心）
                     'Velocity_m_s': velocity,
                     'Heading_deg': heading,
                     'Pitch_deg': pitch,
