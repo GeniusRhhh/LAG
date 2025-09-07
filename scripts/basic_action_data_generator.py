@@ -101,10 +101,9 @@ class BasicActionDataGenerator:
         # 2. 加速 (accelerate) - 极端差异化
         configs["accelerate"] = ActionConfig(
             name="accelerate",
-            function_name="accelerate",
+            function_name="level_flight",  # 改为使用level_flight函数，表示速度保持
             param_ranges={
-                "velocity_increase": (100.0, 400.0),  # 极端差异化：100-400 m/s增速
-                "duration": (15.0, 25.0)  # 加速持续时间
+                "duration": (15.0, 25.0)  # 保持飞行持续时间
             },
             duration_range=(15.0, 25.0),
             samples_count=5  # 减少到5个高质量样本
@@ -113,10 +112,9 @@ class BasicActionDataGenerator:
         # 3. 减速 (decelerate) - 极端差异化
         configs["decelerate"] = ActionConfig(
             name="decelerate",
-            function_name="decelerate",
+            function_name="level_flight",  # 改为使用level_flight函数，表示速度保持
             param_ranges={
-                "velocity_decrease": (100.0, 400.0),  # 极端差异化：100-400 m/s减速
-                "duration": (15.0, 25.0)  # 减速持续时间
+                "duration": (15.0, 25.0)  # 保持飞行持续时间
             },
             duration_range=(15.0, 25.0),
             samples_count=5  # 减少到5个高质量样本
@@ -245,6 +243,9 @@ class BasicActionDataGenerator:
         config = self.action_configs[action_name]
         params = self.generate_random_params(config)
 
+        # 动态调整初始高度以支持大幅度俯冲
+        initial_altitude = self._calculate_dynamic_initial_altitude(action_name, params)
+
         # 确定动作标注名称（用于CSV数据标注）
         actual_action_name = self._determine_action_label(action_name, params)
 
@@ -320,14 +321,14 @@ class BasicActionDataGenerator:
             param_parts = [f"{altitude}m"]
 
         elif action_name == "accelerate":
-            # 加速动作：{speed}mps
-            speed = int(params.get("velocity_increase", 0))
-            param_parts = [f"{speed}mps"]
+            # 加速动作（现在是平飞）：{duration}s
+            duration = int(params.get("duration", 20))
+            param_parts = [f"{duration}s"]
 
         elif action_name == "decelerate":
-            # 减速动作：{speed}mps
-            speed = int(params.get("velocity_decrease", 0))
-            param_parts = [f"{speed}mps"]
+            # 减速动作（现在是平飞）：{duration}s
+            duration = int(params.get("duration", 20))
+            param_parts = [f"{duration}s"]
 
         elif action_name == "level_flight":
             # 平飞动作：{speed}mps
@@ -362,10 +363,70 @@ class BasicActionDataGenerator:
 
         return "_".join(param_parts) if param_parts else "default"
 
+    def _calculate_dynamic_initial_altitude(self, action_name: str, params: Dict[str, Any]) -> float:
+        """根据动作类型和参数动态计算初始高度，确保有足够空间完成机动"""
+        base_altitude = 10000.0  # 基础高度10000米
+
+        # 俯冲相关动作需要更高的初始高度
+        if action_name in ["dive", "dive_left", "dive_right"]:
+            altitude_loss = params.get("altitude_loss", 0.0)
+            if altitude_loss > 5000.0:
+                # 大幅度俯冲：设置更高初始高度
+                required_altitude = altitude_loss + 5000.0  # 保留5000米安全高度
+                dynamic_altitude = max(base_altitude, required_altitude)
+                logging.info(f"🏔️ 大幅度俯冲动作 {action_name}: 俯冲{altitude_loss:.0f}m, 动态初始高度: {dynamic_altitude:.0f}m")
+                return dynamic_altitude
+            elif altitude_loss > 3000.0:
+                # 中等俯冲：适度提升初始高度
+                dynamic_altitude = base_altitude + 2000.0  # 12000米
+                logging.info(f"🏔️ 中等俯冲动作 {action_name}: 俯冲{altitude_loss:.0f}m, 动态初始高度: {dynamic_altitude:.0f}m")
+                return dynamic_altitude
+
+        # 其他动作使用标准高度
+        return base_altitude
+
+    def _update_config_conditions(self, action_name: str, altitude_meters: float):
+        """动态更新配置文件中的初始条件（高度和速度）"""
+        import yaml
+
+        config_path = "envs/JSBSim/configs/simple_maneuver_config.yaml"
+        altitude_feet = altitude_meters * 3.28084  # 转换为英尺
+
+        # 根据动作类型设置不同的初始速度
+        if action_name == "accelerate":
+            velocity_fps = 820.0  # 加速动作使用较低初始速度 (250 m/s)
+            logging.info(f"🚀 加速动作使用低初始速度: 820 fps (250 m/s)")
+        else:
+            velocity_fps = 1200.0  # 其他动作使用标准初始速度 (365 m/s)
+            logging.info(f"✈️ {action_name}动作使用标准初始速度: 1200 fps (365 m/s)")
+
+        try:
+            # 读取配置文件
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+
+            # 更新所有飞机的初始条件
+            for aircraft_id in config['aircraft_configs']:
+                config['aircraft_configs'][aircraft_id]['init_state']['ic_h_sl_ft'] = altitude_feet
+                config['aircraft_configs'][aircraft_id]['init_state']['ic_u_fps'] = velocity_fps
+
+            # 写回配置文件
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+
+            logging.info(f"🏔️ 动态更新初始条件: 高度{altitude_meters:.0f}m ({altitude_feet:.0f}ft), 速度{velocity_fps:.0f}fps")
+
+        except Exception as e:
+            logging.warning(f"⚠️ 无法更新配置文件: {e}")
+
     def _run_simulation(self, action_name: str, function_name: str, params: Dict[str, float],
                        acmi_path: str, csv_path: str) -> bool:
         """运行单次仿真 - 添加精确时间范围控制"""
         try:
+            # 动态调整初始条件配置（高度和速度）
+            dynamic_altitude = self._calculate_dynamic_initial_altitude(action_name, params)
+            self._update_config_conditions(action_name, dynamic_altitude)
+
             # 创建环境
             config_name = "simple_maneuver_config"
             env = MultipleCombatEnv(config_name)
@@ -698,8 +759,11 @@ def main():
     print("  2. 完整模式 (每种动作100个样本)")
     print("  3. 自定义模式")
 
+    # 自动选择测试模式进行修复验证
+    choice = 1
+    print(f"\n自动选择模式: {choice} (测试模式)")
+
     try:
-        choice = int(input("\n请选择模式 (1-3): ").strip())
 
         if choice == 1:
             print("\n🧪 开始测试模式生成...")

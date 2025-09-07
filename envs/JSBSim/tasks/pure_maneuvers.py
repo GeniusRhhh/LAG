@@ -28,18 +28,26 @@ class BasicManeuvers:
 
     @staticmethod
     def accelerate(time_sec: float, current_velocity: float, duration: float = 5.0, velocity_increase: float = 50.0,
-                   max_velocity: float = 350.0):
-        """加速 - 只改变速度，绝对不改变航向和高度"""
+                   max_velocity: float = 500.0):
+        """加速 - 只改变速度，绝对不改变航向和高度，修复版本"""
         if time_sec <= duration:
             progress = time_sec / duration
+            # 使用更平滑的加速曲线，确保持续加速
             smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
             velocity_offset = velocity_increase * smooth_progress
 
+            # 提高最大速度限制，支持军用飞机性能
             if current_velocity + velocity_offset > max_velocity:
                 velocity_offset = max_velocity - current_velocity
 
+            # 确保velocity_offset始终为正值（加速）
+            velocity_offset = max(velocity_offset, 0.0)
+
             return "ACCELERATE", None, None, velocity_offset, None
-        return None, None, None, None, None
+        else:
+            # 加速完成后保持最终速度增量
+            final_velocity_offset = min(velocity_increase, max_velocity - current_velocity)
+            return "ACCELERATE_COMPLETE", None, None, max(final_velocity_offset, 0.0), None
 
     @staticmethod
     def decelerate(time_sec: float, current_velocity: float, duration: float = 5.0, velocity_decrease: float = 50.0,
@@ -157,22 +165,24 @@ class BasicManeuvers:
     @staticmethod
     def dive(time_sec: float, initial_altitude: float, duration: float = 8.0, altitude_loss: float = 1000.0,
              min_altitude: float = 3000.0):
-        """俯冲 - 抑制高度补偿版本，防止JSBSim自动升力补偿"""
+        """俯冲 - 精确高度控制版本，确保达到预期俯冲距离"""
         target_final_altitude = max(initial_altitude - altitude_loss, min_altitude)
         actual_altitude_loss = initial_altitude - target_final_altitude
 
         if time_sec <= duration:
             progress = time_sec / duration
-            # 使用线性下降，避免过于激进
+            # 使用精确的线性俯冲曲线，确保达到目标高度
             target_altitude = initial_altitude - actual_altitude_loss * progress
 
             # 确保不低于最小高度
             target_altitude = max(target_altitude, min_altitude)
 
-            # 不给任何速度补偿，让飞机自然下降
-            return "DIVING", None, target_altitude, 0.0, None
+            # 增强的速度补偿，确保俯冲效果
+            velocity_offset = 20.0 * progress  # 增强加速辅助俯冲
+
+            return "DIVING", None, target_altitude, velocity_offset, None
         else:
-            # 俯冲完成，确保达到目标高度
+            # 俯冲完成，强制保持目标高度
             return "DIVE_FINISHED", None, target_final_altitude, 0.0, None
 
     @staticmethod

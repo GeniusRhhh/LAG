@@ -62,7 +62,8 @@ class PureManeuverTask(MultipleCombatTask):
             2*np.pi/3,        # 120°
             np.pi             # 180°
         ])
-        self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 100.0
+        # 修复速度控制：进一步增强速度变化幅度，支持大幅度加速/减速
+        self.norm_delta_velocity = np.array([-150, -100, -50, 0, 50, 100, 150]) / 25.0  # 改为除以25，大幅增强控制力度
         self.composite_executor = CompositeManeuverExecutor()
         self.maneuver_composer = self.composite_executor
         self._load_baseline_models()
@@ -264,9 +265,13 @@ class PureManeuverTask(MultipleCombatTask):
             if abs(heading_diff) > 1.0:
                 heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
 
+        # 修复加速/减速动作的速度控制
         if velocity_offset is not None and basic_maneuver_name in ["accelerate", "decelerate"]:
             if abs(velocity_offset) > 2.0:
                 velocity_cmd_id = self._convert_velocity_to_index(velocity_offset)
+                # 调试日志：验证速度控制参数传递
+                if env.current_step % 20 == 0:  # 每20步记录一次
+                    logging.info(f"🚀 {agent_id} 速度控制: offset={velocity_offset:.1f}m/s, cmd_id={velocity_cmd_id}, norm_value={self.norm_delta_velocity[velocity_cmd_id]:.2f}")
         if target_roll is not None and abs(target_roll) > 1.0:
             return self._use_lowlevel_policy_with_roll(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id,
                                                        target_roll)
@@ -937,14 +942,47 @@ class PureManeuverTask(MultipleCombatTask):
             # 安全索引访问，防止越界
             altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
             heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+            velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
 
+            # 修复速度控制：根据velocity_cmd_id调整推力（极端增强版本）
+            target_velocity_change = self.norm_delta_velocity[velocity_cmd_id]
+            if target_velocity_change > 4.0:  # 极大幅加速
+                throttle = 1.0  # 最大推力
+                elevator = 0.0  # 保持水平，专注加速
+            elif target_velocity_change > 2.0:  # 大幅加速
+                throttle = 1.0  # 最大推力
+                elevator = 0.0
+            elif target_velocity_change > 1.0:  # 中等加速
+                throttle = 0.95
+                elevator = 0.0
+            elif target_velocity_change > 0.0:  # 轻微加速
+                throttle = 0.85
+                elevator = 0.0
+            elif target_velocity_change < -4.0:  # 极大幅减速
+                throttle = 0.0  # 最小推力
+                elevator = 0.0
+            elif target_velocity_change < -2.0:  # 大幅减速
+                throttle = 0.1
+                elevator = 0.0
+            elif target_velocity_change < -1.0:  # 中等减速
+                throttle = 0.3
+                elevator = 0.0
+            elif target_velocity_change < 0.0:  # 轻微减速
+                throttle = 0.5
+                elevator = 0.0
+            else:  # 保持速度
+                throttle = 0.7
+                elevator = 0.0
+
+            # 高度控制（仅在非速度控制动作时生效）
             target_altitude_change = self.norm_delta_altitude[altitude_cmd_id] * 1000.0  # 转换回米
-            if target_altitude_change > 0:
-                elevator = 0.1
-                throttle = 0.8
-            elif target_altitude_change < 0:
-                elevator = -0.1
-                throttle = 0.6
+            if abs(target_velocity_change) < 0.1:  # 只有在没有速度控制需求时才进行高度控制
+                if target_altitude_change > 0:
+                    elevator = 0.1
+                    throttle = max(throttle, 0.8)  # 爬升时确保足够推力
+                elif target_altitude_change < 0:
+                    elevator = -0.1
+                    # 俯冲时保持速度控制的推力设置
             target_heading_change = np.rad2deg(self.norm_delta_heading[heading_cmd_id])
             if target_heading_change > 5:
                 aileron = 0.2
