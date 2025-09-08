@@ -11,7 +11,7 @@ aircraft_configs:
   A0100:
     color: Red
     init_state:
-      ic_h_sl_ft: 39370.08
+      ic_h_sl_ft: 32808.4
       ic_lat_geod_deg: 60.0
       ic_long_gc_deg: 120.0
       ic_psi_true_deg: 0.0
@@ -21,7 +21,7 @@ aircraft_configs:
   B0100:
     color: Blue
     init_state:
-      ic_h_sl_ft: 39370.08
+      ic_h_sl_ft: 32808.4
       ic_lat_geod_deg: 60.8
       ic_long_gc_deg: 120.0
       ic_psi_true_deg: 180.0

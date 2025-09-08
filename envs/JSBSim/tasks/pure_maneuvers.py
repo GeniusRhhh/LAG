@@ -32,8 +32,8 @@ class BasicManeuvers:
         """加速 - 只改变速度，绝对不改变航向和高度，修复版本"""
         if time_sec <= duration:
             progress = time_sec / duration
-            # 使用更平滑的加速曲线，确保持续加速
-            smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
+            # 修复：使用更激进的加速曲线，确保前期就有明显加速效果
+            smooth_progress = progress ** 1.5  # 更快的前期加速
             velocity_offset = velocity_increase * smooth_progress
 
             # 提高最大速度限制，支持军用飞机性能
@@ -55,7 +55,8 @@ class BasicManeuvers:
         """减速 - 只改变速度，绝对不改变航向和高度"""
         if time_sec <= duration:
             progress = time_sec / duration
-            smooth_progress = 3 * progress ** 2 - 2 * progress ** 3
+            # 修复：使用更激进的减速曲线，确保前期就有明显减速效果
+            smooth_progress = progress ** 1.5  # 更快的前期减速
             velocity_offset = -velocity_decrease * smooth_progress
 
             if current_velocity + velocity_offset < min_velocity:

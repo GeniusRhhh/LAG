@@ -11,6 +11,7 @@ import logging
 import numpy as np
 import pandas as pd
 import random
+import argparse
 from datetime import datetime
 from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass
@@ -95,29 +96,31 @@ class BasicActionDataGenerator:
                 "duration": (20.0, 30.0),  # 平飞持续时间
             },
             duration_range=(20.0, 30.0),
-            samples_count=5  # 减少到5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
-        # 2. 加速 (accelerate) - 极端差异化
+        # 2. 加速 (accelerate) - 修复函数映射
         configs["accelerate"] = ActionConfig(
             name="accelerate",
-            function_name="level_flight",  # 改为使用level_flight函数，表示速度保持
+            function_name="accelerate",  # 修复：使用正确的accelerate函数
             param_ranges={
-                "duration": (15.0, 25.0)  # 保持飞行持续时间
+                "velocity_increase": (60.0, 120.0),  # 修复：加速幅度提高到60-120 m/s，确保有效控制
+                "duration": (10.0, 35.0)  # 加速持续时间：10-35秒
             },
-            duration_range=(15.0, 25.0),
-            samples_count=5  # 减少到5个高质量样本
+            duration_range=(10.0, 35.0),
+            samples_count=50  # 扩大到50个高质量样本
         )
 
-        # 3. 减速 (decelerate) - 极端差异化
+        # 3. 减速 (decelerate) - 修复函数映射
         configs["decelerate"] = ActionConfig(
             name="decelerate",
-            function_name="level_flight",  # 改为使用level_flight函数，表示速度保持
+            function_name="decelerate",  # 修复：使用正确的decelerate函数
             param_ranges={
-                "duration": (15.0, 25.0)  # 保持飞行持续时间
+                "velocity_decrease": (60.0, 120.0),  # 修复：减速幅度提高到60-120 m/s，确保有效控制
+                "duration": (10.0, 35.0)  # 减速持续时间：10-35秒
             },
-            duration_range=(15.0, 25.0),
-            samples_count=5  # 减少到5个高质量样本
+            duration_range=(10.0, 35.0),
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 4. 左转 (turn_left) - 小角度范围修复
@@ -129,7 +132,7 @@ class BasicActionDataGenerator:
                 "turn_rate": (2.0, 6.0),  # 合理转弯速率：2.0-6.0度/秒
             },
             duration_range=(15.0, 25.0),  # 小角度转弯时间范围
-            samples_count=5  # 每种动作5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 5. 右转 (turn_right) - 小角度范围修复
@@ -141,7 +144,7 @@ class BasicActionDataGenerator:
                 "turn_rate": (2.0, 6.0),  # 合理转弯速率：2.0-6.0度/秒
             },
             duration_range=(15.0, 25.0),  # 小角度转弯时间范围
-            samples_count=5  # 每种动作5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 6. 爬升 (climb/pull_up) - 物理可行的参数差异化
@@ -153,7 +156,7 @@ class BasicActionDataGenerator:
                 "duration": (15.0, 25.0)  # 爬升持续时间
             },
             duration_range=(15.0, 25.0),
-            samples_count=5  # 减少到5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 7. 俯冲 (dive) - 物理可行的参数差异化
@@ -166,7 +169,7 @@ class BasicActionDataGenerator:
                 "min_altitude": (2000.0, 3000.0)  # 安全最小高度范围
             },
             duration_range=(15.0, 25.0),
-            samples_count=5  # 减少到5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 8. 左爬升 (climb_left) - 小角度组合机动修复
@@ -180,7 +183,7 @@ class BasicActionDataGenerator:
                 "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
             duration_range=(20.0, 30.0),
-            samples_count=5  # 每种动作5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 9. 右爬升 (climb_right) - 小角度组合机动修复
@@ -194,7 +197,7 @@ class BasicActionDataGenerator:
                 "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
             duration_range=(20.0, 30.0),
-            samples_count=5  # 每种动作5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
 
@@ -211,7 +214,7 @@ class BasicActionDataGenerator:
                 "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
             duration_range=(20.0, 30.0),
-            samples_count=5  # 每种动作5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         # 11. 右俯冲 (dive_right) - 小角度组合机动修复
@@ -226,7 +229,7 @@ class BasicActionDataGenerator:
                 "duration": (20.0, 30.0)  # 组合机动：20-30秒
             },
             duration_range=(20.0, 30.0),
-            samples_count=5  # 每种动作5个高质量样本
+            samples_count=50  # 扩大到50个高质量样本
         )
 
         return configs
@@ -492,12 +495,11 @@ class BasicActionDataGenerator:
                 if step % 2 == 0:  # 每2步记录一次ACMI
                     self._write_acmi_frame(acmi_path, env)
 
-                # CSV数据记录：仅在动作执行期间记录
+                # CSV数据记录：仅在动作执行期间记录（修复：每步都记录，确保0.2s间隔）
                 if action_start_step <= step <= csv_end_step:
-                    if step % 2 == 0:  # 每2步记录一次CSV数据
-                        # 调整时间为相对于动作开始的时间
-                        relative_time = current_time - action_start_time
-                        self._record_trajectory_data(env, relative_time)
+                    # 调整时间为相对于动作开始的时间
+                    relative_time = current_time - action_start_time
+                    self._record_trajectory_data(env, relative_time)
 
                 step += 1
                 done = np.any(dones)
@@ -744,6 +746,17 @@ class BasicActionDataGenerator:
 
 def main():
     """主函数"""
+    parser = argparse.ArgumentParser(description='基础动作数据生成框架')
+    parser.add_argument('--action', type=str, default='all',
+                       help='生成的动作类型 (all, accelerate, decelerate, 等)')
+    parser.add_argument('--mode', type=str, default='test',
+                       choices=['test', 'production', 'custom'],
+                       help='生成模式: test(5个样本), production(配置文件中的样本数), custom(自定义)')
+    parser.add_argument('--samples', type=int, default=None,
+                       help='自定义模式下每种动作的样本数')
+
+    args = parser.parse_args()
+
     print("🎯 基础动作数据生成框架")
     print("=" * 50)
 
@@ -754,32 +767,35 @@ def main():
     for i, action in enumerate(generator.get_available_actions(), 1):
         print(f"  {i:2d}. {action}")
 
-    print("\n选择生成模式:")
-    print("  1. 测试模式 (每种动作5个样本)")
-    print("  2. 完整模式 (每种动作100个样本)")
-    print("  3. 自定义模式")
-
-    # 自动选择测试模式进行修复验证
-    choice = 1
-    print(f"\n自动选择模式: {choice} (测试模式)")
+    print(f"\n选择的模式: {args.mode}")
+    if args.action != 'all':
+        print(f"指定动作: {args.action}")
 
     try:
-
-        if choice == 1:
+        if args.mode == 'test':
             print("\n🧪 开始测试模式生成...")
-            generator.generate_test_samples()
+            if args.action == 'all':
+                generator.generate_test_samples()
+            else:
+                generator.generate_batch_data([args.action], samples_per_action=5)
 
-        elif choice == 2:
-            print("\n🚀 开始完整模式生成...")
-            generator.generate_batch_data()
+        elif args.mode == 'production':
+            print("\n🚀 开始生产模式生成...")
+            if args.action == 'all':
+                generator.generate_batch_data()
+            else:
+                generator.generate_batch_data([args.action])
 
-        elif choice == 3:
-            print("\n🔧 自定义模式")
-            samples = int(input("每种动作生成样本数: ").strip())
-            generator.generate_batch_data(samples_per_action=samples)
+        elif args.mode == 'custom':
+            samples = args.samples or int(input("每种动作生成样本数: ").strip())
+            print(f"\n🔧 自定义模式 ({samples}个样本)")
+            if args.action == 'all':
+                generator.generate_batch_data(samples_per_action=samples)
+            else:
+                generator.generate_batch_data([args.action], samples_per_action=samples)
 
         else:
-            print("❌ 无效选择")
+            print("❌ 无效模式")
 
     except KeyboardInterrupt:
         print("\n\n⏹️ 用户中断生成")
