@@ -74,15 +74,23 @@ def setup_logging():
 
 
 def record_pincer_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
-    """记录钳形夹击仿真数据 - 使用统一数据记录器"""
+    """记录钳形夹击仿真数据 - 使用统一数据记录器，包含动作标注"""
+    # 记录当前数据长度，用于确定新增数据
+    prev_traj_len = len(trajectory_data)
+    prev_radar_len = len(radar_data)
+    prev_missile_len = len(missile_data)
+
     # 使用统一数据记录器
     from unified_data_recorder import UnifiedDataRecorder
 
     # 创建临时记录器实例
     temp_recorder = UnifiedDataRecorder("pincer_attack")
 
+    # 获取战术任务以支持行动注释
+    tactical_task = getattr(env, 'task', None)
+
     # 记录所有数据
-    temp_recorder.record_aircraft_trajectory(env, current_time)
+    temp_recorder.record_aircraft_trajectory(env, current_time, tactical_task)
     temp_recorder.record_radar_data(env, current_time)
     temp_recorder.record_missile_data(env, current_time)
 
@@ -320,6 +328,15 @@ def run_pincer_attack_simulation():
         # 创建钳形夹击战术任务
         logging.info("创建钳形夹击战术任务...")
         tactical_task = PincerAttackTacticalTask(env.config)
+
+        # 集成统一敌方AI系统
+        logging.info("集成统一敌方AI系统...")
+        from pincer_enemy_ai_adapter import create_pincer_enemy_ai_integration
+        enemy_ai_adapter = create_pincer_enemy_ai_integration(tactical_task)
+        if enemy_ai_adapter:
+            logging.info("✅ 钳形夹击统一敌方AI系统集成成功")
+        else:
+            logging.warning("⚠️ 钳形夹击统一敌方AI系统集成失败，将使用默认敌方行为")
 
         # 替换环境的任务
         env.task = tactical_task

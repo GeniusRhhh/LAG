@@ -29,6 +29,9 @@ from envs.JSBSim.utils.utils import get_root_dir
 import torch
 from enum import Enum
 
+# 导入拖曳射击任务
+from drag_shoot_tactical_task import DragShootTacticalTask
+
 
 class TacticalPhase(Enum):
     """拖曳射击战术阶段"""
@@ -832,6 +835,20 @@ def print_status(env, step_interval: int = 50):
         print(f"t={current_time:6.1f}s | step={env.current_step:4d} | "
               f"phase={phase_name:8s} | distance={distance:5.1f}km | "
               f"aircraft={alive_aircraft} | missiles={active_missiles}")
+
+        # 每100步显示统一敌方AI系统状态
+        if env.current_step % 100 == 0 and hasattr(env.task, 'unified_enemy_ai') and env.task.unified_enemy_ai is not None:
+            print("  🎯 统一敌方AI状态:")
+            for enemy_id in ["B0100", "B0200"]:
+                if enemy_id in env._jsbsims and env._jsbsims[enemy_id].is_alive:
+                    try:
+                        status = env.task.unified_enemy_ai.get_detailed_enemy_status(enemy_id)
+                        print(f"    {enemy_id}: 模式={status.get('tactical_mode', 'unknown')}, "
+                              f"动作={status.get('current_action', 'unknown')}, "
+                              f"威胁={status.get('threat_level', 'unknown')}, "
+                              f"阶段={status.get('phase', 'unknown')}")
+                    except Exception as e:
+                        print(f"    {enemy_id}: 状态获取失败 - {e}")
 
 
 def run_simulation():

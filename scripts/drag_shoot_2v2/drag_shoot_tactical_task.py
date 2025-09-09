@@ -135,10 +135,22 @@ class DragShootTacticalTask(MultipleCombatTask):
         # 友方连续发射管理
         self.friendly_burst_launch = {"A0100": 0, "A0200": 0}  # 记录连续发射次数
 
+        # 导弹发射状态记录（兼容性）
+        self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
+
         # 雷达状态管理 - 使用统一雷达管理器
         from radar_manager import get_unified_radar_manager
         self.radar_manager = get_unified_radar_manager()
         logging.info("📡 统一雷达管理系统已集成到拖曳射击任务")
+
+        # 集成统一敌方战术AI系统
+        try:
+            from integration_example import integrate_into_drag_shoot_task
+            self.unified_enemy_ai = integrate_into_drag_shoot_task(self)
+            logging.info("🎯 统一敌方战术AI系统已集成到拖曳射击任务")
+        except Exception as e:
+            logging.error(f"统一敌方AI系统集成失败: {e}")
+            self.unified_enemy_ai = None
 
         # 初始状态记录 - 学习pure_maneuver_task
         self.initial_heading = {}
@@ -463,8 +475,8 @@ class DragShootTacticalTask(MultipleCombatTask):
         return np.argmin(distances)
 
     def _convert_velocity_to_index(self, velocity_offset):
-        """速度偏移转索引 - 完全照抄pure_maneuver_task"""
-        velocity_values = np.array([-150, -100, -50, 0, 50, 100, 150])
+        """速度偏移转索引 - 修复：与pure_maneuver_task保持完全一致"""
+        velocity_values = np.array([-200, -150, -100, 0, 100, 150, 200])  # 与pure_maneuver_task保持一致
         distances = np.abs(velocity_values - velocity_offset)
         return np.argmin(distances)
     
@@ -1028,35 +1040,32 @@ class DragShootTacticalTask(MultipleCombatTask):
         return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
-        """敌方战术指令索引 - 使用重新设计的四阶段AI系统"""
-        current_time = env.current_step * env.time_interval
-
-        # 导入并使用重新设计的敌方AI系统
+        """敌方战术指令索引 - 使用统一敌方战术AI系统"""
         try:
-            import sys
-            import os
-            # 添加当前目录到Python路径
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
+            # 优先使用统一敌方AI系统
+            if hasattr(self, 'unified_enemy_ai') and self.unified_enemy_ai is not None:
+                commands = self.unified_enemy_ai.get_enemy_command_indices(env, agent_id)
 
-            from enemy_tactical_ai_enhanced import get_enemy_tactical_command
-            commands = get_enemy_tactical_command(env, agent_id, current_time)
+                # 每10秒记录一次敌方AI状态
+                current_time = env.current_step * env.time_interval
+                if current_time % 10.0 < 0.2:
+                    status = self.unified_enemy_ai.get_detailed_enemy_status(agent_id)
+                    logging.info(f"🎯 {agent_id} 统一AI: {commands}, 模式={status.get('tactical_mode', 'unknown')}, "
+                               f"动作={status.get('current_action', 'unknown')}, 威胁={status.get('threat_level', 'unknown')}")
 
-            # 每10秒记录一次敌方AI状态
-            if current_time % 10.0 < 0.2:
-                logging.info(f"✅ {agent_id} 重新设计AI指令: {commands}")
+                return commands
+            else:
+                # 回退到原有逻辑
+                current_time = env.current_step * env.time_interval
+                logging.warning(f"统一敌方AI系统未可用，使用回退逻辑 - {agent_id}")
+                return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
-            return commands
-        except ImportError as e:
-            logging.warning(f"❌ 重新设计的敌方AI导入失败: {e}, 使用回退逻辑")
-            # 回退到原有逻辑
-            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
         except Exception as e:
-            logging.error(f"❌ {agent_id} 重新设计AI执行错误: {e}, 使用回退逻辑")
+            logging.error(f"❌ {agent_id} 统一敌方AI执行错误: {e}, 使用回退逻辑")
             import traceback
             logging.error(f"详细错误信息: {traceback.format_exc()}")
             # 回退到原有逻辑
+            current_time = env.current_step * env.time_interval
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id: str, current_time: float):
@@ -1098,6 +1107,12 @@ class DragShootTacticalTask(MultipleCombatTask):
         self.initial_heading.clear()
         self.initial_altitude.clear()
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
+
+        # 重置统一敌方AI系统
+        if hasattr(self, 'unified_enemy_ai') and self.unified_enemy_ai is not None:
+            self.unified_enemy_ai.reset_for_new_episode()
+            logging.info("🎯 统一敌方AI系统已重置")
+
         logging.info("DragShootTacticalTask reset completed")
         return super().reset(env)
 

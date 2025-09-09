@@ -156,6 +156,15 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             logging.warning(f"❌ 统一雷达管理器导入失败: {e}")
             self.radar_manager = None
 
+        # 统一敌方战术AI系统 - 支持多项目复用
+        try:
+            from unified_enemy_tactical_ai import UnifiedEnemyTacticalAI
+            self.unified_enemy_ai = UnifiedEnemyTacticalAI()
+            logging.info("🤖 统一敌方战术AI系统已集成到钳形夹击任务")
+        except ImportError as e:
+            logging.warning(f"❌ 统一敌方战术AI系统导入失败: {e}")
+            self.unified_enemy_ai = None
+
         # 状态跟踪
         self.initial_heading = {}
         self.initial_altitude = {}
@@ -402,30 +411,23 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             return self._maintain_heading_precise(env, agent_id, 180.0)
 
     def _get_enemy_command_indices(self, env, agent_id):
-        """敌方战术指令索引 - 使用新的统一敌方AI系统"""
+        """敌方战术指令索引 - 使用统一敌方AI系统"""
         current_time = env.current_step * env.time_interval
 
         try:
-            # 尝试使用新的敌方AI系统
-            import os
-            import sys
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
-
-            from enemy_tactical_ai_enhanced import get_enemy_tactical_command
-            commands = get_enemy_tactical_command(env, agent_id, current_time)
-            if commands:
-                logging.debug(f"✅ {agent_id} 新敌方AI指令: {commands}")
-                return commands
+            # 检查是否有集成的统一敌方AI系统
+            if hasattr(self, 'unified_enemy_ai'):
+                altitude_cmd, heading_cmd, velocity_cmd = self.unified_enemy_ai.get_enemy_action(
+                    env, agent_id, current_time
+                )
+                logging.debug(f"✅ {agent_id} 统一敌方AI指令: ({altitude_cmd}, {heading_cmd}, {velocity_cmd})")
+                return altitude_cmd, heading_cmd, velocity_cmd
             else:
+                logging.warning(f"⚠️ {agent_id} 未找到统一敌方AI系统，使用备用方案")
                 return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
-        except ImportError as e:
-            logging.warning(f"新敌方AI导入失败，使用内置策略: {e}")
-            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
         except Exception as e:
-            logging.error(f"新敌方AI执行错误: {e}")
+            logging.error(f"统一敌方AI执行错误: {e}")
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id, current_time):

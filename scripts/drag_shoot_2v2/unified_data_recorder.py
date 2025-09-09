@@ -95,7 +95,8 @@ class UnifiedDataRecorder:
                 except Exception as e:
                     logging.warning(f"数据记录异常 {agent_id}: {e}")
 
-                self.trajectory_data.append({
+                # 构建基础轨迹数据
+                trajectory_record = {
                     'Time_s': current_time,
                     'Agent_ID': agent_id,
                     'X_m': pos[0],
@@ -105,8 +106,27 @@ class UnifiedDataRecorder:
                     'Heading_deg': heading,
                     'Pitch_deg': pitch,
                     'Roll_deg': roll
-                    # 动作标注列已移除：Action_Type, Direction
-                })
+                }
+
+                # 为敌方智能体添加行动注释（如果有统一敌方AI系统）
+                if (agent_id.startswith('B') and tactical_task and
+                    hasattr(tactical_task, 'unified_enemy_ai') and
+                    tactical_task.unified_enemy_ai is not None):
+                    try:
+                        annotation_data = tactical_task.unified_enemy_ai.get_action_annotation_for_csv(agent_id)
+                        trajectory_record.update(annotation_data)
+
+                        # 每30秒记录一次注释状态
+                        if current_time % 30.0 < 0.2:
+                            logging.debug(f"🏷️ {agent_id} 行动注释: {annotation_data.get('Action_Intent', 'unknown')}")
+                    except Exception as e:
+                        logging.warning(f"行动注释记录失败 {agent_id}: {e}")
+                        # 添加默认注释数据
+                        trajectory_record.update({
+                            'Action_Intent': 'search'
+                        })
+
+                self.trajectory_data.append(trajectory_record)
 
     def record_radar_data(self, env, current_time: float):
         """记录雷达数据 - 统一格式"""
