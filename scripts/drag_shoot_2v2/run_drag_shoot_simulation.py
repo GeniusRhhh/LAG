@@ -842,7 +842,7 @@ def print_status(env, step_interval: int = 50):
             for enemy_id in ["B0100", "B0200"]:
                 if enemy_id in env._jsbsims and env._jsbsims[enemy_id].is_alive:
                     try:
-                        status = env.task.unified_enemy_ai.get_detailed_enemy_status(enemy_id)
+                        status = env.task.unified_enemy_ai.get_agent_status(enemy_id)
                         print(f"    {enemy_id}: 模式={status.get('tactical_mode', 'unknown')}, "
                               f"动作={status.get('current_action', 'unknown')}, "
                               f"威胁={status.get('threat_level', 'unknown')}, "
@@ -897,8 +897,18 @@ def run_simulation():
         env.max_steps = 1500
 
         # 替换任务为拖曳射击任务
-        env.task = DragShootTacticalTask(env.config)
-        
+        tactical_task = DragShootTacticalTask(env.config)
+        env.task = tactical_task
+
+        # 集成统一敌方AI系统
+        logging.info("集成统一敌方AI系统...")
+        from drag_shoot_enemy_ai_adapter import create_drag_shoot_enemy_ai_integration
+        enemy_ai_adapter = create_drag_shoot_enemy_ai_integration(tactical_task)
+        if enemy_ai_adapter:
+            logging.info("✅ 拖曳射击统一敌方AI系统集成成功")
+        else:
+            logging.warning("⚠️ 拖曳射击统一敌方AI系统集成失败，将使用默认敌方行为")
+
         # 重置环境
         obs = env.reset()
         

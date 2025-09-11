@@ -143,14 +143,9 @@ class DragShootTacticalTask(MultipleCombatTask):
         self.radar_manager = get_unified_radar_manager()
         logging.info("📡 统一雷达管理系统已集成到拖曳射击任务")
 
-        # 集成统一敌方战术AI系统
-        try:
-            from integration_example import integrate_into_drag_shoot_task
-            self.unified_enemy_ai = integrate_into_drag_shoot_task(self)
-            logging.info("🎯 统一敌方战术AI系统已集成到拖曳射击任务")
-        except Exception as e:
-            logging.error(f"统一敌方AI系统集成失败: {e}")
-            self.unified_enemy_ai = None
+        # 统一敌方战术AI系统将由运行脚本集成
+        # 这里只初始化为None，等待外部集成
+        self.unified_enemy_ai = None
 
         # 初始状态记录 - 学习pure_maneuver_task
         self.initial_heading = {}
@@ -442,12 +437,17 @@ class DragShootTacticalTask(MultipleCombatTask):
             return np.array([0.0, 0.0, 0.0, 0.7])
 
     def _convert_altitude_to_index(self, altitude_cmd):
-        """高度指令转索引 - 完全照抄pure_maneuver_task"""
+        """高度指令转索引 - 🛡️ 强化安全机制，禁用俯冲"""
+        # 🛡️ 完全禁用俯冲指令，只允许爬升和保持高度
+        if altitude_cmd < 0:
+            logging.warning(f"🛡️ 俯冲指令{altitude_cmd:.0f}m已禁用，改为保持高度")
+            altitude_cmd = 0  # 改为保持高度
+
         altitude_values = np.array([
-            -1500, -1000, -750, -500, -300, -150, -50, 0, 50, 150, 300, 500, 750, 1000, 1500
+            0, 50, 150, 300, 500, 750, 1000, 1500  # 🛡️ 移除所有负值，只允许爬升
         ])
         distances = np.abs(altitude_values - altitude_cmd)
-        return np.argmin(distances)
+        return np.argmin(distances) + 7  # +7是因为原数组索引7对应0m变化
 
     def _convert_heading_to_index(self, heading_cmd):
         """航向指令转索引 - 完全照抄pure_maneuver_task"""
@@ -926,7 +926,27 @@ class DragShootTacticalTask(MultipleCombatTask):
 
         return 7, 8, 3  # 默认保持航向
 
-    def _convert_maneuver_result_to_indices(self, env, agent_id, target_heading, target_altitude, 
+    def _execute_short_skate_precise_safe(self, env, agent_id, current_time):
+        """执行安全版本的Short Skate机动 - 🛡️ 强化高度安全检查"""
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+
+        # 🛡️ 高度安全检查
+        if current_altitude < 2000.0:
+            logging.warning(f"🛡️ {agent_id} Short Skate机动中高度过低({current_altitude:.0f}m)，强制爬升")
+            return 0, 8, 3  # 强制爬升
+
+        # 调用原有的short_skate方法
+        result = self._execute_short_skate_precise(env, agent_id, current_time)
+
+        # 🛡️ 检查结果是否包含俯冲指令
+        altitude_cmd, heading_cmd, velocity_cmd = result
+        if altitude_cmd in [0, 1, 2, 3, 4, 5, 6]:  # 这些是俯冲指令
+            logging.warning(f"🛡️ {agent_id} Short Skate结果包含俯冲指令({altitude_cmd})，改为保持高度")
+            altitude_cmd = 7  # 改为保持高度
+
+        return altitude_cmd, heading_cmd, velocity_cmd
+
+    def _convert_maneuver_result_to_indices(self, env, agent_id, target_heading, target_altitude,
                                            velocity_offset, target_roll, initial_heading, initial_altitude):
         """将 pure_maneuvers 的结果转换为拖曳射击兼容的索引"""
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
@@ -938,15 +958,23 @@ class DragShootTacticalTask(MultipleCombatTask):
         heading_cmd_id = 8   # 保持航向
         velocity_cmd_id = 3  # 保持速度
         
-        # 高度控制
+        # 高度控制 - 🛡️ 强化安全检查
         if target_altitude is not None:
             altitude_diff = target_altitude - current_altitude
+            # 🛡️ 安全检查：禁止俯冲到危险高度
+            if current_altitude < 2000.0 and altitude_diff < 0:
+                logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，禁止俯冲{altitude_diff:.0f}m")
+                altitude_diff = 200.0  # 改为爬升200m
             if abs(altitude_diff) > 5.0:
                 altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         else:
             # 保持初始高度
             if initial_altitude is not None:
                 altitude_diff = initial_altitude - current_altitude
+                # 🛡️ 安全检查：禁止俯冲到危险高度
+                if current_altitude < 2000.0 and altitude_diff < 0:
+                    logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，禁止返回初始高度")
+                    altitude_diff = 200.0  # 改为爬升200m
                 if abs(altitude_diff) > 10.0:  # 只有偏离较大时才纠正
                     altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
         
@@ -1044,14 +1072,17 @@ class DragShootTacticalTask(MultipleCombatTask):
         try:
             # 优先使用统一敌方AI系统
             if hasattr(self, 'unified_enemy_ai') and self.unified_enemy_ai is not None:
-                commands = self.unified_enemy_ai.get_enemy_command_indices(env, agent_id)
+                current_time = env.current_step * env.time_interval
+                commands = self.unified_enemy_ai.get_enemy_command(env, agent_id, current_time)
 
                 # 每10秒记录一次敌方AI状态
-                current_time = env.current_step * env.time_interval
                 if current_time % 10.0 < 0.2:
-                    status = self.unified_enemy_ai.get_detailed_enemy_status(agent_id)
-                    logging.info(f"🎯 {agent_id} 统一AI: {commands}, 模式={status.get('tactical_mode', 'unknown')}, "
-                               f"动作={status.get('current_action', 'unknown')}, 威胁={status.get('threat_level', 'unknown')}")
+                    try:
+                        status = self.unified_enemy_ai.get_agent_status(agent_id)
+                        logging.info(f"🎯 {agent_id} 统一AI: {commands}, 模式={status.get('tactical_mode', 'unknown')}, "
+                                   f"动作={status.get('current_action', 'unknown')}, 威胁={status.get('threat_level', 'unknown')}")
+                    except Exception as status_e:
+                        logging.debug(f"获取{agent_id}状态失败: {status_e}")
 
                 return commands
             else:
@@ -1069,7 +1100,13 @@ class DragShootTacticalTask(MultipleCombatTask):
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id: str, current_time: float):
-        """敌方战术指令索引 - 回退逻辑"""
+        """敌方战术指令索引 - 回退逻辑 - 🛡️ 强化安全机制"""
+        # 🛡️ 首先检查高度安全
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        if current_altitude < 2000.0:
+            logging.warning(f"🛡️ {agent_id} 高度过低({current_altitude:.0f}m)，强制爬升")
+            return 0, 8, 3  # 强制爬升，保持航向和速度
+
         # 检查是否应该执行short_skate
         should_return = False
 
@@ -1090,8 +1127,8 @@ class DragShootTacticalTask(MultipleCombatTask):
             should_return = True
 
         if should_return:
-            # 执行精确的short_skate
-            action = self._execute_short_skate_precise(env, agent_id, current_time)
+            # 执行精确的short_skate - 🛡️ 带安全检查
+            action = self._execute_short_skate_precise_safe(env, agent_id, current_time)
             return int(action[0]), int(action[1]), int(action[2])
         else:
             # 正常朝南接敌 - 使用精确航向保持

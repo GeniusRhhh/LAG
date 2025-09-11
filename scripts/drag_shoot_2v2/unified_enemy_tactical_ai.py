@@ -714,9 +714,27 @@ class UnifiedEnemyTacticalAI:
             return ActionType.MAINTAIN_HEADING
 
     def _execute_action(self, env, agent_id: str, action_type: ActionType, current_time: float) -> Tuple[int, int, int]:
-        """动作执行模块 - 将动作类型转换为具体的飞行指令"""
+        """动作执行模块 - 将动作类型转换为具体的飞行指令 - 🛡️ 多层安全保护机制"""
         try:
-            # 生成动作参数（如果还没有）
+            # 🛡️ 设置环境引用供参数生成使用
+            self._current_env = env
+
+            # 🛡️ 高度安全检查 - 防止飞机坠毁
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+
+            # 🛡️ 智能安全阈值：根据高度动态调整
+            if current_altitude < 1500.0:
+                # 极度危险：立即强制爬升
+                logging.error(f"🚨 {agent_id} 高度{current_altitude:.0f}m极度危险，立即强制爬升！")
+                return self._execute_altitude_change(env, agent_id, 800.0)  # 大幅爬升800米
+            elif current_altitude < 2000.0:
+                # 危险：禁止所有俯冲动作
+                dangerous_actions = [ActionType.DIVE_ESCAPE, ActionType.SPIRAL_DIVE, ActionType.CHAFF_FLARE_MANEUVER, ActionType.DESCEND]
+                if action_type in dangerous_actions:
+                    logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m危险，禁止{action_type.value}，改为爬升")
+                    return self._execute_altitude_change(env, agent_id, 500.0)  # 爬升500米
+
+            # 生成动作参数（如果还没有）- 🛡️ 现在包含智能高度感知
             if agent_id not in self.action_parameters or self.current_action.get(agent_id) != action_type:
                 self.action_parameters[agent_id] = self._generate_action_parameters(action_type, agent_id)
 
@@ -776,8 +794,10 @@ class UnifiedEnemyTacticalAI:
                 return self._execute_altitude_change(env, agent_id, altitude_change)
 
             elif action_type == ActionType.DESCEND:
-                altitude_change = params.altitude_change if params.altitude_change is not None else 500.0
-                return self._execute_altitude_change(env, agent_id, -abs(altitude_change))
+                # 🛡️ 完全禁用下降动作，改为水平飞行
+                current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+                logging.warning(f"🛡️ {agent_id} 下降动作已禁用（高度{current_altitude:.0f}m），改为水平飞行")
+                return self._execute_maintain_heading(env, agent_id)
 
             else:
                 # 默认保持航向
@@ -787,9 +807,41 @@ class UnifiedEnemyTacticalAI:
             logging.error(f"动作执行失败 {agent_id} - {action_type.value}: {e}")
             return 7, 8, 3  # 默认平稳飞行
 
+    def _calculate_safe_altitude_change(self, current_altitude: Optional[float], action_name: str) -> float:
+        """🛡️ 智能高度感知俯冲策略 - 根据当前高度计算安全的高度变化"""
+        if current_altitude is None:
+            # 无法获取高度信息，采用保守策略
+            logging.warning(f"🛡️ 无法获取高度信息，{action_name}采用保守策略（禁用俯冲）")
+            return random.uniform(100.0, 300.0)  # 强制爬升
+
+        if current_altitude > 3000.0:
+            # 高度 > 3000m：允许适度俯冲（最大200-300m深度）
+            max_dive = min(300.0, (current_altitude - 2500.0) * 0.5)  # 确保不低于2500m
+            altitude_change = random.uniform(-max_dive, 200.0)  # 可俯冲或爬升
+            logging.info(f"🛡️ {action_name}: 高度{current_altitude:.0f}m > 3000m，允许俯冲{max_dive:.0f}m")
+            return altitude_change
+        elif current_altitude > 2000.0:
+            # 高度 2000-3000m：允许小幅俯冲（最大100-150m深度）
+            max_dive = min(150.0, (current_altitude - 1800.0) * 0.3)  # 确保不低于1800m
+            altitude_change = random.uniform(-max_dive, 150.0)  # 小幅俯冲或爬升
+            logging.info(f"🛡️ {action_name}: 高度{current_altitude:.0f}m在2000-3000m，允许小幅俯冲{max_dive:.0f}m")
+            return altitude_change
+        else:
+            # 高度 < 2000m：完全禁止俯冲，强制爬升
+            altitude_change = random.uniform(200.0, 500.0)  # 强制爬升
+            logging.warning(f"🛡️ {action_name}: 高度{current_altitude:.0f}m < 2000m，禁用俯冲，强制爬升{altitude_change:.0f}m")
+            return altitude_change
+
     def _generate_action_parameters(self, action_type: ActionType, agent_id: str) -> ActionParameters:
-        """生成随机化的动作参数"""
+        """生成随机化的动作参数 - 🛡️ 集成智能高度感知安全机制"""
         try:
+            # 🛡️ 获取当前高度进行智能参数生成
+            current_altitude = None
+            if hasattr(self, '_current_env') and self._current_env and agent_id in self._current_env.agents:
+                try:
+                    current_altitude = self._current_env.agents[agent_id].get_property_value(c.position_h_sl_m)
+                except:
+                    current_altitude = None
             if action_type == ActionType.MAINTAIN_HEADING:
                 return ActionParameters(duration=random.uniform(5.0, 15.0))
 
@@ -822,19 +874,23 @@ class UnifiedEnemyTacticalAI:
                 )
 
             elif action_type == ActionType.DIVE_ESCAPE:
+                # 🛡️ 智能高度感知俯冲策略
+                altitude_change = self._calculate_safe_altitude_change(current_altitude, "dive_escape")
                 return ActionParameters(
                     duration=random.uniform(8.0, 15.0),
-                    altitude_change=random.uniform(-800.0, -400.0),  # 减少俯冲深度：400-800m（原来1-2km）
-                    turn_angle=random.uniform(-30.0, 30.0),  # 减少转弯角度：±30°（原来±45°）
-                    turn_rate=random.uniform(4.0, 6.0)  # 降低转弯率：4-6°/s（原来6-10°/s）
+                    altitude_change=altitude_change,  # 🛡️ 智能高度感知俯冲
+                    turn_angle=random.uniform(-30.0, 30.0),  # 减少转弯角度：±30°
+                    turn_rate=random.uniform(4.0, 6.0)  # 降低转弯率：4-6°/s
                 )
 
             elif action_type == ActionType.CHAFF_FLARE_MANEUVER:
+                # 🛡️ 智能高度感知策略
+                altitude_change = self._calculate_safe_altitude_change(current_altitude, "chaff_flare")
                 return ActionParameters(
                     duration=random.uniform(10.0, 20.0),
-                    turn_angle=random.choice([45.0, -45.0, 60.0, -60.0]),  # 进一步减少转弯角度：±45-60°（原来±60-75°）
-                    turn_rate=random.uniform(3.0, 6.0),  # 进一步降低转弯率：3-6°/s（原来5-8°/s）
-                    altitude_change=random.uniform(-200.0, 200.0)  # 进一步减少高度变化：±200m（原来±300m）
+                    turn_angle=random.choice([45.0, -45.0, 60.0, -60.0]),  # 进一步减少转弯角度：±45-60°
+                    turn_rate=random.uniform(3.0, 6.0),  # 进一步降低转弯率：3-6°/s
+                    altitude_change=altitude_change  # 🛡️ 智能高度感知
                 )
 
             # elif action_type == ActionType.SPIRAL_DIVE:
@@ -872,17 +928,27 @@ class UnifiedEnemyTacticalAI:
                 )
 
             elif action_type == ActionType.AGGRESSIVE_APPROACH:
+                # 🛡️ 智能高度感知策略
+                altitude_change = self._calculate_safe_altitude_change(current_altitude, "aggressive_approach")
+                # 攻击接近通常需要爬升，确保为正值
+                if altitude_change < 0:
+                    altitude_change = random.uniform(200.0, 500.0)
                 return ActionParameters(
                     duration=random.uniform(20.0, 40.0),
                     velocity_change=random.uniform(20.0, 50.0),  # 加速
-                    altitude_change=random.uniform(200.0, 800.0)  # 爬升
+                    altitude_change=altitude_change  # 🛡️ 智能高度感知爬升
                 )
 
             elif action_type == ActionType.DEFENSIVE_SPLIT:
+                # 🛡️ 智能高度感知策略
+                altitude_change = self._calculate_safe_altitude_change(current_altitude, "defensive_split")
+                # 防御分离通常需要爬升，确保为正值
+                if altitude_change < 0:
+                    altitude_change = random.uniform(200.0, 400.0)
                 return ActionParameters(
                     duration=random.uniform(15.0, 25.0),
-                    turn_angle=random.uniform(35.0, 60.0),  # 大幅减少转弯角度：35-60°（原来45-90°）
-                    altitude_change=random.choice([-300.0, 300.0])  # 减少高度变化：±300m（原来±500m）
+                    turn_angle=random.uniform(35.0, 60.0),  # 大幅减少转弯角度：35-60°
+                    altitude_change=altitude_change  # 🛡️ 智能高度感知
                 )
 
             elif action_type == ActionType.RETURN_TO_BASE:
@@ -891,10 +957,17 @@ class UnifiedEnemyTacticalAI:
                     target_heading=0.0  # 北向返航
                 )
 
-            elif action_type in [ActionType.CLIMB, ActionType.DESCEND]:
+            elif action_type == ActionType.CLIMB:
                 return ActionParameters(
                     duration=random.uniform(10.0, 20.0),
-                    altitude_change=random.uniform(200.0, 500.0)  # 大幅减少高度变化：200-500m（原来300-1000m）
+                    altitude_change=random.uniform(200.0, 500.0)  # 爬升200-500m
+                )
+
+            elif action_type == ActionType.DESCEND:
+                # 🛡️ DESCEND动作参数生成已禁用，改为爬升
+                return ActionParameters(
+                    duration=random.uniform(10.0, 20.0),
+                    altitude_change=random.uniform(200.0, 500.0)  # 改为爬升200-500m
                 )
 
             else:
@@ -1012,15 +1085,30 @@ class UnifiedEnemyTacticalAI:
             current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
             current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
 
+            # 🛡️ 强化安全检查 - 如果高度过低，改为水平机动
+            safe_altitude_threshold = 5000.0  # 提高安全阈值到5000米
+            if current_altitude < safe_altitude_threshold:
+                logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲脱离改为水平转弯")
+                # 改为水平大角度转弯
+                turn_angle = random.choice([90.0, -90.0])  # 大角度转弯
+                target_heading = (current_heading + turn_angle) % 360.0
+                return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, 1, 5)  # 水平转弯+爬升+加速
+
             # 随机选择俯冲方向（可选择性转弯）
-            turn_angle = random.uniform(-45.0, 45.0)
+            turn_angle = random.uniform(-30.0, 30.0)  # 减少转弯角度
             target_heading = (current_heading + turn_angle) % 360.0
 
-            # 俯冲高度：下降300-500米，但不低于安全高度
-            dive_altitude = random.uniform(300.0, 500.0)  # 进一步减少俯冲深度
-            target_altitude = max(current_altitude - dive_altitude, 6000.0)  # 提高最低安全高度到6000米
+            # 🛡️ 俯冲高度：下降200-300米，但不低于安全高度
+            dive_altitude = random.uniform(200.0, 300.0)  # 进一步减少俯冲深度
+            target_altitude = max(current_altitude - dive_altitude, 4000.0)  # 确保不低于4000米
 
-            return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, -2, 5)  # 俯冲+加速
+            # 如果计算出的目标高度等于安全高度，说明俯冲受限，改为水平机动
+            if target_altitude >= current_altitude - 100:  # 实际俯冲小于100米
+                logging.info(f"🛡️ {agent_id} 俯冲受限，改为水平机动")
+                return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, 0, 5)  # 水平转弯+加速
+
+            logging.info(f"敌方{agent_id}执行俯冲脱离: 转弯{turn_angle:.1f}°, 俯冲{dive_altitude:.0f}m")
+            return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, -1, 5)  # 温和俯冲+加速
         except Exception as e:
             logging.error(f"动作执行失败 {agent_id} - dive_escape: {e}")
             return 7, 8, 3
@@ -1029,13 +1117,16 @@ class UnifiedEnemyTacticalAI:
         """执行干扰弹配合机动 - 大角度转弯配合电子对抗"""
         try:
             current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
 
             # 中等角度转弯（60-75度）- 已优化参数
             turn_angle = random.choice([60.0, -60.0, 75.0, -75.0])  # 使用优化后的参数
             target_heading = (current_heading + turn_angle) % 360.0
 
-            # 可选择性高度变化
-            altitude_change = random.choice([-1, 0, 1])  # 俯冲、平飞或爬升
+            # 🛡️ 完全安全的高度变化 - 完全禁用俯冲
+            altitude_change = random.choice([0, 1])  # 🛡️ 所有情况下都只允许平飞或爬升
+            logging.info(f"🛡️ {agent_id} 高度{current_altitude:.0f}m，干扰弹机动使用安全高度变化")
+
             speed_change = 5  # 加速脱离
 
             logging.info(f"敌方{agent_id}执行干扰弹机动: 转弯{turn_angle:.1f}°, 高度变化={altitude_change}")
@@ -1045,21 +1136,28 @@ class UnifiedEnemyTacticalAI:
             return 7, 8, 3
 
     def _execute_spiral_dive(self, env, agent_id: str) -> Tuple[int, int, int]:
-        """执行螺旋俯冲机动 - 复杂的螺旋下降规避"""
+        """执行螺旋俯冲机动 - 🛡️ 已改为安全的螺旋转弯机动"""
         try:
             current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
             current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
 
-            # 螺旋转弯（360度或720度）
-            spiral_angle = random.choice([360.0, -360.0, 720.0, -720.0])
+            # 🛡️ 螺旋俯冲已禁用，改为安全的螺旋转弯
+            logging.info(f"🛡️ {agent_id} 螺旋俯冲已改为安全螺旋转弯（高度{current_altitude:.0f}m）")
+
+            # 温和的螺旋转弯（180度或360度）
+            spiral_angle = random.choice([180.0, -180.0, 360.0, -360.0])  # 减少转弯角度
             target_heading = (current_heading + spiral_angle) % 360.0
 
-            # 螺旋俯冲：下降200-400米（进一步优化）
-            dive_altitude = random.uniform(200.0, 400.0)  # 进一步减少俯冲深度
-            target_altitude = max(current_altitude - dive_altitude, 6000.0)  # 提高最低安全高度到6000米
+            # 🛡️ 完全禁用俯冲，改为水平或爬升
+            safe_altitude_threshold = 5000.0
+            if current_altitude < safe_altitude_threshold:
+                altitude_change = 1  # 强制爬升
+                logging.info(f"🛡️ {agent_id} 高度较低，螺旋转弯配合爬升")
+            else:
+                altitude_change = random.choice([0, 1])  # 水平或爬升
 
-            logging.info(f"敌方{agent_id}执行螺旋俯冲: 螺旋{spiral_angle:.1f}°, 俯冲{dive_altitude:.0f}m")
-            return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, -2, 4)  # 俯冲+中等加速
+            logging.info(f"敌方{agent_id}执行安全螺旋转弯: 螺旋{spiral_angle:.1f}°, 高度变化={altitude_change}")
+            return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, altitude_change, 4)  # 螺旋转弯+中等加速
         except Exception as e:
             logging.error(f"动作执行失败 {agent_id} - spiral_dive: {e}")
             return 7, 8, 3
@@ -1162,17 +1260,21 @@ class UnifiedEnemyTacticalAI:
             return 7, 8, 3
 
     def _execute_defensive_split(self, env, agent_id: str) -> Tuple[int, int, int]:
-        """执行防御分离机动"""
+        """执行防御分离机动 - 🛡️ 完全禁用俯冲"""
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+
         # 长机和僚机分离机动
         if agent_id == "B0100":  # 长机左分离
             split_angle = random.uniform(-60.0, -30.0)
-            altitude_cmd = 2  # 下降
+            altitude_cmd = 0  # 🛡️ 改为爬升，禁用俯冲
         elif agent_id == "B0200":  # 僚机右分离
             split_angle = random.uniform(30.0, 60.0)
             altitude_cmd = 0  # 爬升
         else:
             split_angle = random.choice([-45.0, 45.0])
-            altitude_cmd = random.choice([0, 2])
+            altitude_cmd = 0  # 🛡️ 改为爬升，禁用俯冲
+
+        logging.info(f"🛡️ {agent_id} 防御分离机动（高度{current_altitude:.0f}m）：转弯{split_angle:.1f}°，爬升")
 
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
         split_heading = (current_heading + split_angle) % 360.0
@@ -1241,11 +1343,30 @@ class UnifiedEnemyTacticalAI:
             logging.info(f"敌方{agent_id}开始直接返航")
 
     def _execute_altitude_change(self, env, agent_id: str, altitude_change: float) -> Tuple[int, int, int]:
-        """执行高度变化"""
+        """执行高度变化 - 🛡️ 智能高度感知安全机制"""
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+
         if altitude_change > 0:
+            # 爬升指令
             altitude_cmd = 0  # 爬升
+            logging.info(f"🛡️ {agent_id} 执行爬升{altitude_change:.0f}m（当前高度{current_altitude:.0f}m）")
         else:
-            altitude_cmd = 2  # 下降
+            # 俯冲指令 - 🛡️ 智能安全检查
+            target_altitude = current_altitude + altitude_change  # altitude_change为负值
+
+            if current_altitude < 2000.0:
+                # 高度过低，完全禁用俯冲
+                altitude_cmd = 0  # 改为爬升
+                logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲{altitude_change:.0f}m已禁用，改为爬升")
+            elif target_altitude < 1800.0:
+                # 俯冲会导致过低，限制俯冲深度
+                safe_altitude_change = current_altitude - 1800.0  # 最低到1800m
+                altitude_cmd = -1  # 温和俯冲
+                logging.warning(f"🛡️ {agent_id} 俯冲受限：原计划{altitude_change:.0f}m，限制为{safe_altitude_change:.0f}m")
+            else:
+                # 安全俯冲
+                altitude_cmd = -1  # 温和俯冲
+                logging.info(f"🛡️ {agent_id} 执行安全俯冲{altitude_change:.0f}m（当前高度{current_altitude:.0f}m → {target_altitude:.0f}m）")
 
         return altitude_cmd, 8, 3  # 保持航向和速度
 
@@ -1353,6 +1474,30 @@ class UnifiedEnemyTacticalAI:
         self.action_start_time[agent_id] = current_time
         self.action_parameters[agent_id] = self._generate_action_parameters(action_type, agent_id)
         logging.info(f"强制敌方{agent_id}执行动作: {action_type.value}")
+
+    def reset_for_new_episode(self):
+        """重置AI系统状态，准备新的仿真回合"""
+        try:
+            # 清空所有状态记录
+            self.tactical_mode.clear()
+            self.current_phase.clear()
+            self.radar_mode.clear()
+            self.current_action.clear()
+            self.action_start_time.clear()
+            self.action_parameters.clear()
+            self.last_mode_switch.clear()
+            self.threat_assessment.clear()
+            self.situation_data.clear()
+
+            # 清空特殊状态
+            if hasattr(self, 'short_skate_states'):
+                self.short_skate_states.clear()
+            if hasattr(self, 'return_states'):
+                self.return_states.clear()
+
+            logging.info("🎯 统一敌方战术AI系统已重置，准备新回合")
+        except Exception as e:
+            logging.error(f"AI系统重置失败: {e}")
 
     def get_action_annotation(self, agent_id: str) -> str:
         """获取当前动作的Action_Intent注释信息 - 简化版本"""
