@@ -182,15 +182,15 @@ def check_simulation_end(env):
     return False
 
 
-def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder):
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder, tactical_task=None):
     """记录仿真数据到CSV格式 - 使用统一数据记录器"""
     # 记录当前数据长度，用于确定新增数据
     prev_traj_len = len(data_recorder.trajectory_data)
     prev_radar_len = len(data_recorder.radar_data)
     prev_missile_len = len(data_recorder.missile_data)
 
-    # 使用统一数据记录器记录数据
-    data_recorder.record_all_data(env, current_time)
+    # 使用统一数据记录器记录数据，传递tactical_task参数
+    data_recorder.record_all_data(env, current_time, tactical_task)
 
     # 将新增数据添加到本地列表
     trajectory_data.extend(data_recorder.trajectory_data[prev_traj_len:])
@@ -244,8 +244,18 @@ def run_side_by_side_shooting_simulation():
         env.max_steps = 1500
         
         # 替换任务为并排射击任务
-        env.task = SideBySideShootingTacticalTask(env.config)
-        
+        tactical_task = SideBySideShootingTacticalTask(env.config)
+        env.task = tactical_task
+
+        # 集成统一敌方AI系统
+        logging.info("集成统一敌方AI系统...")
+        from side_by_side_enemy_ai_adapter import create_side_by_side_enemy_ai_integration
+        enemy_ai_adapter = create_side_by_side_enemy_ai_integration(tactical_task)
+        if enemy_ai_adapter:
+            logging.info("✅ 并排射击统一敌方AI系统集成成功")
+        else:
+            logging.warning("⚠️ 并排射击统一敌方AI系统集成失败，将使用默认敌方行为")
+
         # 重置环境
         obs = env.reset()
         
@@ -320,8 +330,8 @@ def run_side_by_side_shooting_simulation():
                 except Exception as e:
                     logging.warning(f"Failed to render step {step}: {e}")
 
-                # 记录数据 - 使用持久的数据记录器
-                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder)
+                # 记录数据 - 使用持久的数据记录器，传递tactical_task参数
+                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder, env.task)
                 
                 # 检查是否有飞机被击落
                 if isinstance(dones, dict):

@@ -47,8 +47,18 @@ def run_front_back_attack_simulation():
         env.max_steps = 2500
 
         # 替换任务为前后攻击任务 - 完全复制拖曳射击的方式
-        env.task = FrontBackAttackFinalTask(env.config)
-        
+        tactical_task = FrontBackAttackFinalTask(env.config)
+        env.task = tactical_task
+
+        # 集成统一敌方AI系统
+        logging.info("集成统一敌方AI系统...")
+        from front_back_enemy_ai_adapter import create_front_back_enemy_ai_integration
+        enemy_ai_adapter = create_front_back_enemy_ai_integration(tactical_task)
+        if enemy_ai_adapter:
+            logging.info("✅ 前后攻击统一敌方AI系统集成成功")
+        else:
+            logging.warning("⚠️ 前后攻击统一敌方AI系统集成失败，将使用默认敌方行为")
+
         # 重置环境
         obs = env.reset()
         
@@ -101,9 +111,8 @@ def run_front_back_attack_simulation():
             try:
                 from unified_data_recorder import UnifiedDataRecorder
                 temp_recorder = UnifiedDataRecorder("front_back_attack")
-                temp_recorder.record_aircraft_trajectory(env, current_time)
-                temp_recorder.record_radar_data(env, current_time)
-                temp_recorder.record_missile_data(env, current_time)
+                # 传递tactical_task参数以获取Action_Intent数据
+                temp_recorder.record_all_data(env, current_time, env.task)
 
                 # 将数据添加到现有列表中
                 trajectory_data.extend(temp_recorder.trajectory_data)

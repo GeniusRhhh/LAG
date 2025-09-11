@@ -25,17 +25,15 @@ from envs.JSBSim.core.catalog import Catalog as c
 from scripts.drag_shoot_2v2.high_low_attack_fixed import HighLowAttackTacticalTask
 
 
-def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, tactical_task=None):
     """记录仿真数据 - 完全复制拖曳射击"""
     from unified_data_recorder import UnifiedDataRecorder
 
     # 创建临时记录器实例
     temp_recorder = UnifiedDataRecorder("high_low_attack")
 
-    # 记录所有数据
-    temp_recorder.record_aircraft_trajectory(env, current_time)
-    temp_recorder.record_radar_data(env, current_time)
-    temp_recorder.record_missile_data(env, current_time)
+    # 记录所有数据，传递tactical_task参数以获取Action_Intent数据
+    temp_recorder.record_all_data(env, current_time, tactical_task)
 
     # 将数据添加到现有列表中
     trajectory_data.extend(temp_recorder.trajectory_data)
@@ -77,7 +75,17 @@ def run_high_low_attack_simulation():
         
         # 替换任务为上下夹击战术任务
         logging.info("创建上下夹击战术任务...")
-        env.task = HighLowAttackTacticalTask(env.config)
+        tactical_task = HighLowAttackTacticalTask(env.config)
+        env.task = tactical_task
+
+        # 集成统一敌方AI系统
+        logging.info("集成统一敌方AI系统...")
+        from high_low_enemy_ai_adapter import create_high_low_enemy_ai_integration
+        enemy_ai_adapter = create_high_low_enemy_ai_integration(tactical_task)
+        if enemy_ai_adapter:
+            logging.info("✅ 上下夹击统一敌方AI系统集成成功")
+        else:
+            logging.warning("⚠️ 上下夹击统一敌方AI系统集成失败，将使用默认敌方行为")
         logging.info("上下夹击战术任务设置完成")
         
         # 重置环境
@@ -145,7 +153,7 @@ def run_high_low_attack_simulation():
 
             # 记录数据
             try:
-                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data)
+                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, env.task)
             except Exception as e:
                 logging.warning(f"Failed to record data at step {step_count}: {e}")
 

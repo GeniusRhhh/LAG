@@ -135,6 +135,9 @@ class SideBySideShootingTacticalTask(MultipleCombatTask):
         # 友方连续发射管理
         self.friendly_burst_launch = {"A0100": 0, "A0200": 0}  # 记录连续发射次数
 
+        # 导弹发射状态记录（兼容性）
+        self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
+
         # 编队间距控制 - 并排射击特有
         self.formation_spacing = {
             'min_spacing': 1852,      # 1海里最小间距
@@ -1060,7 +1063,27 @@ class SideBySideShootingTacticalTask(MultipleCombatTask):
         return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
-        """敌方战术指令索引 - 完全复制友方战术架构"""
+        """敌方战术指令索引 - 使用统一敌方AI系统"""
+        current_time = env.current_step * env.time_interval
+
+        try:
+            # 检查是否有集成的统一敌方AI系统
+            if hasattr(self, 'unified_enemy_ai'):
+                altitude_cmd, heading_cmd, velocity_cmd = self.unified_enemy_ai.get_enemy_action(
+                    env, agent_id, current_time
+                )
+                logging.debug(f"✅ {agent_id} 统一敌方AI指令: ({altitude_cmd}, {heading_cmd}, {velocity_cmd})")
+                return altitude_cmd, heading_cmd, velocity_cmd
+            else:
+                logging.warning(f"⚠️ {agent_id} 未找到统一敌方AI系统，使用备用方案")
+                return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+
+        except Exception as e:
+            logging.error(f"统一敌方AI执行错误: {e}")
+            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
+
+    def _get_enemy_command_indices_fallback(self, env, agent_id: str, current_time: float):
+        """敌方战术指令索引备用方案 - 原有逻辑"""
         # 根据敌方角色分配不同的战术逻辑
         if agent_id == "B0100":  # 敌方长机
             return self._get_enemy_leader_command_indices(env, agent_id)

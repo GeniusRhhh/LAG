@@ -135,6 +135,9 @@ class HighLowAttackTacticalTask(MultipleCombatTask):
         # 友方连续发射管理
         self.friendly_burst_launch = {"A0100": 0, "A0200": 0}  # 记录连续发射次数
 
+        # 导弹发射状态记录（兼容性）
+        self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
+
         # 雷达状态管理 - 使用统一雷达管理器
         from radar_manager import get_unified_radar_manager
         self.radar_manager = get_unified_radar_manager()
@@ -1041,35 +1044,23 @@ class HighLowAttackTacticalTask(MultipleCombatTask):
         return min_distance
 
     def _get_enemy_command_indices(self, env, agent_id: str):
-        """敌方战术指令索引 - 使用重新设计的四阶段AI系统"""
+        """敌方战术指令索引 - 使用统一敌方AI系统"""
         current_time = env.current_step * env.time_interval
 
-        # 导入并使用重新设计的敌方AI系统
         try:
-            import sys
-            import os
-            # 添加当前目录到Python路径
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
+            # 检查是否有集成的统一敌方AI系统
+            if hasattr(self, 'unified_enemy_ai'):
+                altitude_cmd, heading_cmd, velocity_cmd = self.unified_enemy_ai.get_enemy_action(
+                    env, agent_id, current_time
+                )
+                logging.debug(f"✅ {agent_id} 统一敌方AI指令: ({altitude_cmd}, {heading_cmd}, {velocity_cmd})")
+                return altitude_cmd, heading_cmd, velocity_cmd
+            else:
+                logging.warning(f"⚠️ {agent_id} 未找到统一敌方AI系统，使用备用方案")
+                return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
-            from enemy_tactical_ai_enhanced import get_enemy_tactical_command
-            commands = get_enemy_tactical_command(env, agent_id, current_time)
-
-            # 每10秒记录一次敌方AI状态
-            if current_time % 10.0 < 0.2:
-                logging.info(f"✅ {agent_id} 重新设计AI指令: {commands}")
-
-            return commands
-        except ImportError as e:
-            logging.warning(f"❌ 重新设计的敌方AI导入失败: {e}, 使用回退逻辑")
-            # 回退到原有逻辑
-            return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
         except Exception as e:
-            logging.error(f"❌ {agent_id} 重新设计AI执行错误: {e}, 使用回退逻辑")
-            import traceback
-            logging.error(f"详细错误信息: {traceback.format_exc()}")
-            # 回退到原有逻辑
+            logging.error(f"统一敌方AI执行错误: {e}")
             return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
     def _get_enemy_command_indices_fallback(self, env, agent_id: str, current_time: float):
