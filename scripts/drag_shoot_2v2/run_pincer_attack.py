@@ -117,7 +117,7 @@ def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, mis
     saved_files = recorder.save_csv_files(output_dir, timestamp, simulation_log)
 
     # 动作标注系统已禁用 - 生成纯净轨迹数据
-    print("✅ 钳形攻击纯净轨迹数据生成完成")
+    print("[CHECK] 钳形攻击纯净轨迹数据生成完成")
 
     return saved_files
 
@@ -296,7 +296,7 @@ def generate_pincer_missile_summary(analysis_df, output_dir, timestamp):
 def print_tactical_info():
     """打印钳形夹击战术信息"""
     print("=" * 80)
-    print("🔱 双机钳形夹击战术仿真")
+    print("[TRIDENT] 双机钳形夹击战术仿真")
     print("=" * 80)
     print("战术名称: 钳形夹击 (Pincer Attack)")
     print("战术描述: 双机向两侧展开形成钳形包夹，然后收拢攻击")
@@ -334,9 +334,9 @@ def run_pincer_attack_simulation():
         from pincer_enemy_ai_adapter import create_pincer_enemy_ai_integration
         enemy_ai_adapter = create_pincer_enemy_ai_integration(tactical_task)
         if enemy_ai_adapter:
-            logging.info("✅ 钳形夹击统一敌方AI系统集成成功")
+            logging.info("[CHECK] 钳形夹击统一敌方AI系统集成成功")
         else:
-            logging.warning("⚠️ 钳形夹击统一敌方AI系统集成失败，将使用默认敌方行为")
+            logging.warning("[WARNING] 钳形夹击统一敌方AI系统集成失败，将使用默认敌方行为")
 
         # 替换环境的任务
         env.task = tactical_task
@@ -415,7 +415,7 @@ def run_pincer_attack_simulation():
         duration = (end_time - start_time).total_seconds()
 
         print("=" * 100)
-        print("🎉 钳形夹击仿真完成!")
+        print("[PARTY] 钳形夹击仿真完成!")
         print(f"仿真时间: {current_time:.1f}秒")
         print(f"总步数: {step_count}")
         print(f"计算耗时: {duration:.2f}秒")
@@ -435,7 +435,7 @@ def run_pincer_attack_simulation():
         save_simulation_results(env, step_count, current_time)
 
         # ACMI文件已在每步生成
-        print(f"\n📁 数据文件生成完成:")
+        print(f"\n[FILE] 数据文件生成完成:")
         print(f"  ACMI文件: {acmi_filepath}")
         print(f"  CSV数据目录: {output_dir}")
         print(f"  轨迹数据: pincer_trajectory_{timestamp}.csv")
@@ -444,7 +444,7 @@ def run_pincer_attack_simulation():
             print(f"  导弹数据: pincer_missile_trajectory_{timestamp}.csv")
             print(f"  导弹分析: pincer_missile_analysis_{timestamp}.csv")
 
-        print("\n🎯 使用说明:")
+        print("\n[TARGET] 使用说明:")
         print("1. 使用TacView打开ACMI文件查看3D回放")
         print("2. 使用Excel或Python分析CSV数据文件")
         print("3. 查看生成的分析报告了解战术效果")
@@ -590,9 +590,41 @@ def save_simulation_results(env, step_count: int, simulation_time: float):
         logging.error(f"保存结果失败: {e}")
 
 
-if __name__ == "__main__":
+def run_multiple_simulations(num_runs=1):
+    """批量运行钳形夹击仿真"""
+    import time
+
+    print(f"\n🚀 开始批量运行钳形夹击仿真 - 总计 {num_runs} 次")
+
+    success_count = 0
+    total_time = 0
+
+    for i in range(num_runs):
+        start_time = time.time()
+        print(f"\n运行 {i+1}/{num_runs}")
+
+        success = run_pincer_attack_simulation()
+
+        elapsed = time.time() - start_time
+        total_time += elapsed
+
+        if success:
+            success_count += 1
+            print(f"✅ 运行 {i+1}/{num_runs} 完成 - 耗时: {elapsed:.1f}s")
+        else:
+            print(f"❌ 运行 {i+1}/{num_runs} 失败 - 耗时: {elapsed:.1f}s")
+
+    print(f"\n📊 批量运行完成:")
+    print(f"   成功: {success_count}/{num_runs}")
+    print(f"   总耗时: {total_time:.1f}s")
+    print(f"   平均耗时: {total_time/num_runs:.1f}s")
+
+    return success_count == num_runs
+
+def main():
+    """主函数"""
     print("=" * 80)
-    print("🔱 钳形夹击战术仿真系统")
+    print("钳形夹击战术仿真系统")
     print("=" * 80)
     print("功能: 生成完整的ACMI文件和CSV数据报告")
     print("输出: ACMI文件 + 轨迹CSV + 雷达CSV + 导弹CSV + 分析报告")
@@ -601,13 +633,25 @@ if __name__ == "__main__":
     success = run_pincer_attack_simulation()
 
     if success:
-        print("\n🎉 钳形夹击仿真成功完成!")
+        print("\n[PARTY] 钳形夹击仿真成功完成!")
         print("下一步可以:")
         print("1. 查看生成的CSV数据文件")
         print("2. 使用TacView查看ACMI文件")
         print("3. 运行数据分析脚本生成图表")
         print("4. 对比拖曳射击和钳形夹击的战术效果")
     else:
-        print("\n❌ 仿真失败，请检查配置和日志")
+        print("\n[X] 仿真失败，请检查配置和日志")
 
-    exit(0 if success else 1)
+    return 0 if success else 1
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='钳形夹击战术仿真')
+    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    args = parser.parse_args()
+
+    if args.runs > 1:
+        success = run_multiple_simulations(args.runs)
+        exit(0 if success else 1)
+    else:
+        exit(main())

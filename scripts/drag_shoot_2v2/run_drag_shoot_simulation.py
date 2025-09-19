@@ -838,7 +838,7 @@ def print_status(env, step_interval: int = 50):
 
         # 每100步显示统一敌方AI系统状态
         if env.current_step % 100 == 0 and hasattr(env.task, 'unified_enemy_ai') and env.task.unified_enemy_ai is not None:
-            print("  🎯 统一敌方AI状态:")
+            print("  [TARGET] 统一敌方AI状态:")
             for enemy_id in ["B0100", "B0200"]:
                 if enemy_id in env._jsbsims and env._jsbsims[enemy_id].is_alive:
                     try:
@@ -867,7 +867,7 @@ def run_simulation():
         # 检查配置文件是否存在 - 使用本地configs目录
         config_file_path = os.path.join(current_dir, 'configs', f'{config_name}.yaml')
         if not os.path.exists(config_file_path):
-            print(f"❌ 配置文件不存在: {config_file_path}")
+            print(f"[X] 配置文件不存在: {config_file_path}")
             return False
 
         # 设置输出目录
@@ -882,9 +882,9 @@ def run_simulation():
         # 加载baseline模型
         print("加载baseline模型...")
         if not load_baseline_model():
-            print("⚠️ Baseline模型加载失败，使用基础控制备用方案")
+            print("[WARNING] Baseline模型加载失败，使用基础控制备用方案")
         else:
-            print("✅ Baseline模型加载成功")
+            print("[CHECK] Baseline模型加载成功")
 
         # 创建仿真环境 - 使用MultipleCombatEnv + 拖曳射击任务
         print("初始化仿真环境...")
@@ -905,9 +905,9 @@ def run_simulation():
         from drag_shoot_enemy_ai_adapter import create_drag_shoot_enemy_ai_integration
         enemy_ai_adapter = create_drag_shoot_enemy_ai_integration(tactical_task)
         if enemy_ai_adapter:
-            logging.info("✅ 拖曳射击统一敌方AI系统集成成功")
+            logging.info("[CHECK] 拖曳射击统一敌方AI系统集成成功")
         else:
-            logging.warning("⚠️ 拖曳射击统一敌方AI系统集成失败，将使用默认敌方行为")
+            logging.warning("[WARNING] 拖曳射击统一敌方AI系统集成失败，将使用默认敌方行为")
 
         # 重置环境
         obs = env.reset()
@@ -1048,7 +1048,7 @@ def run_simulation():
 
     except Exception as e:
         sys.stdout = original_stdout  # 恢复输出
-        print(f"\n❌ 仿真运行失败: {e}")
+        print(f"\n[X] 仿真运行失败: {e}")
         logging.error(f"Simulation failed: {e}", exc_info=True)
         return False
 
@@ -1057,21 +1057,59 @@ def run_simulation():
         sys.stdout = original_stdout
 
 
+def run_multiple_simulations(num_runs=1):
+    """批量运行仿真"""
+    print(f"\n🚀 开始批量运行拖曳射击仿真 - 总计 {num_runs} 次")
+
+    success_count = 0
+    total_time = 0
+
+    for i in range(num_runs):
+        start_time = time.time()
+        print(f"\n运行 {i+1}/{num_runs}")
+
+        success = run_simulation()
+
+        elapsed = time.time() - start_time
+        total_time += elapsed
+
+        if success:
+            success_count += 1
+            print(f"✅ 运行 {i+1}/{num_runs} 完成 - 耗时: {elapsed:.1f}s")
+        else:
+            print(f"❌ 运行 {i+1}/{num_runs} 失败 - 耗时: {elapsed:.1f}s")
+
+    print(f"\n📊 批量运行完成:")
+    print(f"   成功: {success_count}/{num_runs}")
+    print(f"   总耗时: {total_time:.1f}s")
+    print(f"   平均耗时: {total_time/num_runs:.1f}s")
+
+    return success_count == num_runs
+
 def main():
     """主函数"""
     success = run_simulation()
-    
+
     if success:
-        print("\n🎉 仿真成功完成!")
+        print("\n[PARTY] 仿真成功完成!")
         print("下一步可以:")
         print("1. 查看生成的CSV数据文件")
         print("2. 使用现有的TacView查看ACMI文件")
         print("3. 运行数据分析脚本生成图表")
     else:
-        print("\n❌ 仿真失败，请检查配置和日志")
-    
+        print("\n[X] 仿真失败，请检查配置和日志")
+
     return 0 if success else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import argparse
+    parser = argparse.ArgumentParser(description='拖曳射击战术仿真')
+    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    args = parser.parse_args()
+
+    if args.runs > 1:
+        success = run_multiple_simulations(args.runs)
+        sys.exit(0 if success else 1)
+    else:
+        sys.exit(main())

@@ -55,9 +55,9 @@ def run_front_back_attack_simulation():
         from front_back_enemy_ai_adapter import create_front_back_enemy_ai_integration
         enemy_ai_adapter = create_front_back_enemy_ai_integration(tactical_task)
         if enemy_ai_adapter:
-            logging.info("✅ 前后攻击统一敌方AI系统集成成功")
+            logging.info("[CHECK] 前后攻击统一敌方AI系统集成成功")
         else:
-            logging.warning("⚠️ 前后攻击统一敌方AI系统集成失败，将使用默认敌方行为")
+            logging.warning("[WARNING] 前后攻击统一敌方AI系统集成失败，将使用默认敌方行为")
 
         # 重置环境
         obs = env.reset()
@@ -179,7 +179,7 @@ def run_front_back_attack_simulation():
                 print(f"  {file_path}")
 
             # 动作标注系统已禁用 - 生成纯净轨迹数据
-            print("✅ 前后攻击纯净轨迹数据生成完成")
+            print("[CHECK] 前后攻击纯净轨迹数据生成完成")
 
         except Exception as e:
             print(f"数据保存失败: {e}")
@@ -228,5 +228,50 @@ def run_front_back_attack_simulation():
         return False
 
 
+def run_multiple_simulations(num_runs=1):
+    """批量运行前后攻击仿真"""
+    import time
+
+    print(f"\n🚀 开始批量运行前后攻击仿真 - 总计 {num_runs} 次")
+
+    success_count = 0
+    total_time = 0
+
+    for i in range(num_runs):
+        start_time = time.time()
+        print(f"\n运行 {i+1}/{num_runs}")
+
+        success = run_front_back_attack_simulation()
+
+        elapsed = time.time() - start_time
+        total_time += elapsed
+
+        if success:
+            success_count += 1
+            print(f"✅ 运行 {i+1}/{num_runs} 完成 - 耗时: {elapsed:.1f}s")
+        else:
+            print(f"❌ 运行 {i+1}/{num_runs} 失败 - 耗时: {elapsed:.1f}s")
+
+    print(f"\n📊 批量运行完成:")
+    print(f"   成功: {success_count}/{num_runs}")
+    print(f"   总耗时: {total_time:.1f}s")
+    print(f"   平均耗时: {total_time/num_runs:.1f}s")
+
+    return success_count == num_runs
+
+def main():
+    """主函数"""
+    success = run_front_back_attack_simulation()
+    return 0 if success else 1
+
 if __name__ == "__main__":
-    run_front_back_attack_simulation()
+    import argparse
+    parser = argparse.ArgumentParser(description='前后攻击战术仿真')
+    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    args = parser.parse_args()
+
+    if args.runs > 1:
+        success = run_multiple_simulations(args.runs)
+        exit(0 if success else 1)
+    else:
+        exit(main())

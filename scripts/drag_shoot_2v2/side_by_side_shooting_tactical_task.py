@@ -675,17 +675,63 @@ class SideBySideShootingTacticalTask(MultipleCombatTask):
 
         if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
             # 并排射击特色：僚机保持与长机的平行航向，但保持适当间距
+
+            # 初始化航向调整状态跟踪
+            if not hasattr(self, '_formation_adjustment_state'):
+                self._formation_adjustment_state = {}
+            if agent_id not in self._formation_adjustment_state:
+                self._formation_adjustment_state[agent_id] = {
+                    'last_adjustment_step': 0,
+                    'adjustment_direction': 0,  # 0=无调整, 1=右偏, -1=左偏
+                    'stable_count': 0
+                }
+
+            state = self._formation_adjustment_state[agent_id]
+            current_step = env.current_step
+
+            # 防止频繁调整 - 至少间隔25步（5秒）才能改变航向
+            can_adjust = (current_step - state['last_adjustment_step']) >= 25
+
             if formation_spacing < self.formation_spacing['min_spacing']:
-                # 间距过小，右偏增加间距
-                logging.info(f"⚠️ {agent_id} 编队间距过小({formation_spacing/1852:.1f}海里)，右偏增加间距")
-                return self._maintain_heading_precise(env, agent_id, 15.0)  # 右偏15度
+                # 间距过小，需要右偏增加间距
+                if can_adjust and state['adjustment_direction'] != 1:
+                    if env.current_step % 100 == 0:  # 减少日志频率
+                        logging.info(f"⚠️ {agent_id} 编队间距过小({formation_spacing/1852:.1f}海里)，开始右偏调整")
+                    state['last_adjustment_step'] = current_step
+                    state['adjustment_direction'] = 1
+                    state['stable_count'] = 0
+
+                # 使用渐进式调整，避免大幅度转向
+                current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+                adjustment_angle = min(5.0, formation_spacing / 1000.0)  # 根据间距动态调整角度
+                target_heading = (current_heading + adjustment_angle) % 360
+                return self._maintain_heading_precise(env, agent_id, target_heading)
+
             elif formation_spacing > self.formation_spacing['max_spacing']:
-                # 间距过大，左偏减少间距
-                logging.info(f"⚠️ {agent_id} 编队间距过大({formation_spacing/1852:.1f}海里)，左偏减少间距")
-                return self._maintain_heading_precise(env, agent_id, -15.0)  # 左偏15度
+                # 间距过大，需要左偏减少间距
+                if can_adjust and state['adjustment_direction'] != -1:
+                    if env.current_step % 100 == 0:  # 减少日志频率
+                        logging.info(f"⚠️ {agent_id} 编队间距过大({formation_spacing/1852:.1f}海里)，开始左偏调整")
+                    state['last_adjustment_step'] = current_step
+                    state['adjustment_direction'] = -1
+                    state['stable_count'] = 0
+
+                # 使用渐进式调整
+                current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+                adjustment_angle = min(5.0, formation_spacing / 1000.0)  # 根据间距动态调整角度
+                target_heading = (current_heading - adjustment_angle) % 360
+                return self._maintain_heading_precise(env, agent_id, target_heading)
+
             else:
-                # 间距合理，保持平行航向
-                logging.info(f"✅ 编队间距合理: {formation_spacing/1852:.1f}海里")
+                # 间距合理，保持稳定
+                state['stable_count'] += 1
+                if state['stable_count'] > 50:  # 稳定10秒后重置调整状态
+                    state['adjustment_direction'] = 0
+                    state['stable_count'] = 0
+                    if env.current_step % 200 == 0:  # 减少日志频率
+                        logging.info(f"✅ 编队间距稳定: {formation_spacing/1852:.1f}海里")
+
+                # 保持标准北向航向
                 return self._maintain_heading_precise(env, agent_id, 0.0)
 
         elif self.current_phase == TacticalPhase.TR_DOR:
@@ -1139,17 +1185,63 @@ class SideBySideShootingTacticalTask(MultipleCombatTask):
 
         if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
             # 敌方僚机保持与敌方长机的平行航向，但保持适当间距
+
+            # 初始化敌方航向调整状态跟踪
+            if not hasattr(self, '_enemy_formation_adjustment_state'):
+                self._enemy_formation_adjustment_state = {}
+            if agent_id not in self._enemy_formation_adjustment_state:
+                self._enemy_formation_adjustment_state[agent_id] = {
+                    'last_adjustment_step': 0,
+                    'adjustment_direction': 0,  # 0=无调整, 1=右偏, -1=左偏
+                    'stable_count': 0
+                }
+
+            enemy_state = self._enemy_formation_adjustment_state[agent_id]
+            current_step = env.current_step
+
+            # 防止频繁调整 - 至少间隔25步（5秒）才能改变航向
+            can_adjust = (current_step - enemy_state['last_adjustment_step']) >= 25
+
             if enemy_formation_spacing < self.formation_spacing['min_spacing']:
-                # 间距过小，左偏增加间距
-                logging.info(f"⚠️ {agent_id} 敌方编队间距过小({enemy_formation_spacing/1852:.1f}海里)，左偏增加间距")
-                return self._maintain_heading_precise(env, agent_id, 165.0)  # 左偏15度
+                # 间距过小，需要左偏增加间距
+                if can_adjust and enemy_state['adjustment_direction'] != -1:
+                    if env.current_step % 100 == 0:  # 减少日志频率
+                        logging.info(f"⚠️ {agent_id} 敌方编队间距过小({enemy_formation_spacing/1852:.1f}海里)，开始左偏调整")
+                    enemy_state['last_adjustment_step'] = current_step
+                    enemy_state['adjustment_direction'] = -1
+                    enemy_state['stable_count'] = 0
+
+                # 使用渐进式调整
+                current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+                adjustment_angle = min(5.0, enemy_formation_spacing / 1000.0)  # 根据间距动态调整角度
+                target_heading = (current_heading - adjustment_angle) % 360
+                return self._maintain_heading_precise(env, agent_id, target_heading)
+
             elif enemy_formation_spacing > self.formation_spacing['max_spacing']:
-                # 间距过大，右偏减少间距
-                logging.info(f"⚠️ {agent_id} 敌方编队间距过大({enemy_formation_spacing/1852:.1f}海里)，右偏减少间距")
-                return self._maintain_heading_precise(env, agent_id, 195.0)  # 右偏15度
+                # 间距过大，需要右偏减少间距
+                if can_adjust and enemy_state['adjustment_direction'] != 1:
+                    if env.current_step % 100 == 0:  # 减少日志频率
+                        logging.info(f"⚠️ {agent_id} 敌方编队间距过大({enemy_formation_spacing/1852:.1f}海里)，开始右偏调整")
+                    enemy_state['last_adjustment_step'] = current_step
+                    enemy_state['adjustment_direction'] = 1
+                    enemy_state['stable_count'] = 0
+
+                # 使用渐进式调整
+                current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+                adjustment_angle = min(5.0, enemy_formation_spacing / 1000.0)  # 根据间距动态调整角度
+                target_heading = (current_heading + adjustment_angle) % 360
+                return self._maintain_heading_precise(env, agent_id, target_heading)
+
             else:
-                # 间距合理，保持平行航向
-                logging.info(f"✅ 敌方编队间距合理: {enemy_formation_spacing/1852:.1f}海里")
+                # 间距合理，保持稳定
+                enemy_state['stable_count'] += 1
+                if enemy_state['stable_count'] > 50:  # 稳定10秒后重置调整状态
+                    enemy_state['adjustment_direction'] = 0
+                    enemy_state['stable_count'] = 0
+                    if env.current_step % 200 == 0:  # 减少日志频率
+                        logging.info(f"✅ 敌方编队间距稳定: {enemy_formation_spacing/1852:.1f}海里")
+
+                # 保持标准南向航向
                 return self._maintain_heading_precise(env, agent_id, 180.0)
 
         elif self.current_phase == TacticalPhase.TR_DOR:

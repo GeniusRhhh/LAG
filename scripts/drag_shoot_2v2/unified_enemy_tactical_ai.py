@@ -154,7 +154,11 @@ class UnifiedEnemyTacticalAI:
         # 态势感知数据
         self.situation_data = {}         # 态势数据缓存
         self.threat_assessment = {}      # 威胁评估缓存
-        
+
+        # 导弹发射管理
+        self.last_missile_launch_time = {}  # 上次导弹发射时间
+        self.enemy_missile_cooldown = 10.0  # 敌方10秒冷却时间
+
         # 随机化参数
         self.mode_switch_cooldown = {}   # 模式切换冷却时间
         self.last_mode_switch = {}       # 上次模式切换时间
@@ -163,7 +167,116 @@ class UnifiedEnemyTacticalAI:
         self._init_action_weights()
         
         logging.info("🎯 统一敌方战术AI系统初始化完成")
-    
+
+    def handle_missile_launch(self, env, agent_id: str, current_time: float):
+        """处理敌方导弹发射逻辑"""
+        if not agent_id.startswith('B'):  # 只处理敌方
+            return
+
+        if not env.agents[agent_id].is_alive:
+            return
+
+        # 检查导弹数量
+        if env.agents[agent_id].num_missiles <= 0:
+            return
+
+        # 检查冷却时间
+        last_launch = self.last_missile_launch_time.get(agent_id, -999)
+        if current_time - last_launch < self.enemy_missile_cooldown:
+            return
+
+        # 寻找目标
+        target = self._find_best_target(env, agent_id)
+        if target is None:
+            return
+
+        # 计算距离
+        current_pos = env.agents[agent_id].get_position()
+        target_pos = target.get_position()
+        distance = np.linalg.norm(np.array(current_pos) - np.array(target_pos))
+
+        # 敌方导弹发射判断
+        should_launch = self._enemy_should_launch_missile(env, agent_id, target, distance, current_time)
+
+        if should_launch:
+            self._launch_missile(env, agent_id, target, current_time)
+
+    def _find_best_target(self, env, agent_id: str):
+        """寻找最佳攻击目标"""
+        best_target = None
+        min_distance = float('inf')
+
+        for target_id, target_agent in env.agents.items():
+            if target_id.startswith('A') and target_agent.is_alive:  # 友方目标
+                current_pos = env.agents[agent_id].get_position()
+                target_pos = target_agent.get_position()
+                distance = np.linalg.norm(np.array(current_pos) - np.array(target_pos))
+
+                if distance < min_distance:
+                    min_distance = distance
+                    best_target = target_agent
+
+        return best_target
+
+    def _enemy_should_launch_missile(self, env, agent_id: str, target, distance: float, current_time: float) -> bool:
+        """敌方智能导弹发射判断"""
+        # 基本条件检查
+        if env.agents[agent_id].num_missiles <= 0:
+            return False
+
+        # 冷却时间检查
+        last_launch = self.last_missile_launch_time.get(agent_id, -999)
+        if current_time - last_launch < self.enemy_missile_cooldown:
+            return False
+
+        # 距离条件：20-60km范围内发射
+        if distance < 20000 or distance > 60000:
+            return False
+
+        # 威胁评估：在高威胁情况下更积极发射
+        threat = self.threat_assessment.get(agent_id)
+        if threat and threat.threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
+            return True
+
+        # 正常发射条件：30-50km最佳发射窗口
+        if 30000 <= distance <= 50000:
+            return True
+
+        return False
+
+    def _launch_missile(self, env, agent_id: str, target, current_time: float):
+        """发射导弹"""
+        try:
+            from envs.JSBSim.core.simulatior import MissileSimulator
+
+            aircraft = env.agents[agent_id]
+
+            # 创建导弹ID
+            missile_count = 2 - aircraft.num_missiles + 1
+            base_id = agent_id[0] + agent_id[2:]  # B0100 → B100
+            missile_uid = f"{base_id}{missile_count}"  # B100 → B1001
+
+            # 创建导弹模拟器
+            missile = MissileSimulator.create(
+                parent=aircraft,
+                target=target,
+                uid=missile_uid
+            )
+
+            # 添加到环境
+            env.add_temp_simulator(missile)
+
+            # 更新发射时间
+            self.last_missile_launch_time[agent_id] = current_time
+
+            # 减少导弹数量
+            aircraft.num_missiles -= 1
+
+            logging.info(f"🚀 {agent_id} 发射导弹 {missile_uid} 攻击目标")
+
+        except Exception as e:
+            logging.error(f"导弹发射失败 {agent_id}: {e}")
+
     def _init_action_weights(self):
         """初始化动作权重配置"""
         # 基于战术模式和阶段的动作权重矩阵
@@ -1034,10 +1147,25 @@ class UnifiedEnemyTacticalAI:
             return 7, 8, 3
 
     def _execute_notch_maneuver(self, env, agent_id: str) -> Tuple[int, int, int]:
-        """执行Notch机动 - 90度侧向规避"""
+        """执行Notch机动 - 安全的侧向规避"""
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        current_velocity = np.linalg.norm(env.agents[agent_id].get_velocity())
+
+        # 飞行安全检查
+        MINIMUM_SAFE_ALTITUDE = 1000.0
+        MINIMUM_SAFE_VELOCITY = 150.0
+
+        if current_altitude < MINIMUM_SAFE_ALTITUDE:
+            logging.warning(f"⚠️ {agent_id} Notch机动时高度过低，执行紧急爬升")
+            return 7, 0, 3  # 直飞+爬升+保持速度
+
+        if current_velocity < MINIMUM_SAFE_VELOCITY:
+            logging.warning(f"⚠️ {agent_id} Notch机动时速度过低，执行加速")
+            return 7, 8, 1  # 直飞+保持高度+加速
+
         situation = self.situation_data.get(agent_id)
         if situation and situation.missile_threats:
-            # 相对于最近导弹威胁进行90度规避
+            # 相对于最近导弹威胁进行安全规避
             closest_missile = min(situation.missile_threats, key=lambda x: x['distance'])
             missile_pos = closest_missile['position']
             current_pos = env.agents[agent_id].get_position()
@@ -1047,15 +1175,16 @@ class UnifiedEnemyTacticalAI:
             dy = missile_pos[1] - current_pos[1]
             missile_bearing = np.rad2deg(np.arctan2(dy, dx))
 
-            # 90度规避（随机选择左或右）
-            notch_angle = 90.0 if random.random() > 0.5 else -90.0
+            # 安全的规避角度（限制在45度以内）
+            notch_angle = 45.0 if random.random() > 0.5 else -45.0  # 减小转弯角度
             notch_heading = (missile_bearing + notch_angle) % 360.0
         else:
-            # 默认相对于当前航向90度转弯
+            # 默认相对于当前航向安全转弯
             current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
-            notch_angle = 90.0 if random.random() > 0.5 else -90.0
+            notch_angle = 45.0 if random.random() > 0.5 else -45.0  # 限制转弯角度
             notch_heading = (current_heading + notch_angle) % 360.0
 
+        logging.info(f"🔄 {agent_id} 安全Notch机动（高度{current_altitude:.0f}m）: {notch_angle:.1f}°")
         return self._maintain_heading_precise(env, agent_id, notch_heading)
 
     def _execute_beam_maneuver(self, env, agent_id: str) -> Tuple[int, int, int]:
@@ -1260,21 +1389,73 @@ class UnifiedEnemyTacticalAI:
             return 7, 8, 3
 
     def _execute_defensive_split(self, env, agent_id: str) -> Tuple[int, int, int]:
-        """执行防御分离机动 - 🛡️ 完全禁用俯冲"""
+        """执行防御分离机动 - 🛡️ 添加飞行安全保护机制"""
         current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        current_velocity = np.linalg.norm(env.agents[agent_id].get_velocity())
+        current_step = getattr(env, 'current_step', 0)
 
-        # 长机和僚机分离机动
-        if agent_id == "B0100":  # 长机左分离
-            split_angle = random.uniform(-60.0, -30.0)
-            altitude_cmd = 0  # 🛡️ 改为爬升，禁用俯冲
-        elif agent_id == "B0200":  # 僚机右分离
-            split_angle = random.uniform(30.0, 60.0)
+        # 飞行安全检查
+        MINIMUM_SAFE_ALTITUDE = 1000.0  # 最低安全高度1000m
+        MINIMUM_SAFE_VELOCITY = 150.0   # 最低安全速度150m/s
+
+        if current_altitude < MINIMUM_SAFE_ALTITUDE:
+            logging.warning(f"⚠️ {agent_id} 高度过低({current_altitude:.0f}m)，执行紧急爬升")
+            return 7, 0, 3  # 直飞+爬升+保持速度
+
+        if current_velocity < MINIMUM_SAFE_VELOCITY:
+            logging.warning(f"⚠️ {agent_id} 速度过低({current_velocity:.0f}m/s)，执行加速")
+            return 7, 8, 1  # 直飞+保持高度+加速
+
+        # 初始化防御分离状态管理
+        if not hasattr(self, '_defensive_split_states'):
+            self._defensive_split_states = {}
+
+        if agent_id not in self._defensive_split_states:
+            self._defensive_split_states[agent_id] = {
+                'start_step': current_step,
+                'split_angle': None,
+                'duration_limit': 150,  # 30秒限制（150步 * 0.2秒/步）
+                'completed': False
+            }
+
+        state = self._defensive_split_states[agent_id]
+
+        # 检查是否已经完成防御分离机动
+        if state['completed'] or (current_step - state['start_step']) > state['duration_limit']:
+            # 防御分离完成，切换到正常机动
+            if agent_id in self._defensive_split_states:
+                del self._defensive_split_states[agent_id]
+            # 返回正常的直飞指令
+            return 7, 8, 3  # 直飞+保持高度+保持速度
+
+        # 确定分离角度（限制在安全范围内）
+        if state['split_angle'] is None:
+            if agent_id == "B0100":  # 长机左分离 - 限制角度
+                state['split_angle'] = random.uniform(-35.0, -20.0)  # 减小角度范围
+            elif agent_id == "B0200":  # 僚机右分离 - 限制角度
+                state['split_angle'] = random.uniform(20.0, 35.0)   # 减小角度范围
+            else:
+                state['split_angle'] = random.choice([-30.0, 30.0])  # 限制最大角度
+
+        split_angle = state['split_angle']
+
+        # 安全的高度指令 - 根据当前高度决定
+        if current_altitude > 12000:  # 高空时可以保持或轻微下降
+            altitude_cmd = random.choice([8, 9])  # 保持高度或轻微下降
+        else:  # 中低空时优先爬升
             altitude_cmd = 0  # 爬升
-        else:
-            split_angle = random.choice([-45.0, 45.0])
-            altitude_cmd = 0  # 🛡️ 改为爬升，禁用俯冲
 
-        logging.info(f"🛡️ {agent_id} 防御分离机动（高度{current_altitude:.0f}m）：转弯{split_angle:.1f}°，爬升")
+        # 减少日志频率，避免刷屏
+        if not hasattr(self, '_last_defensive_log_step'):
+            self._last_defensive_log_step = {}
+        if agent_id not in self._last_defensive_log_step:
+            self._last_defensive_log_step[agent_id] = 0
+
+        if current_step - self._last_defensive_log_step[agent_id] >= 50:  # 每10秒打印一次
+            remaining_time = (state['duration_limit'] - (current_step - state['start_step'])) * 0.2
+            altitude_action = "爬升" if altitude_cmd == 0 else ("保持" if altitude_cmd == 8 else "轻微下降")
+            logging.info(f"🛡️ {agent_id} 安全防御分离（高度{current_altitude:.0f}m，速度{current_velocity:.0f}m/s）：转弯{split_angle:.1f}°，{altitude_action}，剩余{remaining_time:.1f}s")
+            self._last_defensive_log_step[agent_id] = current_step
 
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
         split_heading = (current_heading + split_angle) % 360.0

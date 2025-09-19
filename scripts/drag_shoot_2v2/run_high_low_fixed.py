@@ -83,9 +83,9 @@ def run_high_low_attack_simulation():
         from high_low_enemy_ai_adapter import create_high_low_enemy_ai_integration
         enemy_ai_adapter = create_high_low_enemy_ai_integration(tactical_task)
         if enemy_ai_adapter:
-            logging.info("✅ 上下夹击统一敌方AI系统集成成功")
+            logging.info("[CHECK] 上下夹击统一敌方AI系统集成成功")
         else:
-            logging.warning("⚠️ 上下夹击统一敌方AI系统集成失败，将使用默认敌方行为")
+            logging.warning("[WARNING] 上下夹击统一敌方AI系统集成失败，将使用默认敌方行为")
         logging.info("上下夹击战术任务设置完成")
         
         # 重置环境
@@ -193,7 +193,7 @@ def run_high_low_attack_simulation():
                 print(f"  {file_type}: {file_path}")
 
             # 动作标注系统已禁用 - 生成纯净轨迹数据
-            print("✅ 上下夹击纯净轨迹数据生成完成")
+            print("[CHECK] 上下夹击纯净轨迹数据生成完成")
 
         except Exception as e:
             print(f"CSV数据保存失败: {e}")
@@ -226,7 +226,7 @@ def run_high_low_attack_simulation():
 def analyze_high_low_attack_results(trajectory_data):
     """分析上下夹击战术结果"""
     if not trajectory_data:
-        print("⚠️ 没有轨迹数据可供分析")
+        print("[WARNING] 没有轨迹数据可供分析")
         return
     
     # 转换为DataFrame
@@ -249,24 +249,69 @@ def analyze_high_low_attack_results(trajectory_data):
         print(f"高度差: {altitude_diff:.0f}m")
         
         if altitude_diff > 1500:
-            print("✅ 高度优势建立成功")
+            print("[CHECK] 高度优势建立成功")
         elif altitude_diff > 800:
-            print("⚠️ 高度优势建立部分成功")
+            print("[WARNING] 高度优势建立部分成功")
         else:
-            print("❌ 高度优势建立失败")
+            print("[X] 高度优势建立失败")
     
     print("\n仿真分析完成")
 
 
-if __name__ == "__main__":
+def run_multiple_simulations(num_runs=1):
+    """批量运行上下夹击仿真"""
+    import time
+
+    print(f"\n🚀 开始批量运行上下夹击仿真 - 总计 {num_runs} 次")
+
+    success_count = 0
+    total_time = 0
+
+    for i in range(num_runs):
+        start_time = time.time()
+        print(f"\n运行 {i+1}/{num_runs}")
+
+        success = run_high_low_attack_simulation()
+
+        elapsed = time.time() - start_time
+        total_time += elapsed
+
+        if success:
+            success_count += 1
+            print(f"✅ 运行 {i+1}/{num_runs} 完成 - 耗时: {elapsed:.1f}s")
+        else:
+            print(f"❌ 运行 {i+1}/{num_runs} 失败 - 耗时: {elapsed:.1f}s")
+
+    print(f"\n📊 批量运行完成:")
+    print(f"   成功: {success_count}/{num_runs}")
+    print(f"   总耗时: {total_time:.1f}s")
+    print(f"   平均耗时: {total_time/num_runs:.1f}s")
+
+    return success_count == num_runs
+
+def main():
+    """主函数"""
     print("=" * 60)
     print("上下夹击战术仿真 (基于拖曳射击架构)")
     print("=" * 60)
-    
+
     success = run_high_low_attack_simulation()
-    
+
     if success:
-        print("✅ 仿真成功完成")
+        print("[CHECK] 仿真成功完成")
+        return 0
     else:
-        print("❌ 仿真失败")
-        sys.exit(1)
+        print("[X] 仿真失败")
+        return 1
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='上下夹击战术仿真')
+    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    args = parser.parse_args()
+
+    if args.runs > 1:
+        success = run_multiple_simulations(args.runs)
+        sys.exit(0 if success else 1)
+    else:
+        sys.exit(main())

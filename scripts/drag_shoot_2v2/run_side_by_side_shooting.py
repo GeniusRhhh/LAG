@@ -51,7 +51,7 @@ def setup_logging(output_dir: str) -> str:
         ]
     )
 
-    logging.info("🚀 并排射击战术仿真开始")
+    logging.info("[LAUNCH] 并排射击战术仿真开始")
     logging.info(f"📝 日志文件: {log_file}")
     return log_file
 
@@ -59,7 +59,7 @@ def setup_logging(output_dir: str) -> str:
 def print_simulation_header():
     """打印仿真标题"""
     print("\n" + "="*80)
-    print("🎯 并排射击战术仿真系统")
+    print("[TARGET] 并排射击战术仿真系统")
     print("="*80)
     print("战术特点:")
     print("  • 编队保持平行航向接敌，水平间距1-3海里")
@@ -123,7 +123,7 @@ def print_status(env, step, current_time):
         
     current_phase = get_current_phase(env)
     
-    print(f"\n⏰ 时间: {current_time:6.1f}s | 步数: {step:4d} | 阶段: {current_phase.value}")
+    print(f"\n[TIMEOUT] 时间: {current_time:6.1f}s | 步数: {step:4d} | 阶段: {current_phase.value}")
     
     # 打印飞机状态
     for agent_id in ["A0100", "A0200", "B0100", "B0200"]:
@@ -161,7 +161,7 @@ def print_status(env, step, current_time):
             min_distance = min(min_distance, distance)
     
     if min_distance != float('inf'):
-        print(f"🎯 双方最近距离: {min_distance/1000:.1f}km")
+        print(f"[TARGET] 双方最近距离: {min_distance/1000:.1f}km")
 
 
 def check_simulation_end(env):
@@ -173,10 +173,10 @@ def check_simulation_end(env):
                      if agent_id in env.agents and env.agents[agent_id].is_alive)
     
     if friendly_alive == 0:
-        print("\n💥 己方全部被击落，仿真结束")
+        print("\n[CRASH] 己方全部被击落，仿真结束")
         return True
     elif enemy_alive == 0:
-        print("\n🎉 敌方全部被击落，仿真结束")
+        print("\n[PARTY] 敌方全部被击落，仿真结束")
         return True
     
     return False
@@ -252,9 +252,9 @@ def run_side_by_side_shooting_simulation():
         from side_by_side_enemy_ai_adapter import create_side_by_side_enemy_ai_integration
         enemy_ai_adapter = create_side_by_side_enemy_ai_integration(tactical_task)
         if enemy_ai_adapter:
-            logging.info("✅ 并排射击统一敌方AI系统集成成功")
+            logging.info("[CHECK] 并排射击统一敌方AI系统集成成功")
         else:
-            logging.warning("⚠️ 并排射击统一敌方AI系统集成失败，将使用默认敌方行为")
+            logging.warning("[WARNING] 并排射击统一敌方AI系统集成失败，将使用默认敌方行为")
 
         # 重置环境
         obs = env.reset()
@@ -274,7 +274,7 @@ def run_side_by_side_shooting_simulation():
         print()
         
         # 开始仿真循环
-        print("🚀 开始并排射击战术仿真...")
+        print("[LAUNCH] 开始并排射击战术仿真...")
         start_time = time.time()
 
         # 准备ACMI文件路径和数据记录
@@ -340,7 +340,7 @@ def run_side_by_side_shooting_simulation():
                             if not env.agents[agent_id].is_alive:
                                 role = "长机" if agent_id.endswith("100") else "僚机"
                                 side = "己方" if agent_id.startswith("A") else "敌方"
-                                print(f"💥 {side}{role}({agent_id}) 被击落！")
+                                print(f"[CRASH] {side}{role}({agent_id}) 被击落！")
                 else:
                     # dones是数组格式，检查所有智能体
                     for i, agent_id in enumerate(["A0100", "A0200", "B0100", "B0200"]):
@@ -348,15 +348,15 @@ def run_side_by_side_shooting_simulation():
                             if not env.agents[agent_id].is_alive:
                                 role = "长机" if agent_id.endswith("100") else "僚机"
                                 side = "己方" if agent_id.startswith("A") else "敌方"
-                                print(f"💥 {side}{role}({agent_id}) 被击落！")
+                                print(f"[CRASH] {side}{role}({agent_id}) 被击落！")
                 
             except Exception as e:
                 import traceback
                 error_details = traceback.format_exc()
-                logging.error(f"❌ 仿真步骤 {step} 执行错误: {e}")
-                logging.error(f"❌ 详细错误信息:\n{error_details}")
-                print(f"❌ 仿真步骤 {step} 执行错误: {e}")
-                print(f"❌ 详细错误信息:\n{error_details}")
+                logging.error(f"[X] 仿真步骤 {step} 执行错误: {e}")
+                logging.error(f"[X] 详细错误信息:\n{error_details}")
+                print(f"[X] 仿真步骤 {step} 执行错误: {e}")
+                print(f"[X] 详细错误信息:\n{error_details}")
                 break
         
         # 仿真结束
@@ -365,7 +365,7 @@ def run_side_by_side_shooting_simulation():
         
         print(f"\n🏁 并排射击战术仿真完成")
         print(f"⏱️  仿真用时: {simulation_time:.2f}秒")
-        print(f"📊 总步数: {step + 1}")
+        print(f"[DATA] 总步数: {step + 1}")
         print(f"🕐 仿真时间: {(step + 1) * env.time_interval:.1f}秒")
         
         # 最终统计
@@ -374,48 +374,92 @@ def run_side_by_side_shooting_simulation():
         enemy_alive = sum(1 for agent_id in ["B0100", "B0200"] 
                          if agent_id in env.agents and env.agents[agent_id].is_alive)
         
-        print(f"📈 最终结果: 己方存活{friendly_alive}架，敌方存活{enemy_alive}架")
+        print(f"[CHART] 最终结果: 己方存活{friendly_alive}架，敌方存活{enemy_alive}架")
 
         if friendly_alive > enemy_alive:
-            print("🎉 己方获胜！")
+            print("[PARTY] 己方获胜！")
         elif enemy_alive > friendly_alive:
             print("💔 敌方获胜！")
         else:
             print("🤝 平局！")
 
         # 保存CSV数据
-        print("\n💾 保存仿真数据...")
+        print("\n[DISK] 保存仿真数据...")
         save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data)
 
         # ACMI文件已在每步生成
-        print(f"📊 ACMI文件已生成: {acmi_filepath}")
-        print("📈 CSV数据文件已保存")
+        print(f"[DATA] ACMI文件已生成: {acmi_filepath}")
+        print("[CHART] CSV数据文件已保存")
 
         print("=" * 80)
-        print("🎉 并排射击战术仿真成功完成!")
-        print(f"📁 数据文件保存在: {output_dir}")
-        print(f"🎬 ACMI文件: {acmi_filepath}")
-        print("📊 可以运行数据分析脚本查看结果")
+        print("[PARTY] 并排射击战术仿真成功完成!")
+        print(f"[FILE] 数据文件保存在: {output_dir}")
+        print(f"[VIDEO] ACMI文件: {acmi_filepath}")
+        print("[DATA] 可以运行数据分析脚本查看结果")
         print("=" * 80)
 
         return True
         
     except Exception as e:
-        logging.error(f"❌ 仿真运行错误: {e}")
-        print(f"❌ 仿真运行错误: {e}")
+        logging.error(f"[X] 仿真运行错误: {e}")
+        print(f"[X] 仿真运行错误: {e}")
         return False
 
 
-if __name__ == "__main__":
-    print("🎯 并排射击战术仿真系统")
+def run_multiple_simulations(num_runs=1):
+    """批量运行并排射击仿真"""
+    import time
+
+    print(f"\n🚀 开始批量运行并排射击仿真 - 总计 {num_runs} 次")
+
+    success_count = 0
+    total_time = 0
+
+    for i in range(num_runs):
+        start_time = time.time()
+        print(f"\n运行 {i+1}/{num_runs}")
+
+        success = run_side_by_side_shooting_simulation()
+
+        elapsed = time.time() - start_time
+        total_time += elapsed
+
+        if success:
+            success_count += 1
+            print(f"✅ 运行 {i+1}/{num_runs} 完成 - 耗时: {elapsed:.1f}s")
+        else:
+            print(f"❌ 运行 {i+1}/{num_runs} 失败 - 耗时: {elapsed:.1f}s")
+
+    print(f"\n📊 批量运行完成:")
+    print(f"   成功: {success_count}/{num_runs}")
+    print(f"   总耗时: {total_time:.1f}s")
+    print(f"   平均耗时: {total_time/num_runs:.1f}s")
+
+    return success_count == num_runs
+
+def main():
+    """主函数"""
+    print("并排射击战术仿真系统")
     print("基于拖曳射击项目架构，实现编队平行接敌、同时发射的战术")
     print()
-    
+
     success = run_side_by_side_shooting_simulation()
-    
+
     if success:
-        print("\n✅ 仿真成功完成")
+        print("\n[CHECK] 仿真成功完成")
+        return 0
     else:
-        print("\n❌ 仿真执行失败")
-    
-    input("\n按回车键退出...")
+        print("\n[X] 仿真执行失败")
+        return 1
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='并排射击战术仿真')
+    parser.add_argument('--runs', type=int, default=30, help='运行次数（默认为1）')
+    args = parser.parse_args()
+
+    if args.runs > 1:
+        success = run_multiple_simulations(args.runs)
+        exit(0 if success else 1)
+    else:
+        exit(main())
