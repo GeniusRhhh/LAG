@@ -116,15 +116,25 @@ class UnifiedDataRecorder:
                         annotation_data = tactical_task.unified_enemy_ai.get_action_annotation_for_csv(agent_id)
                         trajectory_record.update(annotation_data)
 
+                        # 添加具体的战术动作类型
+                        action_type_data = tactical_task.unified_enemy_ai.get_action_type_for_csv(agent_id)
+                        trajectory_record.update(action_type_data)
+
                         # 每30秒记录一次注释状态
                         if current_time % 30.0 < 0.2:
-                            logging.debug(f"🏷️ {agent_id} 行动注释: {annotation_data.get('Action_Intent', 'unknown')}")
+                            logging.debug(f"🏷️ {agent_id} 行动注释: {annotation_data.get('Action_Intent', 'unknown')}, 动作类型: {action_type_data.get('action_type', 'N/A')}")
                     except Exception as e:
                         logging.warning(f"行动注释记录失败 {agent_id}: {e}")
                         # 添加默认注释数据
                         trajectory_record.update({
-                            'Action_Intent': 'search'
+                            'Action_Intent': 'search',
+                            'action_type': ''
                         })
+                else:
+                    # 友方飞机添加空的action_type列
+                    trajectory_record.update({
+                        'action_type': ''
+                    })
 
                 self.trajectory_data.append(trajectory_record)
 

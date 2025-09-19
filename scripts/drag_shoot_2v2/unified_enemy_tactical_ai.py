@@ -1716,6 +1716,61 @@ class UnifiedEnemyTacticalAI:
                 'Action_Intent': 'search'  # 默认返回search而不是unknown
             }
 
+    def get_action_type_for_csv(self, agent_id: str) -> Dict[str, str]:
+        """获取CSV格式的具体战术动作类型信息"""
+        try:
+            if agent_id not in self.current_action:
+                return {'action_type': ''}
+
+            action_type = self.current_action[agent_id]
+
+            # 确保action_type是ActionType枚举类型
+            if not isinstance(action_type, ActionType):
+                logging.error(f"错误的action_type类型 {agent_id}: {type(action_type)} = {action_type}")
+                return {'action_type': ''}
+
+            # 将ActionType枚举值转换为具体的战术动作名称
+            action_type_name = self._convert_action_type_to_name(action_type)
+
+            return {
+                'action_type': action_type_name
+            }
+        except Exception as e:
+            logging.error(f"CSV动作类型获取失败 {agent_id}: {e}")
+            return {
+                'action_type': ''
+            }
+
+    def _convert_action_type_to_name(self, action_type: ActionType) -> str:
+        """将ActionType枚举转换为具体的战术动作名称"""
+        try:
+            # 映射ActionType到具体的战术动作名称
+            action_mapping = {
+                ActionType.MAINTAIN_HEADING: 'neutral_flight',
+                ActionType.TURN_LEFT: 'defensive_turn',
+                ActionType.TURN_RIGHT: 'defensive_turn',
+                ActionType.CLIMB: 'climb_escape',
+                ActionType.DESCEND: 'dive_escape',
+                ActionType.ACCELERATE: 'aggressive_approach',
+                ActionType.DECELERATE: 'defensive_positioning',
+                ActionType.CRANK_LEFT: 'crank_left',
+                ActionType.CRANK_RIGHT: 'crank_right',
+                ActionType.NOTCH_MANEUVER: 'notch',
+                ActionType.BEAM_MANEUVER: 'evasive_maneuver',
+                ActionType.DIVE_ESCAPE: 'dive_escape',
+                ActionType.CHAFF_FLARE_MANEUVER: 'evasive_maneuver',
+                ActionType.SPIRAL_DIVE: 'evasive_maneuver',
+                ActionType.SHORT_SKATE: 'aggressive_approach',
+                ActionType.DEFENSIVE_SPLIT: 'split',
+                ActionType.AGGRESSIVE_APPROACH: 'aggressive_approach',
+                ActionType.RETURN_TO_BASE: 'escape'
+            }
+
+            return action_mapping.get(action_type, 'neutral_flight')
+        except Exception as e:
+            logging.error(f"动作类型转换失败: {e}")
+            return 'neutral_flight'
+
     def _generate_action_intent(self, action_type: ActionType, tactical_mode: TacticalMode, situation) -> str:
         """生成动作意图"""
         try:

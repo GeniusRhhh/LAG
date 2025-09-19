@@ -91,10 +91,10 @@ class PincerEnemyAIAdapter:
     def get_action_annotation_for_csv(self, agent_id: str) -> Dict[str, str]:
         """
         获取用于CSV记录的行动注释数据（简化版本，只返回Action_Intent）
-        
+
         Args:
             agent_id: 智能体ID
-            
+
         Returns:
             Dict[str, str]: 行动注释数据
         """
@@ -102,6 +102,29 @@ class PincerEnemyAIAdapter:
         return {
             'Action_Intent': annotation_data.get('Action_Intent', 'search')
         }
+
+    def get_action_type_for_csv(self, agent_id: str) -> Dict[str, str]:
+        """
+        获取CSV格式的具体战术动作类型信息
+
+        Args:
+            agent_id: 智能体ID
+
+        Returns:
+            Dict[str, str]: 包含action_type的字典
+        """
+        try:
+            # 委托给统一敌方AI系统
+            if hasattr(self, 'unified_ai') and self.unified_ai:
+                return self.unified_ai.get_action_type_for_csv(agent_id)
+            else:
+                # 如果没有统一AI系统，返回空的action_type
+                return {'action_type': ''}
+        except Exception as e:
+            logging.error(f"CSV动作类型获取失败 {agent_id}: {e}")
+            return {
+                'action_type': ''
+            }
     
     def force_action(self, agent_id: str, action_name: str, current_time: float = 0.0):
         """强制执行特定动作 - 用于测试"""

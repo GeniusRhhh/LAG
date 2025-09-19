@@ -167,6 +167,40 @@ class EnemyAIAdapter:
         """获取当前战术阶段"""
         phase = self.unified_ai.current_phase.get(agent_id, EnemyTacticalPhase.MELD_MTR)
         return phase.value
+
+    def get_action_annotation_for_csv(self, agent_id: str) -> Dict[str, str]:
+        """
+        获取CSV格式的行动注释数据
+
+        Args:
+            agent_id: 智能体ID
+
+        Returns:
+            Dict[str, str]: 包含Action_Intent的字典
+        """
+        try:
+            # 委托给统一敌方AI系统
+            return self.unified_ai.get_action_annotation_for_csv(agent_id)
+        except Exception as e:
+            logging.error(f"敌方{agent_id}CSV行动注释获取失败: {e}")
+            return {'Action_Intent': 'search'}
+
+    def get_action_type_for_csv(self, agent_id: str) -> Dict[str, str]:
+        """
+        获取CSV格式的具体战术动作类型信息
+
+        Args:
+            agent_id: 智能体ID
+
+        Returns:
+            Dict[str, str]: 包含action_type的字典
+        """
+        try:
+            # 委托给统一敌方AI系统
+            return self.unified_ai.get_action_type_for_csv(agent_id)
+        except Exception as e:
+            logging.error(f"敌方{agent_id}CSV动作类型获取失败: {e}")
+            return {'action_type': ''}
     
     # ==================== 调试和测试接口 ====================
     
