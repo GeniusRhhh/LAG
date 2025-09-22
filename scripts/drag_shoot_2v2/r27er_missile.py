@@ -283,16 +283,18 @@ class R27ERMissileSimulator(BaseSimulator):
         self._distance_increment.append(distance > self._distance_pre)
         self._distance_pre = distance
 
-        # 命中判定
-        if distance < self._Rc and self.target_aircraft.is_alive:
+        # 命中判定 - 修复：允许击中已死亡目标（多导弹同时击中场景）
+        if distance < self._Rc:
             # 记录击中时刻和距离
             if self._hit_time is None:
                 self._hit_time = self._t
                 self._hit_distance = distance
                 print(f"💥 R-27ER {self.uid} HIT target at t={self._hit_time:.1f}s, dist={self._hit_distance:.1f}m")
-            
+
             self.__status = R27ERMissileSimulator.HIT
-            self.target_aircraft.shotdown()
+            # 只有在目标仍存活时才调用shotdown()，避免重复击落
+            if self.target_aircraft.is_alive:
+                self.target_aircraft.shotdown()
         elif self._should_miss():
             self.__status = R27ERMissileSimulator.MISS
             miss_reason = self._get_miss_reason()
@@ -342,8 +344,9 @@ class R27ERMissileSimulator(BaseSimulator):
             if distance_increase >= 15:
                 return True
 
-        # 目标消失
-        if not self.target_aircraft or not self.target_aircraft.is_alive:
+        # 移除"目标已死亡"检查 - 修复：避免与击中检测冲突
+        # 导弹应该能够击中刚被击落的目标（多导弹同时攻击场景）
+        if not self.target_aircraft:
             return True
 
         # 距离过远且无制导能力 - 只在飞行后期检查

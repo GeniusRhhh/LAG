@@ -727,16 +727,18 @@ class MissileSimulator(BaseSimulator):
         self._distance_increment.append(distance > self._distance_pre)
         self._distance_pre = distance
 
-        # 命中判定
-        if distance < self._Rc and self.target_aircraft.is_alive:
+        # 命中判定 - 修复：允许击中已死亡目标（多导弹同时击中场景）
+        if distance < self._Rc:
             # 记录击中时刻和距离（只在第一次击中时记录）
             if self._hit_time is None:
                 self._hit_time = self._t
                 self._hit_distance = distance
                 print(f" {self.model} {self.uid} HIT target at t={self._hit_time:.1f}s, dist={self._hit_distance:.1f}m")
-            
+
             self.__status = MissileSimulator.HIT
-            self.target_aircraft.shotdown()
+            # 只有在目标仍存活时才调用shotdown()，避免重复击落
+            if self.target_aircraft.is_alive:
+                self.target_aircraft.shotdown()
         elif self._should_miss():
             self.__status = MissileSimulator.MISS
             miss_reason = self._get_miss_reason()
@@ -778,9 +780,8 @@ class MissileSimulator(BaseSimulator):
         if velocity < self._v_min:
             return True
 
-        # 目标已死亡
-        if not self.target_aircraft.is_alive:
-            return True
+        # 移除"目标已死亡"检查 - 修复：避免与击中检测冲突
+        # 导弹应该能够击中刚被击落的目标（多导弹同时攻击场景）
 
         # 距离持续增大(发散检测) - 更宽松的条件
         if len(self._distance_increment) >= self._distance_increment.maxlen:

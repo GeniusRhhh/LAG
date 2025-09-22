@@ -271,13 +271,16 @@ class UnifiedDataRecorder:
                 elif hasattr(missile_sim, 'MISS') and status == missile_sim.MISS:
                     return 'MISS'
 
-            # 检查数值状态
+            # 检查数值状态 - 使用动态获取的状态常量
+            hit_value = getattr(missile_sim, 'HIT', 1)  # 默认HIT=1
+            miss_value = getattr(missile_sim, 'MISS', 2)  # 默认MISS=2
+
             for attr_name in ['__status', '_status', 'status']:
                 if hasattr(missile_sim, attr_name):
                     status = getattr(missile_sim, attr_name)
-                    if status == 1:  # MissileSimulator.HIT = 1
+                    if status == 'HIT' or status == hit_value:  # 使用实际的HIT常量值
                         return 'HIT'
-                    elif status == 2:  # MissileSimulator.MISS = 2
+                    elif status == 'MISS' or status == miss_value:  # 使用实际的MISS常量值
                         return 'MISS'
 
             # 如果导弹不再存活但无法确定状态，默认为MISS
@@ -329,13 +332,15 @@ class UnifiedDataRecorder:
     def _get_missile_status(self, missile_sim) -> str:
         """获取导弹状态 - 改进的击中检测逻辑"""
         try:
-            # 方法1：检查导弹是否存活
-            if hasattr(missile_sim, 'is_alive') and not missile_sim.is_alive:
-                # 导弹已经销毁，检查是否成功击中
-                if hasattr(missile_sim, 'is_success') and missile_sim.is_success:
-                    return 'HIT'
+            # 优先检查is_success属性（最可靠的方法）
+            if hasattr(missile_sim, 'is_success') and missile_sim.is_success:
+                return 'HIT'
 
-                # 检查私有状态属性
+            # 检查导弹是否存活
+            if hasattr(missile_sim, 'is_alive') and not missile_sim.is_alive:
+                # 导弹已经销毁，使用状态常量比较（最准确的方法）
+
+                # 方法1：直接比较状态常量 - R27ER导弹
                 if hasattr(missile_sim, '_R27ERMissileSimulator__status'):
                     status = missile_sim._R27ERMissileSimulator__status
                     if hasattr(missile_sim, 'HIT') and status == missile_sim.HIT:
@@ -343,7 +348,7 @@ class UnifiedDataRecorder:
                     elif hasattr(missile_sim, 'MISS') and status == missile_sim.MISS:
                         return 'MISS'
 
-                # 检查AIM-120C导弹的状态
+                # 方法2：直接比较状态常量 - AIM-120C导弹
                 if hasattr(missile_sim, '_MissileSimulator__status'):
                     status = missile_sim._MissileSimulator__status
                     if hasattr(missile_sim, 'HIT') and status == missile_sim.HIT:
@@ -351,13 +356,17 @@ class UnifiedDataRecorder:
                     elif hasattr(missile_sim, 'MISS') and status == missile_sim.MISS:
                         return 'MISS'
 
-                # 检查通用状态属性
+                # 方法3：数值状态检查（备用方法）
+                # 首先尝试获取状态常量进行比较
+                hit_value = getattr(missile_sim, 'HIT', 1)  # 默认HIT=1
+                miss_value = getattr(missile_sim, 'MISS', 2)  # 默认MISS=2
+
                 for attr_name in ['__status', '_status', 'status']:
                     if hasattr(missile_sim, attr_name):
                         status = getattr(missile_sim, attr_name)
-                        if status == 'HIT' or status == 2:  # 2通常表示HIT
+                        if status == 'HIT' or status == hit_value:  # 使用实际的HIT常量值
                             return 'HIT'
-                        elif status == 'MISS' or status == 3:  # 3通常表示MISS
+                        elif status == 'MISS' or status == miss_value:  # 使用实际的MISS常量值
                             return 'MISS'
 
                 # 如果导弹已销毁但无法确定原因，默认为MISS
