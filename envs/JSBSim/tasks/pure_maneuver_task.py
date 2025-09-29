@@ -62,8 +62,8 @@ class PureManeuverTask(MultipleCombatTask):
             2*np.pi/3,        # 120°
             np.pi             # 180°
         ])
-        # 修复速度控制：大幅增强速度变化幅度，支持极大幅度加速/减速
-        self.norm_delta_velocity = np.array([-200, -150, -100, 0, 100, 150, 200]) / 10.0  # 改为除以10，极大增强控制力度
+        # 修复速度控制：更精确的速度映射，确保加速机动有明显效果
+        self.norm_delta_velocity = np.array([-200, -150, -100, 0, 50, 100, 200]) / 5.0  # 改为除以5，进一步增强控制力度
         self.composite_executor = CompositeManeuverExecutor()
         self.maneuver_composer = self.composite_executor
         self._load_baseline_models()
@@ -138,8 +138,7 @@ class PureManeuverTask(MultipleCombatTask):
             default_params = {"duration": 25.0, "altitude_loss": 1500.0, "turn_angle": 90.0, "min_altitude": 2500.0}
         elif maneuver_name == "short_skate":
             default_params = {"duration": 35.0, "crank_angle": 40.0, "escape_angle": 140.0, "acceleration": 40.0}
-        elif maneuver_name == "high_g_turn":
-            default_params = {"turn_angle": 180.0, "g_force": 7.0, "turn_rate": 8.0, "duration": 25.0}
+
         elif maneuver_name == "accelerate_escape":
             default_params = {"acceleration": 50.0, "duration": 20.0}
         elif maneuver_name == "vertical_loop":
@@ -334,10 +333,8 @@ class PureManeuverTask(MultipleCombatTask):
                 if abs(altitude_diff) > 5.0:  # 降低阈值到5米
                     altitude_cmd_id = self._convert_altitude_to_index(altitude_diff)
 
-        elif phase in ["MANEUVER_COMPLETED", "BARREL_ROLLING", "BARREL_ROLL_COMPLETE",
-                       "HIGH_G_TURNING", "HIGH_G_TURN_COMPLETE", "ACCELERATING_ESCAPE", "ESCAPE_COMPLETE",
-                       "VERTICAL_LOOPING", "VERTICAL_LOOP_COMPLETE", "ADAPTIVE_CRANKING", "ADAPTIVE_CRANK_COMPLETE",
-                       "ADAPTIVE_TURNING", "ADAPTIVE_TURN_COMPLETE", "ENTERING_INVERTED", "INVERTED_FLIGHT_READY"]:
+        elif phase in ["MANEUVER_COMPLETED", "ACCELERATING_ESCAPE", "ESCAPE_COMPLETE",
+                       "VERTICAL_LOOPING", "VERTICAL_LOOP_COMPLETE"]:
             # 机动完成状态和特殊机动状态：保持目标高度和航向，确保平稳飞行
             if target_altitude is not None:
                 altitude_diff = target_altitude - current_altitude
@@ -358,9 +355,7 @@ class PureManeuverTask(MultipleCombatTask):
             # 根据阶段调整精度
             if phase in ["TURN_ADJUSTING", "TURN_LEVEL_ADJUSTING"]:
                 threshold = 1.0  # 转弯调整阶段：1度精度
-            elif phase in ["MAINTAINING_HEADING", "MANEUVER_COMPLETED", "BARREL_ROLL_COMPLETE",
-                           "HIGH_G_TURN_COMPLETE", "ESCAPE_COMPLETE", "VERTICAL_LOOP_COMPLETE",
-                           "ADAPTIVE_CRANK_COMPLETE", "ADAPTIVE_TURN_COMPLETE", "INVERTED_FLIGHT_READY"]:
+            elif phase in ["MAINTAINING_HEADING", "MANEUVER_COMPLETED", "ESCAPE_COMPLETE", "VERTICAL_LOOP_COMPLETE"]:
                 threshold = 1.5  # 保持航向和机动完成：1.5度精度
             else:
                 threshold = 1.0  # 其他阶段：1度精度
@@ -535,21 +530,7 @@ class PureManeuverTask(MultipleCombatTask):
                 params.get("target_heading", initial_heading),
                 params.get("duration", 15.0)
             )
-        elif basic_maneuver_name == "barrel_roll":
-            return BasicManeuvers.barrel_roll(
-                current_time,
-                initial_heading,
-                params.get("roll_angle", 135.0),
-                params.get("roll_rate", 45.0)
-            )
-        elif basic_maneuver_name == "high_g_turn":
-            return BasicManeuvers.high_g_turn(
-                current_time,
-                initial_heading,
-                params.get("turn_angle", 180.0),
-                params.get("g_force", 7.0),
-                params.get("turn_rate", 8.0)
-            )
+
         elif basic_maneuver_name == "accelerate_escape":
             return BasicManeuvers.accelerate_escape(
                 current_time,
@@ -831,10 +812,26 @@ class PureManeuverTask(MultipleCombatTask):
         return np.argmin(distances)
 
     def _convert_velocity_to_index(self, velocity_offset):
-        """速度偏移转索引 - 修复：与norm_delta_velocity数组保持一致"""
-        velocity_values = np.array([-200, -150, -100, 0, 100, 150, 200])  # 与norm_delta_velocity原始值保持一致
-        distances = np.abs(velocity_values - velocity_offset)
-        return np.argmin(distances)
+        """速度偏移转索引 - 修复：更精确的速度映射"""
+        # 修复：使用更细粒度的速度映射，确保小幅加速也能生效
+        velocity_values = np.array([-200, -150, -100, 0, 50, 100, 200])  # 添加50m/s档位
+
+        # 确保加速机动有明显效果的优先级映射 - 修复边界条件
+        if velocity_offset > 125.0:  # 125m/s以上使用最大索引6
+            return 6
+        elif velocity_offset > 75.0:  # 75m/s以上使用索引5
+            return 5
+        elif velocity_offset >= 25.0:  # 25m/s及以上的加速使用索引4 (修复：包含边界值)
+            return 4
+        elif velocity_offset < -125.0:  # 大幅减速
+            return 0
+        elif velocity_offset < -75.0:  # 中等减速
+            return 1
+        elif velocity_offset <= -25.0:  # 轻微减速 (修复：包含边界值)
+            return 2
+        else:  # 其他情况使用最接近的值
+            distances = np.abs(velocity_values - velocity_offset)
+            return np.argmin(distances)
 
 
 
@@ -946,27 +943,27 @@ class PureManeuverTask(MultipleCombatTask):
             heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
             velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
 
-            # 修复速度控制：根据velocity_cmd_id调整推力（超级增强版本）
+            # 修复速度控制：根据velocity_cmd_id调整推力（超级增强版本，匹配新的归一化值）
             target_velocity_change = self.norm_delta_velocity[velocity_cmd_id]
-            if target_velocity_change > 15.0:  # 极大幅加速 (200/10=20.0)
+            if target_velocity_change > 30.0:  # 极大幅加速 (200/5=40.0)
                 throttle = 1.0  # 最大推力
                 elevator = 0.0  # 保持水平，专注加速
-            elif target_velocity_change > 8.0:  # 大幅加速 (降低阈值：100/10=10.0也触发最大推力)
+            elif target_velocity_change > 15.0:  # 大幅加速 (100/5=20.0)
                 throttle = 1.0  # 最大推力
                 elevator = 0.0
-            elif target_velocity_change > 5.0:  # 中等加速 (150/10=15.0)
+            elif target_velocity_change > 8.0:  # 中等加速 (50/5=10.0)
                 throttle = 0.98  # 提高推力
                 elevator = 0.0
             elif target_velocity_change > 0.0:  # 轻微加速
                 throttle = 0.90  # 提高推力
                 elevator = 0.0
-            elif target_velocity_change < -15.0:  # 极大幅减速 (-200/10=-20.0)
+            elif target_velocity_change < -30.0:  # 极大幅减速 (-200/5=-40.0)
                 throttle = 0.0  # 最小推力
                 elevator = 0.0
-            elif target_velocity_change < -10.0:  # 大幅减速 (-150/10=-15.0)
+            elif target_velocity_change < -20.0:  # 大幅减速 (-150/5=-30.0)
                 throttle = 0.05
                 elevator = 0.0
-            elif target_velocity_change < -5.0:  # 中等减速 (-100/10=-10.0)
+            elif target_velocity_change < -15.0:  # 中等减速 (-100/5=-20.0)
                 throttle = 0.2
                 elevator = 0.0
             elif target_velocity_change < 0.0:  # 轻微减速

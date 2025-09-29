@@ -15,7 +15,7 @@ aircraft_configs:
       ic_lat_geod_deg: 60.0
       ic_long_gc_deg: 120.0
       ic_psi_true_deg: 0.0
-      ic_u_fps: 1200.0
+      ic_u_fps: 820.0
     missile: 0
     model: f16
   B0100:
@@ -25,7 +25,7 @@ aircraft_configs:
       ic_lat_geod_deg: 60.8
       ic_long_gc_deg: 120.0
       ic_psi_true_deg: 180.0
-      ic_u_fps: 1200.0
+      ic_u_fps: 820.0
     missile: 0
     model: f16
 battle_field_center:

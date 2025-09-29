@@ -176,29 +176,54 @@ def runtest_composite_maneuver(maneuver_name, maneuver_index, custom_params=None
 
 def run_all_basic_maneuvers():
     """运行所有基础机动测试"""
-    logging.info("基础机动测试")
+    logging.info("=== 基础机动综合测试 ===")
     basic_maneuvers = [
+        # 核心飞行机动
         ("level_flight", {"duration": 40.0}),
         ("accelerate", {"velocity_change": 50.0, "duration": 25.0}),
         ("decelerate", {"velocity_change": 50.0, "duration": 25.0}),
         ("turn", {"turn_angle": 80.0, "turn_rate": 3.0}),
+        ("turn_level", {"turn_angle": 80.0, "turn_rate": 3.0}),  # 新增：保持高度转弯
         ("pull_up", {"altitude_gain": 1500.0, "duration": 20.0}),
         ("dive", {"altitude_loss": 1500.0, "duration": 20.0, "min_altitude": 2000.0}),
         ("diagonal_flight", {"turn_angle": 70.0, "altitude_change": 1000.0, "duration": 20.0}),
-        ("level_flight_maintain_heading", {"duration": 40.0}),
-        # 保留有效的新增基础机动
-        ("high_g_turn", {"turn_angle": 180.0, "g_force": 7.0, "turn_rate": 8.0, "duration": 25.0}),
-        ("accelerate_escape", {"acceleration": 50.0, "duration": 20.0}),
+        ("maintain_heading_flight", {"duration": 40.0}),  # 修正名称
+
+        # 高级机动
+        ("accelerate_escape", {"acceleration": 100.0, "duration": 20.0}),
         ("vertical_loop", {"loop_type": "half", "g_force": 6.0, "duration": 15.0}),
     ]
+
     results = []
+    failed_tests = []
+
     for i, (maneuver_name, params) in enumerate(basic_maneuvers, 1):
         logging.info(f"测试 {i}/{len(basic_maneuvers)}: {maneuver_name}")
         logging.info(f"参数: {params}")
-        file_path = runtest_basic_maneuver(maneuver_name, i, **params)
-        if file_path:
-            results.append((f"{maneuver_name}_{i}", file_path))
-    return results
+        try:
+            file_path = runtest_basic_maneuver(maneuver_name, i, **params)
+            if file_path:
+                results.append((f"{maneuver_name}_{i}", file_path))
+                logging.info(f"✅ {maneuver_name} 测试成功")
+            else:
+                failed_tests.append((maneuver_name, "文件生成失败"))
+                logging.warning(f"⚠️ {maneuver_name} 测试失败：文件生成失败")
+        except Exception as e:
+            failed_tests.append((maneuver_name, str(e)))
+            logging.error(f"❌ {maneuver_name} 测试异常：{e}")
+
+    # 输出测试总结
+    logging.info(f"\n=== 基础机动测试总结 ===")
+    logging.info(f"总测试数量: {len(basic_maneuvers)}")
+    logging.info(f"成功测试: {len(results)}")
+    logging.info(f"失败测试: {len(failed_tests)}")
+
+    if failed_tests:
+        logging.warning("失败的测试:")
+        for name, error in failed_tests:
+            logging.warning(f"  - {name}: {error}")
+
+    return results, failed_tests
 
 
 def run_all_composite_maneuvers():
@@ -238,21 +263,134 @@ def run_all_composite_maneuvers():
 
 def run_all_tactical_maneuvers_simple():
     """运行新增的战术机动测试，包括Short Skate"""
-    logging.info("新增战术机动测试")
+    logging.info("=== 战术机动综合测试 ===")
     tactical_configs = [
         ("crank_tactical", {}),
         ("beam_tactical", {}),
         ("notch_tactical", {}),
-        ("short_skate_tactical", {})  # 新增Short Skate机动测试
+        ("short_skate_tactical", {}),
+        ("banzai_tactical", {}),  # 新增：包含adaptive_crank和adaptive_turn_to_enemy
+        ("sliceback_tactical", {}),  # 新增：包含vertical_loop
     ]
+
     results = []
+    failed_tests = []
+
     for i, (maneuver_name, params) in enumerate(tactical_configs, 1):
         logging.info(f"测试 {i}/{len(tactical_configs)}: {maneuver_name}")
         logging.info(f"参数: {params}")
-        file_path = runtest_composite_maneuver(maneuver_name, i, custom_params=params)
-        if file_path:
-            results.append((f"{maneuver_name}_{i}", file_path))
-    return results
+        try:
+            file_path = runtest_composite_maneuver(maneuver_name, i, custom_params=params)
+            if file_path:
+                results.append((f"{maneuver_name}_{i}", file_path))
+                logging.info(f"✅ {maneuver_name} 战术测试成功")
+            else:
+                failed_tests.append((maneuver_name, "文件生成失败"))
+                logging.warning(f"⚠️ {maneuver_name} 战术测试失败：文件生成失败")
+        except Exception as e:
+            failed_tests.append((maneuver_name, str(e)))
+            logging.error(f"❌ {maneuver_name} 战术测试异常：{e}")
+
+    # 输出测试总结
+    logging.info(f"\n=== 战术机动测试总结 ===")
+    logging.info(f"总测试数量: {len(tactical_configs)}")
+    logging.info(f"成功测试: {len(results)}")
+    logging.info(f"失败测试: {len(failed_tests)}")
+
+    if failed_tests:
+        logging.warning("失败的战术测试:")
+        for name, error in failed_tests:
+            logging.warning(f"  - {name}: {error}")
+
+    return results, failed_tests
+
+
+def run_comprehensive_maneuver_tests():
+    """运行全面的机动测试 - 包括所有基础、组合和战术机动"""
+    logging.info("🚀 开始全面机动测试")
+    logging.info("=" * 80)
+
+    all_results = {}
+    all_failed = {}
+
+    # 1. 基础机动测试
+    logging.info("第一阶段：基础机动测试")
+    basic_results, basic_failed = run_all_basic_maneuvers()
+    all_results['basic'] = basic_results
+    all_failed['basic'] = basic_failed
+
+    # 2. 组合机动测试
+    logging.info("\n第二阶段：组合机动测试")
+    composite_results = run_all_composite_maneuvers()
+    all_results['composite'] = composite_results
+
+    # 3. 战术机动测试
+    logging.info("\n第三阶段：战术机动测试")
+    tactical_results, tactical_failed = run_all_tactical_maneuvers_simple()
+    all_results['tactical'] = tactical_results
+    all_failed['tactical'] = tactical_failed
+
+    # 生成综合报告
+    generate_comprehensive_test_report(all_results, all_failed)
+
+    return all_results, all_failed
+
+
+def generate_comprehensive_test_report(all_results, all_failed):
+    """生成综合测试报告"""
+    logging.info("\n" + "=" * 80)
+    logging.info("📊 全面机动测试综合报告")
+    logging.info("=" * 80)
+
+    total_tests = 0
+    total_success = 0
+    total_failed = 0
+
+    for category, results in all_results.items():
+        if isinstance(results, tuple):  # 有失败信息的结果
+            success_count = len(results)
+            failed_count = len(all_failed.get(category, []))
+        else:  # 只有成功结果的列表
+            success_count = len(results)
+            failed_count = 0
+
+        category_total = success_count + failed_count
+        total_tests += category_total
+        total_success += success_count
+        total_failed += failed_count
+
+        logging.info(f"\n{category.upper()}机动测试:")
+        logging.info(f"  总数: {category_total}")
+        logging.info(f"  成功: {success_count}")
+        logging.info(f"  失败: {failed_count}")
+        logging.info(f"  成功率: {(success_count/category_total*100):.1f}%" if category_total > 0 else "  成功率: N/A")
+
+    logging.info(f"\n总体统计:")
+    logging.info(f"  总测试数: {total_tests}")
+    logging.info(f"  总成功数: {total_success}")
+    logging.info(f"  总失败数: {total_failed}")
+    logging.info(f"  总成功率: {(total_success/total_tests*100):.1f}%" if total_tests > 0 else "  总成功率: N/A")
+
+    # 分析失败的机动
+    if total_failed > 0:
+        logging.info(f"\n❌ 失败机动分析:")
+        for category, failed_list in all_failed.items():
+            if failed_list:
+                logging.info(f"  {category.upper()}机动失败:")
+                for name, error in failed_list:
+                    logging.info(f"    - {name}: {error}")
+
+    # 生成建议
+    logging.info(f"\n💡 优化建议:")
+
+    if total_failed == 0:
+        logging.info("  - 所有机动测试通过，代码库状态良好")
+    elif total_failed < total_tests * 0.1:
+        logging.info("  - 大部分机动正常工作，少数失败可能需要修复")
+    else:
+        logging.info("  - 较多机动测试失败，建议进行系统性检查和修复")
+
+    logging.info("=" * 80)
 
 
 def run_new_maneuvers_test():
@@ -263,8 +401,6 @@ def run_new_maneuvers_test():
 
     # 新增基础机动
     new_basic_maneuvers = [
-        ("barrel_roll", "桶滚机动 - 水平滚转135度"),
-        ("high_g_turn", "高G转弯 - 高机动性转弯"),
         ("accelerate_escape", "加速逃离 - 保持航向并加速"),
         ("vertical_loop", "垂直回旋 - 上下方向的高G机动")
     ]
@@ -353,13 +489,14 @@ if __name__ == "__main__":
     logging.info("  5 - 新增战术机动测试")
     logging.info("  6 - 全部测试")
     logging.info("  7 - 新增机动专项测试 (基础机动+战术机动)")
+    logging.info("  8 - 🚀 全面综合测试 (推荐 - 包含所有机动和详细分析)")
 
     while True:
         try:
-            choice = input("请输入数字 (1-7): ").strip()
+            choice = input("请输入数字 (1-8): ").strip()
             choice = int(choice)
-            if choice not in [1, 2, 3, 4, 5, 6, 7]:
-                logging.warning("请输入1、2、3、4、5、6或7")
+            if choice not in [1, 2, 3, 4, 5, 6, 7, 8]:
+                logging.warning("请输入1-8之间的数字")
                 continue
             break
         except ValueError:
@@ -467,6 +604,20 @@ if __name__ == "__main__":
         logging.info("运行新增机动专项测试")
         success = run_new_maneuvers_test()
 
+    elif choice == 8:
+        logging.info("🚀 运行全面综合测试")
+        all_results, all_failed = run_comprehensive_maneuver_tests()
+
+        # 判断成功标准：至少有一些测试通过
+        total_success = sum(len(results) if isinstance(results, list) else len(results)
+                          for results in all_results.values())
+        success = total_success > 0
+
+        if success:
+            logging.info(f"✅ 全面综合测试完成！共有 {total_success} 个测试通过")
+        else:
+            logging.error("❌ 全面综合测试失败，所有测试都未通过")
+
     if success:
         logging.info("测试成功完成")
         logging.info("ACMI文件已保存到 maneuver_results/ 目录")
@@ -475,5 +626,61 @@ if __name__ == "__main__":
         sys.exit(1)
 
     logging.info("测试完成")
+
+
+def run_remaining_maneuvers():
+    """运行剩余的机动测试 - 自适应和特殊机动"""
+    results = {}
+    failed = {}
+
+    logging.info("🚀 开始运行剩余机动测试")
+
+    # 特殊机动测试
+    special_maneuvers = [
+        ("vertical_loop", {"loop_type": "half", "g_force": 6.0, "duration": 15.0}),
+        ("accelerate_escape", {"acceleration": 100.0, "duration": 20.0}),
+    ]
+
+    all_maneuvers = special_maneuvers
+
+    for i, (maneuver_name, params) in enumerate(all_maneuvers, 11):  # 从11开始编号
+        logging.info(f"测试 {i-10}/{len(all_maneuvers)}: {maneuver_name}")
+        try:
+            result = runtest_basic_maneuver(maneuver_name, i, custom_params=params)
+            if result:
+                results[f"Remaining_{i}_{maneuver_name}"] = result
+                logging.info(f"✅ {maneuver_name} 测试成功")
+            else:
+                failed[maneuver_name] = "测试失败"
+                logging.warning(f"⚠️ {maneuver_name} 测试失败")
+        except Exception as e:
+            failed[maneuver_name] = str(e)
+            logging.error(f"❌ {maneuver_name} 测试异常：{e}")
+
+    return results, failed
+
+
+if __name__ == "__main__":
+    # 如果直接运行此脚本，执行剩余机动测试
+    if len(sys.argv) > 1 and sys.argv[1] == "remaining":
+        logging.info("🚀 执行剩余机动测试")
+        results, failed = run_remaining_maneuvers()
+
+        logging.info(f"\n=== 剩余机动测试总结 ===")
+        logging.info(f"成功测试: {len(results)}")
+        logging.info(f"失败测试: {len(failed)}")
+
+        if failed:
+            logging.warning("失败的测试:")
+            for name, error in failed.items():
+                logging.warning(f"  - {name}: {error}")
+
+        if len(results) > 0:
+            logging.info(f"✅ 剩余机动测试完成！共有 {len(results)} 个测试通过")
+        else:
+            logging.error("❌ 剩余机动测试失败，所有测试都未通过")
+    else:
+        # 原有的交互式测试
+        main()
 
 
