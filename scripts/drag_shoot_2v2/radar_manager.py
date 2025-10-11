@@ -238,22 +238,14 @@ class UnifiedRadarManager:
     def update_friendly_radar_states(self, env, current_time: float):
         """更新友方雷达状态 - APG-68(V)9功能级建模"""
         for agent_id in self.friendly_radar_states.keys():
-            if agent_id not in env.agents:
-                logging.warning(f"⚠️ {agent_id} 不在env.agents中！")
-                continue
-            if not env.agents[agent_id].is_alive:
-                logging.debug(f"💀 {agent_id} 已被摧毁")
-                continue
-            self._update_single_friendly_radar(env, agent_id, current_time)
+            if agent_id in env.agents and env.agents[agent_id].is_alive:
+                self._update_single_friendly_radar(env, agent_id, current_time)
 
     def _update_single_friendly_radar(self, env, agent_id: str, current_time: float):
         """更新单个友方雷达状态 - APG-68(V)9完整功能级建模"""
         try:
             # 1. 执行雷达扫描（基于扫描周期）
-            should_scan = (current_time - self.friendly_scan_times[agent_id] >= self.apg68_radar.scan_period or 
-                          self.friendly_scan_times[agent_id] == 0.0)
-            if should_scan:
-                logging.debug(f"🔄 {agent_id} 执行雷达扫描 (t={current_time:.1f}s)")
+            if current_time - self.friendly_scan_times[agent_id] >= self.apg68_radar.scan_period or self.friendly_scan_times[agent_id] == 0.0:
                 self._scan_friendly_radar(env, agent_id, current_time)
                 self.friendly_scan_times[agent_id] = current_time
 
@@ -274,10 +266,10 @@ class UnifiedRadarManager:
         """APG-68雷达扫描 - 真实探测模型"""
         try:
             agent = env.agents[agent_id]
-            
+
             # 获取敌方目标列表
             enemy_ids = ["B0100", "B0200"] if agent_id.startswith("A") else ["A0100", "A0200"]
-            
+
             logging.debug(f"🔍 {agent_id} APG-68开始扫描，目标列表: {enemy_ids}")
 
             for target_id in enemy_ids:
@@ -389,8 +381,8 @@ class UnifiedRadarManager:
             # 雷达截面积因子（Su-27约10-15m²，比F-16大）
             rcs_factor = min(1.0, math.log10(12.0 + 1) / 2.0)
 
-            # 角度因子 - APG-68有±120°宽扫描范围，实际可360度扫描
-            # 简化处理：在扫描周期内所有方向都会被扫描到，角度因子设为高值
+            # 角度因子 - APG-68宽波束搜索（±120°），简化为固定值
+            # 注：bearing是绝对方位角，实际应用中机械扫描能覆盖所有方向
             angle_factor = 0.92
 
             # 仰角因子 - APG-68优秀的下视能力
@@ -525,7 +517,7 @@ class UnifiedRadarManager:
     def get_friendly_radar_state(self, agent_id: str) -> RadarStatus:
         """获取友方雷达状态"""
         return self.friendly_radar_states.get(agent_id, RadarStatus.SEARCH)
-    
+
     def _calculate_distance(self, agent1, agent2) -> float:
         """计算两个智能体之间的距离"""
         try:
@@ -535,7 +527,7 @@ class UnifiedRadarManager:
         except Exception as e:
             logging.error(f"❌ 距离计算错误: {e}")
             return float('inf')
-
+    
     def _calculate_bearing(self, agent, target) -> float:
         """计算方位角"""
         try:
@@ -609,8 +601,6 @@ class UnifiedRadarManager:
                 return
 
             self.enemy_scan_times[agent_id] = current_time
-            
-            logging.debug(f"🔍 {agent_id} N001VE开始扫描")
 
             # 扫描友方目标
             friendly_agents = ["A0100", "A0200"]
@@ -625,8 +615,6 @@ class UnifiedRadarManager:
                 bearing = self._calculate_bearing(agent, target)
                 elevation = self._calculate_elevation(agent, target)
                 velocity = self._calculate_target_velocity(env, target_id)
-                
-                logging.debug(f"🎯 {agent_id} 扫描目标 {target_id}: 距离={distance/1000:.1f}km, 方位={bearing:.1f}°")
 
                 # 检查探测距离
                 if distance > self.n001ve_radar.max_detection_range:
@@ -638,8 +626,6 @@ class UnifiedRadarManager:
                 # 计算真实探测概率
                 detection_prob = self._calculate_realistic_detection_probability(
                     distance, bearing, elevation, velocity, current_time)
-                
-                logging.debug(f"📊 {agent_id} N001VE探测概率: {detection_prob:.3f}")
 
                 # 探测成功
                 if random.random() < detection_prob:
@@ -694,43 +680,43 @@ class UnifiedRadarManager:
 
     def _calculate_realistic_detection_probability(self, distance: float, bearing: float,
                                                  elevation: float, velocity: float, current_time: float) -> float:
-        """计算真实的N001VE雷达探测概率 - 基于真实物理模型 (90km最大探测距离)"""
+        """计算真实的N001VE雷达探测概率 - 基于真实物理模型"""
         try:
-            # 基础距离衰减 - 基于真实N001VE雷达方程
+            # 基础距离衰减 - 基于雷达方程但调整为实用值（N001VE max: 90km）
             if distance > self.n001ve_radar.max_detection_range:  # > 90km
                 return 0.0
             elif distance > 80000:  # 80-90km：边缘探测
-                base_prob = 0.65
-            elif distance > 70000:  # 70-80km：接近跟踪距离
-                base_prob = 0.80
-            elif distance > 50000:  # 50-70km：高概率区域
-                base_prob = 0.88
-            elif distance > 30000:  # 30-50km：最佳探测区域
-                base_prob = 0.93
-            else:  # < 30km：近距离高概率
-                base_prob = 0.96
+                base_prob = 0.40
+            elif distance > 70000:  # 70-80km：中等概率
+                base_prob = 0.70
+            elif distance > 55000:  # 55-70km：高概率
+                base_prob = 0.85
+            elif distance > 35000:  # 35-55km：极高概率
+                base_prob = 0.92
+            else:  # < 35km：最佳探测区
+                base_prob = 0.95
 
-            # 雷达截面积因子（F-16约5m²，标准参考目标）
+            # 雷达截面积因子（F-16约5m²）
             rcs_factor = min(1.0, math.log10(5.0 + 1) / 2.0)
 
-            # 角度因子 - N001VE是机械扫描雷达，会360度扫描
-            # 简化处理：在扫描周期内所有方向都会被扫描到，角度因子设为较高值
-            angle_factor = 0.9
+            # 角度因子 - N001VE机械扫描（±70°），简化为固定值
+            # 注：bearing是绝对方位角，实际应用中机械扫描能覆盖所有方向
+            angle_factor = 0.90
 
-            # 仰角因子 - 低仰角性能更好（机械扫描雷达特性）
-            elevation_factor = max(0.75, 1.0 - abs(elevation) / 50.0)
+            # 仰角因子 - 低仰角性能更好（提高最小值）
+            elevation_factor = max(0.8, 1.0 - abs(elevation) / 45.0)
 
-            # 多普勒因子 - 脉冲多普勒雷达对高速目标敏感
-            doppler_factor = min(1.15, 1.0 + velocity / 600.0)
+            # 多普勒因子 - 高速目标更容易探测
+            doppler_factor = min(1.2, 1.0 + velocity / 500.0)
 
-            # 大气衰减因子（X波段雷达特性）
-            atmospheric_factor = max(0.75, 1.0 - (distance / self.n001ve_radar.max_detection_range) *
+            # 大气衰减因子（减少衰减影响）
+            atmospheric_factor = max(0.8, 1.0 - (distance / self.n001ve_radar.max_detection_range) *
                                    self.n001ve_radar.atmospheric_absorption * 500)
 
-            # 天气影响（降雨和云层对X波段影响明显）
+            # 天气影响
             weather_factor = self.environmental_conditions["weather_factor"]
 
-            # 综合探测概率（考虑N001VE实际性能）
+            # 综合探测概率
             total_prob = (base_prob * rcs_factor * angle_factor * elevation_factor *
                          doppler_factor * atmospheric_factor * weather_factor)
 
@@ -1211,16 +1197,23 @@ RadarManager = UnifiedRadarManager
 get_radar_manager = get_unified_radar_manager
 
 def get_friendly_radar_states() -> Dict[str, str]:
-    """获取我方雷达状态"""
+    """获取我方雷达状态（向后兼容）"""
     radar_manager = get_radar_manager()
-    return radar_manager.get_friendly_radar_states()
+    return {agent_id: status.value for agent_id, status in radar_manager.friendly_radar_states.items()}
 
 def get_enemy_radar_states() -> Dict[str, str]:
-    """获取敌方雷达状态"""
+    """获取敌方雷达状态（向后兼容）"""
     radar_manager = get_radar_manager()
-    return radar_manager.get_enemy_radar_states()
+    return {agent_id: status.value for agent_id, status in radar_manager.enemy_radar_states.items()}
 
 def get_enemy_radar_data() -> Dict[str, Dict[str, Any]]:
-    """获取敌方雷达数据"""
+    """获取敌方雷达数据（向后兼容）"""
     radar_manager = get_radar_manager()
-    return radar_manager.get_enemy_radar_data() 
+    result = {}
+    for agent_id, targets in radar_manager.enemy_radar_targets.items():
+        result[agent_id] = {
+            'status': radar_manager.enemy_radar_states.get(agent_id, RadarStatus.SEARCH).value,
+            'targets': {tid: {'distance': t.distance, 'bearing': t.bearing} for tid, t in targets.items()},
+            'lock_target': radar_manager.enemy_lock_targets.get(agent_id, None)
+        }
+    return result 
