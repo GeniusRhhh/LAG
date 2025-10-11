@@ -68,39 +68,91 @@ class RadarTarget:
 
 
 @dataclass
-class N001VERadarModel:
-    """N001VE雷达模型参数 - 真实物理特性"""
-    # 基本性能参数
-    max_detection_range: float = 120000    # 最大探测距离 120km
-    max_track_range: float = 80000         # 最大跟踪距离 80km
-    max_lock_range: float = 60000          # 最大锁定距离 60km
-    max_simultaneous_tracks: int = 8       # 同时跟踪目标数
+class APG68RadarModel:
+    """AN/APG-68(V)9雷达模型参数 - F-16C Block 50/52真实雷达规格"""
+    # 基本性能参数 - 基于真实AN/APG-68(V)9技术规格
+    max_detection_range: float = 105000    # 最大探测距离 105km (对5m² RCS战斗机目标)
+    max_detection_range_large: float = 165000  # 对大型目标(轰炸机)探测距离 165km
+    max_track_range: float = 85000         # 最大跟踪距离 85km (战斗机目标)
+    max_lock_range: float = 70000          # 最大锁定距离 70km (STT模式)
+    max_simultaneous_tracks: int = 10      # 同时跟踪目标数 10个 (TWS模式)
+    max_simultaneous_engagement: int = 2   # 同时攻击目标数 2个 (支持AIM-120)
 
-    # 波束参数
-    search_beam_width: float = 60.0        # 搜索波束宽度 (度)
-    track_beam_width: float = 3.0          # 跟踪波束宽度 (度)
-    lock_beam_width: float = 1.0           # 锁定波束宽度 (度)
+    # 波束参数 - 平板裂缝阵列天线特性
+    search_beam_width: float = 120.0       # 搜索波束宽度 ±120° (宽扫描范围)
+    search_elevation_coverage: float = 60.0  # 搜索仰角覆盖 ±60°
+    track_beam_width: float = 2.5          # 跟踪波束宽度 2.5° (窄波束)
+    lock_beam_width: float = 0.8           # 锁定波束宽度 0.8° (高精度)
 
-    # 时间参数
-    scan_period: float = 1.0               # 扫描周期 (秒) - 提高扫描频率
-    lock_update_rate: float = 0.1          # 锁定更新率 (秒)
-    track_update_rate: float = 0.5         # 跟踪更新率 (秒)
+    # 时间参数 - 平板裂缝阵列（准相控阵）
+    scan_period: float = 2.0               # 扫描周期 2秒 (比机械扫描快)
+    lock_update_rate: float = 0.04         # 锁定更新率 0.04秒 (25Hz)
+    track_update_rate: float = 0.3         # 跟踪更新率 0.3秒 (TWS模式)
 
-    # 性能参数
-    detection_probability_base: float = 0.9 # 基础探测概率
-    track_loss_probability: float = 0.01   # 跟踪丢失概率（降低）
-    lock_loss_probability: float = 0.005   # 锁定丢失概率（降低）
+    # 性能参数 - 90年代末/2000年代技术水平
+    detection_probability_base: float = 0.90  # 基础探测概率 (优秀性能)
+    track_loss_probability: float = 0.015  # 跟踪丢失概率 (低丢失率)
+    lock_loss_probability: float = 0.008   # 锁定丢失概率 (STT稳定)
 
-    # 电子战参数
-    jamming_resistance: float = 0.7        # 抗干扰能力
-    eccm_capability: float = 0.8           # 电子反对抗能力
-    frequency_agility: bool = True         # 频率捷变能力
-    sidelobe_suppression: float = 0.9      # 旁瓣抑制能力
+    # 电子战参数 - 第四代雷达抗干扰能力
+    jamming_resistance: float = 0.75       # 抗干扰能力 (强于N001VE)
+    eccm_capability: float = 0.82          # 电子反对抗能力 (频率捷变+PRF调制)
+    frequency_agility: bool = True         # 频率捷变能力 (快速跳频)
+    sidelobe_suppression: float = 0.90     # 旁瓣抑制能力 (优秀)
+    lpi_capability: float = 0.65           # 低截获概率能力 (部分LPI特性)
+
+    # 多模式能力
+    has_look_down_shoot_down: bool = True  # 下视下射能力 (优秀的地杂波抑制)
+    has_synthetic_aperture: bool = True    # 合成孔径雷达模式 (对地)
+    has_ground_moving_target: bool = True  # 地面移动目标指示 (GMTI)
+    has_sea_surface_search: bool = True    # 海面搜索模式
 
     # 环境适应参数
-    weather_degradation: float = 0.1       # 天气影响因子
-    terrain_masking_threshold: float = 500.0 # 地形遮蔽阈值 (m)
-    atmospheric_absorption: float = 0.001   # 大气吸收系数
+    weather_degradation: float = 0.08      # 天气影响因子 (优于N001VE)
+    terrain_masking_threshold: float = 300.0  # 地形遮蔽阈值 300m
+    atmospheric_absorption: float = 0.0008  # 大气吸收系数 (X波段，优化设计)
+    
+    # 目标分辨率
+    range_resolution: float = 30.0         # 距离分辨率 30m (高分辨率)
+    angular_resolution: float = 1.5        # 角度分辨率 1.5° (优秀)
+    velocity_resolution: float = 5.0       # 速度分辨率 5 m/s
+
+
+@dataclass
+class N001VERadarModel:
+    """N001VE雷达模型参数 - 真实物理特性 (基于Su-27/Su-30MKK实际雷达规格)"""
+    # 基本性能参数 - 基于真实N001VE技术规格
+    max_detection_range: float = 90000     # 最大探测距离 90km (对5m² RCS战斗机目标)
+    max_track_range: float = 70000         # 最大跟踪距离 70km (官方数据)
+    max_lock_range: float = 45000          # 最大锁定距离 45km (稳定锁定)
+    max_simultaneous_tracks: int = 10      # 同时跟踪目标数 10个 (官方规格)
+    max_simultaneous_engagement: int = 2   # 同时攻击目标数 2个 (TWS模式)
+
+    # 波束参数 - 机械扫描雷达特性
+    search_beam_width: float = 70.0        # 搜索波束宽度 ±70° (总140°扫描范围)
+    track_beam_width: float = 3.0          # 跟踪波束宽度 3° (窄波束跟踪)
+    lock_beam_width: float = 1.0           # 锁定波束宽度 1° (精确锁定)
+
+    # 时间参数 - 机械扫描限制
+    scan_period: float = 3.5               # 扫描周期 3.5秒 (机械扫描雷达，非相控阵)
+    lock_update_rate: float = 0.05         # 锁定更新率 0.05秒 (连续波照射)
+    track_update_rate: float = 0.5         # 跟踪更新率 0.5秒 (TWS模式)
+
+    # 性能参数 - 90年代雷达技术水平
+    detection_probability_base: float = 0.85 # 基础探测概率 (考虑杂波和干扰)
+    track_loss_probability: float = 0.02   # 跟踪丢失概率 (机动目标)
+    lock_loss_probability: float = 0.01    # 锁定丢失概率 (STT模式)
+
+    # 电子战参数 - 第三代雷达抗干扰能力
+    jamming_resistance: float = 0.6        # 抗干扰能力 (较老技术，中等水平)
+    eccm_capability: float = 0.7           # 电子反对抗能力 (有频率捷变等手段)
+    frequency_agility: bool = True         # 频率捷变能力 (支持跳频)
+    sidelobe_suppression: float = 0.85     # 旁瓣抑制能力 (中等水平)
+
+    # 环境适应参数
+    weather_degradation: float = 0.1       # 天气影响因子 (降雨/云层衰减)
+    terrain_masking_threshold: float = 500.0 # 地形遮蔽阈值 500m
+    atmospheric_absorption: float = 0.001   # 大气吸收系数 (X波段)
 
 
 class UnifiedRadarManager:
@@ -108,7 +160,7 @@ class UnifiedRadarManager:
 
     def __init__(self):
         """初始化统一雷达管理系统"""
-        # 友方雷达状态 - 保持简单的基础逻辑
+        # 友方雷达状态 - APG-68(V)9功能级建模
         self.friendly_radar_states = {
             "A0100": RadarStatus.SEARCH,
             "A0200": RadarStatus.SEARCH
@@ -120,8 +172,29 @@ class UnifiedRadarManager:
             "B0200": RadarStatus.SEARCH
         }
 
-        # N001VE雷达模型实例
+        # APG-68雷达模型实例 (F-16C)
+        self.apg68_radar = APG68RadarModel()
+        
+        # N001VE雷达模型实例 (Su-27/Su-30)
         self.n001ve_radar = N001VERadarModel()
+
+        # 友方雷达目标跟踪 (APG-68系统)
+        self.friendly_radar_targets = {
+            "A0100": {},
+            "A0200": {}
+        }
+
+        # 友方雷达扫描时间记录
+        self.friendly_scan_times = {
+            "A0100": 0.0,
+            "A0200": 0.0
+        }
+
+        # 友方雷达锁定目标
+        self.friendly_lock_targets = {
+            "A0100": None,
+            "A0200": None
+        }
 
         # 敌方雷达目标跟踪
         self.enemy_radar_targets = {
@@ -141,8 +214,10 @@ class UnifiedRadarManager:
             "B0200": None
         }
 
-        # 电子战状态
+        # 电子战状态 (双方通用)
         self.ecm_states = {
+            "A0100": {"active": False, "type": None, "start_time": 0.0, "duration": 0.0},
+            "A0200": {"active": False, "type": None, "start_time": 0.0, "duration": 0.0},
             "B0100": {"active": False, "type": None, "start_time": 0.0, "duration": 0.0},
             "B0200": {"active": False, "type": None, "start_time": 0.0, "duration": 0.0}
         }
@@ -156,68 +231,301 @@ class UnifiedRadarManager:
             "humidity": 50.0           # 湿度 (%)
         }
 
-        logging.info("📡 统一雷达管理系统初始化完成")
+        logging.info("📡 统一雷达管理系统初始化完成 (APG-68 + N001VE 功能级建模)")
 
-    # ==================== 友方雷达系统方法 ====================
+    # ==================== 友方雷达系统方法 (APG-68功能级建模) ====================
 
     def update_friendly_radar_states(self, env, current_time: float):
-        """更新友方雷达状态 - 保持简单的基础逻辑"""
+        """更新友方雷达状态 - APG-68(V)9功能级建模"""
         for agent_id in self.friendly_radar_states.keys():
-            if agent_id in env.agents and env.agents[agent_id].is_alive:
-                self._update_single_friendly_radar(env, agent_id, current_time)
+            if agent_id not in env.agents:
+                logging.warning(f"⚠️ {agent_id} 不在env.agents中！")
+                continue
+            if not env.agents[agent_id].is_alive:
+                logging.debug(f"💀 {agent_id} 已被摧毁")
+                continue
+            self._update_single_friendly_radar(env, agent_id, current_time)
 
     def _update_single_friendly_radar(self, env, agent_id: str, current_time: float):
-        """更新单个友方雷达状态 - 保持原有的基础逻辑"""
+        """更新单个友方雷达状态 - APG-68(V)9完整功能级建模"""
         try:
-            # 找到最近的敌机
-            target = self._find_closest_enemy_target(env, agent_id)
-            if not target:
-                self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
-                return
+            # 1. 执行雷达扫描（基于扫描周期）
+            should_scan = (current_time - self.friendly_scan_times[agent_id] >= self.apg68_radar.scan_period or 
+                          self.friendly_scan_times[agent_id] == 0.0)
+            if should_scan:
+                logging.debug(f"🔄 {agent_id} 执行雷达扫描 (t={current_time:.1f}s)")
+                self._scan_friendly_radar(env, agent_id, current_time)
+                self.friendly_scan_times[agent_id] = current_time
 
-            distance = self._calculate_distance(env.agents[agent_id], target)
+            # 2. 更新现有目标跟踪
+            self._update_friendly_radar_tracks(env, agent_id, current_time)
 
-            # 根据距离确定雷达状态 - 保持原有的基础逻辑
-            if distance > 90000:  # 90km
-                self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
-            elif distance > 81000:  # 81km
-                self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
-            elif distance > 45000:  # 45km
-                self.friendly_radar_states[agent_id] = RadarStatus.TRACK
-            else:  # < 45km
-                self.friendly_radar_states[agent_id] = RadarStatus.LOCK
+            # 3. 更新雷达工作模式
+            self._update_friendly_radar_mode(env, agent_id, current_time)
+
+            # 4. 处理电子战影响
+            self._process_friendly_ecm(env, agent_id, current_time)
 
         except Exception as e:
-            logging.error(f"❌ {agent_id} 友方雷达状态更新错误: {e}")
+            logging.error(f"❌ {agent_id} APG-68雷达更新错误: {e}")
             self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
+
+    def _scan_friendly_radar(self, env, agent_id: str, current_time: float):
+        """APG-68雷达扫描 - 真实探测模型"""
+        try:
+            agent = env.agents[agent_id]
+            
+            # 获取敌方目标列表
+            enemy_ids = ["B0100", "B0200"] if agent_id.startswith("A") else ["A0100", "A0200"]
+            
+            logging.debug(f"🔍 {agent_id} APG-68开始扫描，目标列表: {enemy_ids}")
+
+            for target_id in enemy_ids:
+                if target_id not in env.agents or not env.agents[target_id].is_alive:
+                    # 移除已摧毁的目标
+                    if target_id in self.friendly_radar_targets[agent_id]:
+                        del self.friendly_radar_targets[agent_id][target_id]
+                    continue
+
+                target = env.agents[target_id]
+                
+                # 计算几何参数
+                distance = self._calculate_distance(agent, target)
+                bearing = self._calculate_bearing(agent, target)
+                elevation = self._calculate_elevation(agent, target)
+                velocity = self._calculate_target_velocity(env, target_id)
+                
+                logging.debug(f"🎯 {agent_id} 扫描目标 {target_id}: 距离={distance/1000:.1f}km, 方位={bearing:.1f}°, 仰角={elevation:.1f}°")
+
+                # 检查探测距离
+                if distance > self.apg68_radar.max_detection_range:
+                    # 移除超出距离的目标
+                    if target_id in self.friendly_radar_targets[agent_id]:
+                        del self.friendly_radar_targets[agent_id][target_id]
+                    continue
+
+                # 计算APG-68真实探测概率
+                detection_prob = self._calculate_apg68_detection_probability(
+                    distance, bearing, elevation, velocity, current_time)
+                
+                logging.debug(f"📊 {agent_id} 探测概率: {detection_prob:.3f}")
+
+                # 探测成功
+                if random.random() < detection_prob:
+                    if target_id not in self.friendly_radar_targets[agent_id]:
+                        # 检查是否达到最大跟踪目标数（APG-68限制：10个）
+                        current_tracks = len(self.friendly_radar_targets[agent_id])
+                        if current_tracks >= self.apg68_radar.max_simultaneous_tracks:
+                            # 找到最远的目标并移除
+                            farthest_target_id = max(
+                                self.friendly_radar_targets[agent_id].items(),
+                                key=lambda x: x[1].distance
+                            )[0]
+                            farthest_distance = self.friendly_radar_targets[agent_id][farthest_target_id].distance
+                            
+                            # 只有新目标更近时才替换
+                            if distance < farthest_distance:
+                                del self.friendly_radar_targets[agent_id][farthest_target_id]
+                                logging.debug(f"📡 {agent_id} 达到最大跟踪数({self.apg68_radar.max_simultaneous_tracks})，"
+                                            f"移除最远目标 {farthest_target_id}")
+                            else:
+                                continue
+                        
+                        # 创建新目标
+                        self.friendly_radar_targets[agent_id][target_id] = RadarTarget(
+                            target_id=target_id,
+                            distance=distance,
+                            bearing=bearing,
+                            elevation=elevation,
+                            velocity=velocity,
+                            detection_probability=detection_prob,
+                            last_update=current_time,
+                            doppler_shift=self._calculate_doppler_shift(velocity, bearing),
+                            snr=self._calculate_snr(distance, bearing),
+                            multipath_factor=self._calculate_multipath_factor(distance, elevation),
+                            atmospheric_loss=self._calculate_atmospheric_loss(distance)
+                        )
+                        logging.debug(f"🎯 {agent_id} APG-68雷达探测到新目标: {target_id} 距离={distance/1000:.1f}km")
+                    else:
+                        # 更新现有目标
+                        target_obj = self.friendly_radar_targets[agent_id][target_id]
+                        target_obj.distance = distance
+                        target_obj.bearing = bearing
+                        target_obj.elevation = elevation
+                        target_obj.velocity = velocity
+                        target_obj.detection_probability = detection_prob
+                        target_obj.last_update = current_time
+                        target_obj.doppler_shift = self._calculate_doppler_shift(velocity, bearing)
+                        target_obj.snr = self._calculate_snr(distance, bearing)
+                        target_obj.multipath_factor = self._calculate_multipath_factor(distance, elevation)
+                        target_obj.atmospheric_loss = self._calculate_atmospheric_loss(distance)
+                else:
+                    # 探测失败，移除目标
+                    if target_id in self.friendly_radar_targets[agent_id]:
+                        logging.debug(f"📡 {agent_id} APG-68雷达失去目标: {target_id} 距离={distance/1000:.1f}km")
+                        del self.friendly_radar_targets[agent_id][target_id]
+
+        except Exception as e:
+            logging.error(f"❌ {agent_id} APG-68雷达扫描错误: {e}")
+
+    def _calculate_apg68_detection_probability(self, distance: float, bearing: float,
+                                              elevation: float, velocity: float, current_time: float) -> float:
+        """计算真实的APG-68雷达探测概率 - 基于真实物理模型"""
+        try:
+            # 基础距离衰减 - APG-68性能优于N001VE
+            if distance > self.apg68_radar.max_detection_range:  # > 105km
+                return 0.0
+            elif distance > 95000:  # 95-105km：边缘探测
+                base_prob = 0.45
+            elif distance > 85000:  # 85-95km：接近跟踪距离
+                base_prob = 0.75
+            elif distance > 60000:  # 60-85km：高概率区域
+                base_prob = 0.88
+            elif distance > 35000:  # 35-60km：最佳探测区域
+                base_prob = 0.93
+            else:  # < 35km：近距离高概率
+                base_prob = 0.96
+
+            # 雷达截面积因子（Su-27约10-15m²，比F-16大）
+            rcs_factor = min(1.0, math.log10(12.0 + 1) / 2.0)
+
+            # 角度因子 - APG-68有±120°宽扫描范围，实际可360度扫描
+            # 简化处理：在扫描周期内所有方向都会被扫描到，角度因子设为高值
+            angle_factor = 0.92
+
+            # 仰角因子 - APG-68优秀的下视能力
+            elevation_factor = max(0.80, 1.0 - abs(elevation) / 60.0)
+
+            # 多普勒因子 - APG-68优秀的多普勒处理能力
+            doppler_factor = min(1.20, 1.0 + velocity / 550.0)
+
+            # 大气衰减因子（APG-68优化的X波段设计）
+            atmospheric_factor = max(0.80, 1.0 - (distance / self.apg68_radar.max_detection_range) *
+                                   self.apg68_radar.atmospheric_absorption * 500)
+
+            # 天气影响（APG-68对恶劣天气适应性更好）
+            weather_factor = self.environmental_conditions["weather_factor"]
+
+            # 下视下射能力加成（APG-68强项）
+            look_down_bonus = 1.1 if elevation < -10.0 and self.apg68_radar.has_look_down_shoot_down else 1.0
+
+            # 综合探测概率（APG-68总体性能优于N001VE）
+            total_prob = (base_prob * rcs_factor * angle_factor * elevation_factor *
+                         doppler_factor * atmospheric_factor * weather_factor * look_down_bonus)
+
+            return min(1.0, max(0.0, total_prob))
+
+        except Exception as e:
+            logging.error(f"❌ APG-68探测概率计算错误: {e}")
+            return 0.5
+
+    def _update_friendly_radar_tracks(self, env, agent_id: str, current_time: float):
+        """更新友方雷达目标跟踪 - APG-68 TWS模式"""
+        try:
+            # 清理过期目标
+            expired_targets = []
+            for target_id, target in self.friendly_radar_targets[agent_id].items():
+                if current_time - target.last_update > 8.0:  # 8秒未更新（APG-68数据链更新快）
+                    expired_targets.append(target_id)
+
+            for target_id in expired_targets:
+                del self.friendly_radar_targets[agent_id][target_id]
+                logging.debug(f"📡 {agent_id} 清理过期目标: {target_id}")
+
+            # 更新跟踪质量
+            for target_id, target in self.friendly_radar_targets[agent_id].items():
+                # 基于距离和时间更新跟踪质量（APG-68跟踪更稳定）
+                time_factor = min(1.0, (current_time - target.last_update) / 4.0)
+                distance_factor = max(0.15, 1.0 - target.distance / self.apg68_radar.max_track_range)
+                
+                # APG-68跟踪质量更新
+                target.detection_probability *= (1.0 - time_factor * self.apg68_radar.track_loss_probability)
+
+                # 移除跟踪丢失的目标
+                if random.random() < self.apg68_radar.track_loss_probability * time_factor:
+                    expired_targets.append(target_id)
+
+            # 移除跟踪丢失的目标
+            for target_id in expired_targets:
+                if target_id in self.friendly_radar_targets[agent_id]:
+                    del self.friendly_radar_targets[agent_id][target_id]
+                    logging.debug(f"📡 {agent_id} 跟踪丢失目标: {target_id}")
+
+        except Exception as e:
+            logging.error(f"❌ {agent_id} APG-68跟踪更新错误: {e}")
+
+    def _update_friendly_radar_mode(self, env, agent_id: str, current_time: float):
+        """更新友方雷达工作模式 - APG-68多模式"""
+        try:
+            targets = self.friendly_radar_targets[agent_id]
+
+            if not targets:
+                self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
+                self.friendly_lock_targets[agent_id] = None
+                return
+
+            # 找到最近的威胁目标
+            closest_target = min(targets.items(), key=lambda x: x[1].distance)
+            target_id, target_data = closest_target
+
+            # 基于距离决定雷达模式
+            if target_data.distance <= self.apg68_radar.max_lock_range:
+                # STT锁定模式
+                self.friendly_radar_states[agent_id] = RadarStatus.LOCK
+                
+                # 锁定逻辑
+                if self.friendly_lock_targets[agent_id] != target_id:
+                    self.friendly_lock_targets[agent_id] = target_id
+                    logging.info(f"🔒 {agent_id} APG-68锁定目标: {target_id} 距离={target_data.distance/1000:.1f}km")
+                
+                # 锁定丢失检查
+                if random.random() < self.apg68_radar.lock_loss_probability:
+                    self.friendly_radar_states[agent_id] = RadarStatus.TRACK
+                    self.friendly_lock_targets[agent_id] = None
+                    logging.debug(f"📡 {agent_id} 锁定丢失: {target_id}")
+
+            elif target_data.distance <= self.apg68_radar.max_track_range:
+                # TWS跟踪模式（可跟踪多目标）
+                self.friendly_radar_states[agent_id] = RadarStatus.TRACK
+                self.friendly_lock_targets[agent_id] = None
+                
+            else:
+                # 搜索模式
+                self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
+                self.friendly_lock_targets[agent_id] = None
+
+        except Exception as e:
+            logging.error(f"❌ {agent_id} APG-68模式更新错误: {e}")
+            self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
+
+    def _process_friendly_ecm(self, env, agent_id: str, current_time: float):
+        """处理友方电子对抗 - APG-68 ECCM能力"""
+        try:
+            ecm_state = self.ecm_states.get(agent_id, {})
+            
+            if ecm_state.get("active", False):
+                # 检查ECM是否过期
+                if current_time - ecm_state["start_time"] > ecm_state["duration"]:
+                    ecm_state["active"] = False
+                    ecm_state["type"] = None
+                    logging.debug(f"🛡️ {agent_id} ECM结束")
+                else:
+                    # ECM激活期间，APG-68有更强的抗干扰能力
+                    for target_id in list(self.friendly_radar_targets[agent_id].keys()):
+                        target = self.friendly_radar_targets[agent_id][target_id]
+                        # APG-68 ECCM能力更强
+                        if ecm_state["type"] == ECMType.NOISE_JAMMING:
+                            target.detection_probability *= 0.5  # APG-68抗干扰能力强
+                        elif ecm_state["type"] == ECMType.DECEPTION_JAMMING:
+                            target.detection_probability *= 0.6
+
+        except Exception as e:
+            logging.error(f"❌ {agent_id} ECM处理错误: {e}")
 
     def get_friendly_radar_state(self, agent_id: str) -> RadarStatus:
         """获取友方雷达状态"""
         return self.friendly_radar_states.get(agent_id, RadarStatus.SEARCH)
-
-    def _find_closest_enemy_target(self, env, agent_id: str):
-        """找到最近的敌方目标"""
-        try:
-            agent = env.agents[agent_id]
-            min_distance = float('inf')
-            closest_target = None
-
-            # 搜索敌方目标
-            enemy_ids = ["B0100", "B0200"] if agent_id.startswith("A") else ["A0100", "A0200"]
-
-            for enemy_id in enemy_ids:
-                if enemy_id in env.agents and env.agents[enemy_id].is_alive:
-                    distance = self._calculate_distance(agent, env.agents[enemy_id])
-                    if distance < min_distance:
-                        min_distance = distance
-                        closest_target = env.agents[enemy_id]
-
-            return closest_target
-
-        except Exception as e:
-            logging.error(f"❌ {agent_id} 寻找最近目标错误: {e}")
-            return None
-
+    
     def _calculate_distance(self, agent1, agent2) -> float:
         """计算两个智能体之间的距离"""
         try:
@@ -227,12 +535,36 @@ class UnifiedRadarManager:
         except Exception as e:
             logging.error(f"❌ 距离计算错误: {e}")
             return float('inf')
-    
-    def update_friendly_radar_states(self, env, current_time: float):
-        """更新我方雷达状态 - 基础的状态转换器"""
-        for agent_id in self.friendly_radar_states.keys():
-            if agent_id in env.agents and env.agents[agent_id].is_alive:
-                self._update_single_friendly_radar(env, agent_id, current_time)
+
+    def _calculate_bearing(self, agent, target) -> float:
+        """计算方位角"""
+        try:
+            agent_pos = np.array(agent.get_position())
+            target_pos = np.array(target.get_position())
+
+            dx = target_pos[0] - agent_pos[0]
+            dy = target_pos[1] - agent_pos[1]
+
+            bearing = math.degrees(math.atan2(dx, dy))
+            return (bearing + 360) % 360  # 标准化到0-360度
+        except Exception as e:
+            logging.error(f"❌ 方位角计算错误: {e}")
+            return 0.0
+
+    def _calculate_elevation(self, agent, target) -> float:
+        """计算仰角"""
+        try:
+            agent_pos = np.array(agent.get_position())
+            target_pos = np.array(target.get_position())
+
+            horizontal_distance = np.linalg.norm(agent_pos[:2] - target_pos[:2])
+            height_diff = target_pos[2] - agent_pos[2]
+
+            elevation = math.degrees(math.atan2(height_diff, horizontal_distance))
+            return elevation
+        except Exception as e:
+            logging.error(f"❌ 仰角计算错误: {e}")
+            return 0.0
     
     # ==================== 敌方雷达系统方法 ====================
 
@@ -273,10 +605,12 @@ class UnifiedRadarManager:
         """更新敌方雷达扫描 - 真实物理建模"""
         try:
             # 检查扫描周期
-            if current_time - self.enemy_scan_times[agent_id] < self.n001ve_radar.scan_period:
+            if current_time - self.enemy_scan_times[agent_id] < self.n001ve_radar.scan_period and self.enemy_scan_times[agent_id] != 0.0:
                 return
 
             self.enemy_scan_times[agent_id] = current_time
+            
+            logging.debug(f"🔍 {agent_id} N001VE开始扫描")
 
             # 扫描友方目标
             friendly_agents = ["A0100", "A0200"]
@@ -285,10 +619,14 @@ class UnifiedRadarManager:
                     continue
 
                 # 计算目标参数
-                distance = self._calculate_distance(env.agents[agent_id], env.agents[target_id])
-                bearing = self._calculate_bearing(env, agent_id, target_id)
+                agent = env.agents[agent_id]
+                target = env.agents[target_id]
+                distance = self._calculate_distance(agent, target)
+                bearing = self._calculate_bearing(agent, target)
+                elevation = self._calculate_elevation(agent, target)
                 velocity = self._calculate_target_velocity(env, target_id)
-                elevation = self._calculate_elevation(env, agent_id, target_id)
+                
+                logging.debug(f"🎯 {agent_id} 扫描目标 {target_id}: 距离={distance/1000:.1f}km, 方位={bearing:.1f}°")
 
                 # 检查探测距离
                 if distance > self.n001ve_radar.max_detection_range:
@@ -300,6 +638,8 @@ class UnifiedRadarManager:
                 # 计算真实探测概率
                 detection_prob = self._calculate_realistic_detection_probability(
                     distance, bearing, elevation, velocity, current_time)
+                
+                logging.debug(f"📊 {agent_id} N001VE探测概率: {detection_prob:.3f}")
 
                 # 探测成功
                 if random.random() < detection_prob:
@@ -341,35 +681,6 @@ class UnifiedRadarManager:
         except Exception as e:
             logging.error(f"❌ {agent_id} 敌方雷达扫描错误: {e}")
     
-    def _calculate_bearing(self, env, agent_id: str, target_id: str) -> float:
-        """计算方位角"""
-        try:
-            agent_pos = np.array(env.agents[agent_id].get_position())
-            target_pos = np.array(env.agents[target_id].get_position())
-
-            dx = target_pos[0] - agent_pos[0]
-            dy = target_pos[1] - agent_pos[1]
-
-            bearing = math.degrees(math.atan2(dx, dy))
-            return (bearing + 360) % 360  # 标准化到0-360度
-        except Exception as e:
-            logging.error(f"❌ 方位角计算错误: {e}")
-            return 0.0
-
-    def _calculate_elevation(self, env, agent_id: str, target_id: str) -> float:
-        """计算仰角"""
-        try:
-            agent_pos = np.array(env.agents[agent_id].get_position())
-            target_pos = np.array(env.agents[target_id].get_position())
-
-            horizontal_distance = np.linalg.norm(agent_pos[:2] - target_pos[:2])
-            height_diff = target_pos[2] - agent_pos[2]
-
-            elevation = math.degrees(math.atan2(height_diff, horizontal_distance))
-            return elevation
-        except Exception as e:
-            logging.error(f"❌ 仰角计算错误: {e}")
-            return 0.0
 
     def _calculate_target_velocity(self, env, target_id: str) -> float:
         """计算目标速度"""
@@ -383,42 +694,43 @@ class UnifiedRadarManager:
 
     def _calculate_realistic_detection_probability(self, distance: float, bearing: float,
                                                  elevation: float, velocity: float, current_time: float) -> float:
-        """计算真实的N001VE雷达探测概率 - 基于真实物理模型"""
+        """计算真实的N001VE雷达探测概率 - 基于真实物理模型 (90km最大探测距离)"""
         try:
-            # 基础距离衰减 - 基于雷达方程但调整为实用值
-            if distance > self.n001ve_radar.max_detection_range:
+            # 基础距离衰减 - 基于真实N001VE雷达方程
+            if distance > self.n001ve_radar.max_detection_range:  # > 90km
                 return 0.0
-            elif distance > 100000:  # 100-120km：中等概率
-                base_prob = 0.5
-            elif distance > 80000:  # 80-100km：高概率
-                base_prob = 0.8
-            elif distance > 60000:  # 60-80km：极高概率
-                base_prob = 0.9
-            elif distance > 40000:  # 40-60km：高概率
-                base_prob = 0.9
-            else:  # < 40km：极高概率
-                base_prob = 0.95
+            elif distance > 80000:  # 80-90km：边缘探测
+                base_prob = 0.65
+            elif distance > 70000:  # 70-80km：接近跟踪距离
+                base_prob = 0.80
+            elif distance > 50000:  # 50-70km：高概率区域
+                base_prob = 0.88
+            elif distance > 30000:  # 30-50km：最佳探测区域
+                base_prob = 0.93
+            else:  # < 30km：近距离高概率
+                base_prob = 0.96
 
-            # 雷达截面积因子（F-16约5m²）
+            # 雷达截面积因子（F-16约5m²，标准参考目标）
             rcs_factor = min(1.0, math.log10(5.0 + 1) / 2.0)
 
-            # 角度因子 - 基于波束宽度（提高最小值）
-            angle_factor = max(0.7, 1.0 - abs(bearing) / (self.n001ve_radar.search_beam_width / 2))
+            # 角度因子 - N001VE是机械扫描雷达，会360度扫描
+            # 简化处理：在扫描周期内所有方向都会被扫描到，角度因子设为较高值
+            angle_factor = 0.9
 
-            # 仰角因子 - 低仰角性能更好（提高最小值）
-            elevation_factor = max(0.8, 1.0 - abs(elevation) / 45.0)
+            # 仰角因子 - 低仰角性能更好（机械扫描雷达特性）
+            elevation_factor = max(0.75, 1.0 - abs(elevation) / 50.0)
 
-            # 多普勒因子 - 高速目标更容易探测
-            doppler_factor = min(1.2, 1.0 + velocity / 500.0)
+            # 多普勒因子 - 脉冲多普勒雷达对高速目标敏感
+            doppler_factor = min(1.15, 1.0 + velocity / 600.0)
 
-            # 大气衰减因子（减少衰减影响）
-            atmospheric_factor = max(0.8, 1.0 - (distance / self.n001ve_radar.max_detection_range) *
+            # 大气衰减因子（X波段雷达特性）
+            atmospheric_factor = max(0.75, 1.0 - (distance / self.n001ve_radar.max_detection_range) *
                                    self.n001ve_radar.atmospheric_absorption * 500)
 
-            # 天气影响
+            # 天气影响（降雨和云层对X波段影响明显）
             weather_factor = self.environmental_conditions["weather_factor"]
 
-            # 综合探测概率
+            # 综合探测概率（考虑N001VE实际性能）
             total_prob = (base_prob * rcs_factor * angle_factor * elevation_factor *
                          doppler_factor * atmospheric_factor * weather_factor)
 
@@ -663,12 +975,15 @@ class UnifiedRadarManager:
         logging.debug(f"📡 环境条件已更新: 天气因子={weather_factor}, 地形高度={terrain_height}m")
 
     def get_radar_performance_summary(self) -> Dict[str, Any]:
-        """获取雷达性能摘要"""
+        """获取雷达性能摘要 - 包含APG-68和N001VE完整信息"""
         summary = {
             "friendly_radars": {
                 agent_id: {
                     "status": status.value,
-                    "type": "AN/APG-68(V)9"
+                    "type": "AN/APG-68(V)9",
+                    "targets_tracked": len(self.friendly_radar_targets.get(agent_id, {})),
+                    "lock_target": self.friendly_lock_targets.get(agent_id, None),
+                    "ecm_active": self.ecm_states.get(agent_id, {}).get("active", False)
                 }
                 for agent_id, status in self.friendly_radar_states.items()
             },
@@ -682,42 +997,80 @@ class UnifiedRadarManager:
                 }
                 for agent_id, status in self.enemy_radar_states.items()
             },
+            "apg68_specs": {
+                "max_detection_range_km": self.apg68_radar.max_detection_range / 1000,
+                "max_track_range_km": self.apg68_radar.max_track_range / 1000,
+                "max_lock_range_km": self.apg68_radar.max_lock_range / 1000,
+                "max_simultaneous_tracks": self.apg68_radar.max_simultaneous_tracks,
+                "max_simultaneous_engagement": self.apg68_radar.max_simultaneous_engagement,
+                "scan_period_s": self.apg68_radar.scan_period,
+                "jamming_resistance": self.apg68_radar.jamming_resistance,
+                "has_look_down_shoot_down": self.apg68_radar.has_look_down_shoot_down
+            },
             "n001ve_specs": {
                 "max_detection_range_km": self.n001ve_radar.max_detection_range / 1000,
                 "max_track_range_km": self.n001ve_radar.max_track_range / 1000,
                 "max_lock_range_km": self.n001ve_radar.max_lock_range / 1000,
                 "max_simultaneous_tracks": self.n001ve_radar.max_simultaneous_tracks,
+                "max_simultaneous_engagement": self.n001ve_radar.max_simultaneous_engagement,
+                "scan_period_s": self.n001ve_radar.scan_period,
                 "jamming_resistance": self.n001ve_radar.jamming_resistance
             }
         }
         return summary
 
     def record_radar_data(self, env, current_time: float) -> List[Dict[str, Any]]:
-        """记录雷达数据到CSV格式 - 兼容性方法"""
+        """记录雷达数据到CSV格式 - APG-68和N001VE功能级数据"""
         radar_data = []
 
         try:
-            # 记录友方雷达数据 - 基础状态
+            # 记录友方雷达数据 - APG-68(V)9详细数据
             for agent_id, radar_state in self.friendly_radar_states.items():
                 if hasattr(env, 'agents') and agent_id in env.agents and env.agents[agent_id].is_alive:
-                    # 找到目标
-                    target_id = self._find_closest_target_id(env, agent_id)
-                    target_distance = self._get_target_distance(env, agent_id, target_id) if target_id else 0.0
+                    # 获取APG-68雷达目标信息
+                    targets = self.friendly_radar_targets.get(agent_id, {})
+                    lock_target = self.friendly_lock_targets.get(agent_id, None)
 
-                    radar_data.append({
-                        'Time_s': current_time,
-                        'Agent_ID': agent_id,
-                        'Radar_Type': 'AN/APG-68(V)9',
-                        'Status': radar_state.value,
-                        'Target_ID': target_id or 'None',
-                        'Target_Distance_km': target_distance / 1000.0,
-                        'Side': 'Friendly'
-                    })
+                    if targets:
+                        # 记录每个目标的雷达数据
+                        for target_id, target in targets.items():
+                            radar_data.append({
+                                'Time_s': current_time,
+                                'Agent_ID': agent_id,
+                                'Radar_Type': 'AN/APG-68(V)9',
+                                'Status': radar_state.value,
+                                'Target_ID': target_id,
+                                'Target_Distance_km': target.distance / 1000.0,
+                                'SNR_dB': target.snr,
+                                'Doppler_Shift_m_s': target.doppler_shift,
+                                'Lock_Quality': target.track_quality,
+                                'Detection_Probability': target.detection_probability,
+                                'Beam_Angle_deg': target.bearing,
+                                'Side': 'Friendly',
+                                'Lock_Target': target_id == lock_target
+                            })
+                    else:
+                        # 无目标时记录搜索状态
+                        radar_data.append({
+                            'Time_s': current_time,
+                            'Agent_ID': agent_id,
+                            'Radar_Type': 'AN/APG-68(V)9',
+                            'Status': 'SEARCH',
+                            'Target_ID': 'None',
+                            'Target_Distance_km': 0.0,
+                            'SNR_dB': 0.0,
+                            'Doppler_Shift_m_s': 0.0,
+                            'Lock_Quality': 0.0,
+                            'Detection_Probability': 0.0,
+                            'Beam_Angle_deg': 0.0,
+                            'Side': 'Friendly',
+                            'Lock_Target': False
+                        })
 
-            # 记录敌方雷达数据 - 详细数据
+            # 记录敌方雷达数据 - N001VE详细数据
             for agent_id, radar_state in self.enemy_radar_states.items():
                 if hasattr(env, 'agents') and agent_id in env.agents and env.agents[agent_id].is_alive:
-                    # 获取雷达目标信息
+                    # 获取N001VE雷达目标信息
                     targets = self.enemy_radar_targets.get(agent_id, {})
                     lock_target = self.enemy_lock_targets.get(agent_id, None)
 
@@ -735,7 +1088,7 @@ class UnifiedRadarManager:
                                 'Doppler_Shift_m_s': target.doppler_shift,
                                 'Lock_Quality': target.track_quality,
                                 'Detection_Probability': target.detection_probability,
-                                'Beam_Angle_deg': np.rad2deg(target.bearing),
+                                'Beam_Angle_deg': target.bearing,
                                 'Side': 'Enemy',
                                 'Lock_Target': target_id == lock_target
                             })

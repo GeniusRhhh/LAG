@@ -150,11 +150,12 @@ class UnifiedDataRecorder:
                 from radar_manager import RadarManager
                 radar_manager = RadarManager()
             
-            # 更新雷达状态
-            radar_manager.update_enemy_radar_states(env, current_time)
-            radar_manager.update_friendly_radar_states(env, current_time)
+            # ❌ 不要在这里更新雷达状态！任务的step函数已经更新过了
+            # 重复更新会导致扫描时机错误和状态不一致
+            # radar_manager.update_enemy_radar_states(env, current_time)
+            # radar_manager.update_friendly_radar_states(env, current_time)
             
-            # 获取雷达数据
+            # 获取雷达数据（直接记录已经更新过的状态）
             radar_records = radar_manager.record_radar_data(env, current_time)
             
             # 标准化雷达数据格式

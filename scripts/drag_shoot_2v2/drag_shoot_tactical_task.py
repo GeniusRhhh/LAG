@@ -492,8 +492,32 @@ class DragShootTacticalTask(MultipleCombatTask):
                 self._handle_missile_launch(env, agent_id, current_time)
 
         # 更新统一雷达系统状态
+        if env.current_step % 25 == 0:
+            logging.info(f"⏰ t={current_time:.1f}s (步数{env.current_step}): 更新雷达系统...")
         self.radar_manager.update_friendly_radar_states(env, current_time)
         self.radar_manager.update_enemy_radar_states(env, current_time)
+
+        # A0200诊断信息 - 查找问题
+        if env.current_step == 0 or (env.current_step % 50 == 0 and current_time < 10):
+            logging.info(f"\n{'='*60}")
+            logging.info(f"⏰ A0200诊断 - t={current_time:.1f}s")
+            if "A0200" in env.agents:
+                logging.info(f"✅ A0200存在, is_alive={env.agents['A0200'].is_alive}")
+                if env.agents["A0200"].is_alive:
+                    pos = env.agents["A0200"].get_position()
+                    logging.info(f"   位置: ({pos[0]/1000:.1f}, {pos[1]/1000:.1f}, {pos[2]/1000:.1f}) km")
+                    # 计算与敌方距离
+                    for enemy_id in ["B0100", "B0200"]:
+                        if enemy_id in env.agents and env.agents[enemy_id].is_alive:
+                            enemy_pos = env.agents[enemy_id].get_position()
+                            dist = np.linalg.norm(np.array(pos) - np.array(enemy_pos))
+                            logging.info(f"   距离到{enemy_id}: {dist/1000:.1f}km")
+                    # 检查雷达跟踪
+                    targets = self.radar_manager.friendly_radar_targets.get("A0200", {})
+                    logging.info(f"   雷达跟踪: {len(targets)}个目标 - {list(targets.keys())}")
+            else:
+                logging.warning(f"⚠️ A0200不在env.agents中!")
+            logging.info(f"{'='*60}\n")
 
         # 详细状态信息 - 每5秒打印一次
         if env.current_step % 25 == 0:
