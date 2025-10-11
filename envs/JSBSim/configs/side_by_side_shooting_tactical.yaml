@@ -33,7 +33,7 @@ aircraft_configs: {
     color: Red,
     model: f16,
     init_state: {
-      ic_long_gc_deg: 120.01,     # 己方僚机，右侧1km偏移
+      ic_long_gc_deg: 120.056,     # 己方僚机，右侧1km偏移
       ic_lat_geod_deg: 60.0,      # 基准纬度
       ic_h_sl_ft: 20000,          # 20,000英尺
       ic_psi_true_deg: 0.0,       # 朝北（接敌方向）

@@ -308,12 +308,22 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             return self._use_lowlevel_policy(env, agent_id, 7, 8, 3)  # 平稳飞行
 
     def _update_tactical_phase(self, env):
-        """更新战术阶段 - 照抄drag_shoot_tactical_task的实现"""
+        """更新战术阶段 - 增加调试信息"""
         # 获取主要对抗双方
-        leader_red = env._jsbsims.get("A0100")
-        leader_blue = env._jsbsims.get("B0100")
+        leader_red = None
+        for aid in ["A0100", "A0200"]:
+            if aid in env._jsbsims and env._jsbsims[aid].is_alive:
+                leader_red = env._jsbsims[aid]
+                break
 
-        if not leader_red or not leader_blue or not leader_red.is_alive or not leader_blue.is_alive:
+        leader_blue = None
+        for bid in ["B0100", "B0200"]:
+            if bid in env._jsbsims and env._jsbsims[bid].is_alive:
+                leader_blue = env._jsbsims[bid]
+                break
+
+        if not leader_red or not leader_blue:
+            logging.warning("⚠️ 无法找到存活飞机，停止阶段更新")
             return
 
         # 计算距离
@@ -322,9 +332,42 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         # 确定当前阶段
         new_phase = self._get_phase_by_distance(distance)
 
+        # 🔍 添加详细调试信息（只在阶段即将转换时打印）
+        current_time = env.current_step * env.time_interval
+        # if env.current_step % 25 == 0:  # 每5秒打印一次
+        #     logging.info(f"🔍 [阶段检查] 当前阶段={self.current_phase.value}, 判定阶段={new_phase.value}, 距离={distance/1000:.1f}km, 时间={current_time:.1f}s")
+
         if new_phase != self.current_phase:
-            current_time = env.current_step * env.time_interval
-            logging.info(f"Phase transition: {self.current_phase.value} -> {new_phase.value} "
+            # 🔍 详细调试信息
+            logging.warning(f"🔄 阶段变化检测: {self.current_phase.value} -> {new_phase.value}, 距离={distance/1000:.1f}km, 时间={current_time:.1f}s")
+            
+            # 🔒 关键修复：如果当前已经在DOR_DR返航阶段，不允许切换到其他阶段
+            if self.current_phase == TacticalPhase.DOR_DR:
+                logging.error(f"🔒 已在DOR_DR返航阶段，拒绝切换到{new_phase.value}（距离={distance/1000:.1f}km），保持返航")
+                return  # 直接返回，不切换阶段
+            
+            # 🔒 新增修复：如果当前在TR_DOR阶段且友方已经开始Short Skate返航，也不允许切换
+            if self.current_phase == TacticalPhase.TR_DOR:
+                # 检查是否有友方飞机已经在Short Skate返航中
+                has_friendly_returning = False
+                for aid in ["A0100", "A0200"]:
+                    if aid in self.short_skate_states:
+                        skate_state = self.short_skate_states[aid]
+                        elapsed_time = current_time - skate_state['start_time']
+                        if elapsed_time > 10.0:  # 已经进入返航阶段（10秒后）
+                            has_friendly_returning = True
+                            break
+                
+                if has_friendly_returning:
+                    logging.error(f"🔒 TR_DOR阶段友方已返航，拒绝切换到{new_phase.value}（距离={distance/1000:.1f}km），保持TR_DOR")
+                    return  # 直接返回，不切换阶段
+            
+            # 🧹 修复2：进入DOR_DR返航阶段时，清空Short Skate残留状态
+            if new_phase == TacticalPhase.DOR_DR:
+                logging.info(f"✈️✈️✈️ 进入DOR_DR返航阶段，清空Short Skate残留状态（共{len(self.short_skate_states)}个）")
+                self.short_skate_states.clear()  # 清空所有友方的Short Skate状态
+            
+            logging.info(f"🔄🔄🔄 Phase transition: {self.current_phase.value} -> {new_phase.value} "
                         f"at t={current_time:.1f}s, distance={distance/1000:.1f}km")
             self.current_phase = new_phase
             self.phase_start_time = current_time
@@ -368,6 +411,8 @@ class PincerAttackTacticalTask(MultipleCombatTask):
 
     def _get_friendly_leader_command_indices(self, env, agent_id):
         """友方长机钳形夹击指令"""
+        current_time = env.current_step * env.time_interval
+        
         if self.current_phase == TacticalPhase.NLT_MELD:
             # 阶段1 (90-81km): 长机执行LEFT crank机动 - 增大角度形成更明显的钳形态势
             return self._maintain_heading_precise(env, agent_id, 315.0)  # 左转45°
@@ -385,7 +430,7 @@ class PincerAttackTacticalTask(MultipleCombatTask):
             return self._execute_short_skate_precise(env, agent_id, "right")
 
         else:  # DOR_DR
-            # 阶段5 (19.6-14.5km): 返航，航向180°
+            # 阶段5 (< 19.6km): 返航，航向180°
             return self._maintain_heading_precise(env, agent_id, 180.0)
 
     def _get_friendly_wingman_command_indices(self, env, agent_id):
@@ -416,14 +461,12 @@ class PincerAttackTacticalTask(MultipleCombatTask):
 
         try:
             # 检查是否有集成的统一敌方AI系统
-            if hasattr(self, 'unified_enemy_ai'):
+            if hasattr(self, 'unified_enemy_ai') and self.unified_enemy_ai is not None:
                 altitude_cmd, heading_cmd, velocity_cmd = self.unified_enemy_ai.get_enemy_action(
                     env, agent_id, current_time
                 )
-                logging.debug(f"✅ {agent_id} 统一敌方AI指令: ({altitude_cmd}, {heading_cmd}, {velocity_cmd})")
                 return altitude_cmd, heading_cmd, velocity_cmd
             else:
-                logging.warning(f"⚠️ {agent_id} 未找到统一敌方AI系统，使用备用方案")
                 return self._get_enemy_command_indices_fallback(env, agent_id, current_time)
 
         except Exception as e:
@@ -482,34 +525,50 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         role = self.enemy_roles.get(agent_id, 'support')
         side_sign = state.get('side_sign', -1 if role == 'shooter' else 1)
         
-        # 若存在保持机动（notch/cold），在时间窗口内维持
-        if state.get('hold_heading') is not None and current_time < state.get('hold_until', 0.0):
-            return self._maintain_heading_precise(env, agent_id, state['hold_heading'])
-
-        # 检查来袭导弹威胁：触发一次notch并保持数秒，避免抖动
-        if self._check_missile_threat(env, agent_id):
-            # 动态notch保持：距离近保持更短，并加入轻微下降（通过低速俯仰由低层控制处理，这里仅做航向）
-            notch_heading = (closest_bearing + side_sign * 90.0) % 360.0
-            # 基础距离近似：用closest_dist估计，<30km -> 2s，30–60km -> 4s，>60km -> 6s
-            if closest_dist < 30000:
-                hold_time = 2.0
-            elif closest_dist < 60000:
-                hold_time = 4.0
-            else:
-                hold_time = 6.0
-            state['hold_heading'] = notch_heading
-            state['hold_until'] = current_time + hold_time
-            logging.debug(f"敌方{agent_id}执行notch规避，转向{notch_heading:.1f}°，保持{hold_time:.1f}s 至{state['hold_until']:.1f}s")
-            return self._maintain_heading_precise(env, agent_id, notch_heading)
-        
-        # 根据距离确定对抗阶段（与我方完全对应）
+        # 🔍 先判断当前应该处于什么阶段
         current_phase = self._determine_enemy_phase(closest_dist)
+        
+        # 🔒 修复1：RTB阶段屏蔽所有干扰机动，强制返航
+        if current_phase == 'RTB':
+            # RTB阶段：清空所有保持机动状态，不受任何干扰
+            state['hold_heading'] = None
+            state['hold_until'] = 0.0
+            logging.debug(f"🚫 {agent_id} RTB阶段：忽略所有干扰，强制返航0°")
+            # 直接跳到阶段执行，不检查hold_heading和导弹威胁
+        else:
+            # 非RTB阶段：正常检查保持机动和导弹威胁
+            # 若存在保持机动（notch/cold），在时间窗口内维持
+            if state.get('hold_heading') is not None and current_time < state.get('hold_until', 0.0):
+                return self._maintain_heading_precise(env, agent_id, state['hold_heading'])
+
+            # 检查来袭导弹威胁：触发一次notch并保持数秒，避免抖动
+            if self._check_missile_threat(env, agent_id):
+                # 动态notch保持：距离近保持更短，并加入轻微下降（通过低速俯仰由低层控制处理，这里仅做航向）
+                notch_heading = (closest_bearing + side_sign * 90.0) % 360.0
+                # 基础距离近似：用closest_dist估计，<30km -> 2s，30–60km -> 4s，>60km -> 6s
+                if closest_dist < 30000:
+                    hold_time = 2.0
+                elif closest_dist < 60000:
+                    hold_time = 4.0
+                else:
+                    hold_time = 6.0
+                state['hold_heading'] = notch_heading
+                state['hold_until'] = current_time + hold_time
+                logging.debug(f"敌方{agent_id}执行notch规避，转向{notch_heading:.1f}°，保持{hold_time:.1f}s 至{state['hold_until']:.1f}s")
+                return self._maintain_heading_precise(env, agent_id, notch_heading)
         
         # 阶段切换处理
         if state['phase'] != current_phase:
+            old_phase = state['phase']
             state['phase'] = current_phase
             state['phase_start_time'] = current_time
-            logging.info(f"敌方{agent_id}进入{current_phase}阶段，距离{closest_dist/1000:.1f}km")
+            logging.info(f"🔄🔄🔄 敌方{agent_id}: {old_phase} → {current_phase}阶段，距离{closest_dist/1000:.1f}km，时间{current_time:.1f}s")
+            
+            # 🔑 关键修复：切换到RTB阶段时，清除所有保持机动状态
+            if current_phase == 'RTB':
+                state['hold_heading'] = None
+                state['hold_until'] = 0.0
+                logging.info(f"✈️✈️✈️ {agent_id}进入RTB返航阶段，清除保持机动状态")
         
         # 执行对应阶段的机动（真正模仿我方的逻辑）
         if current_phase == 'OBSERVATION':
@@ -593,9 +652,20 @@ class PincerAttackTacticalTask(MultipleCombatTask):
     def _execute_rtb_phase(self, env, agent_id, current_time, state):
         """返航阶段（对应我方DOR_DR）：稳定返航"""
         # 与我方相反：我方返航180°时，敌方返航0°
-        target_heading = 0.0  # 北向返航
+        target_heading = 0.0  # 固定北向返航，不依赖任何目标方位
         
-        logging.debug(f"敌方{agent_id}返航阶段：转向{target_heading:.1f}°")
+        # 🔧 修复4：RTB阶段每次都强制清空hold_heading，避免残留机动
+        state['hold_heading'] = None
+        state['hold_until'] = 0.0
+        
+        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+        current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        
+        # 每5秒打印一次返航状态
+        if int(current_time * 2) % 10 == 0:
+            logging.info(f"✈️ 敌方{agent_id} RTB返航中：目标航向={target_heading:.1f}°, 当前航向={current_heading:.1f}°, 高度={current_altitude:.0f}m")
+        
+        # 强制返回0°航向，不受其他逻辑干扰
         return self._maintain_heading_precise(env, agent_id, target_heading)
 
     # 旧的FSM函数已删除，使用新的对抗阶段逻辑
@@ -802,7 +872,7 @@ class PincerAttackTacticalTask(MultipleCombatTask):
 
     # ========== 精确航向保持和机动方法 ==========
     def _maintain_heading_precise(self, env, agent_id, target_heading):
-        """精确航向保持 - 复制拖曳射击项目的实现"""
+        """精确航向保持 - 返航阶段放宽阈值"""
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
 
         # 计算航向差值
@@ -812,13 +882,22 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         while heading_diff < -180:
             heading_diff += 360
 
+        # 🔧 修复3：返航阶段放宽调整阈值，减少频繁修正
+        is_friendly_return = (hasattr(self, 'current_phase') and 
+                             self.current_phase == TacticalPhase.DOR_DR and 
+                             agent_id.startswith('A'))
+        is_enemy_return = (agent_id.startswith('B') and 
+                          agent_id in self.enemy_combat_states and 
+                          self.enemy_combat_states[agent_id].get('phase') == 'RTB')
+        
+        # 返航阶段5°内不调整，非返航阶段2°内不调整
+        adjust_threshold = 5.0 if (is_friendly_return or is_enemy_return) else 2.0
+        
         # 精确航向控制
-        if abs(heading_diff) > 2.0:
+        if abs(heading_diff) > adjust_threshold:
             heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
         else:
-            heading_cmd_id = 8  # 保持当前航向
-
-        print(f"[钳形夹击] {agent_id}: 当前航向{current_heading:.1f}° -> 目标航向{target_heading:.1f}° (差值{heading_diff:.1f}°)")
+            heading_cmd_id = 8  # 保持当前航向（索引8 = 0°变化）
 
         return 7, heading_cmd_id, 3  # 保持高度，调整航向，保持速度
 
@@ -850,6 +929,10 @@ class PincerAttackTacticalTask(MultipleCombatTask):
         if elapsed_time < 10.0:  # 前10秒执行转弯
             return self._maintain_heading_precise(env, agent_id, skate_state['target_heading'])
         else:  # 10秒后转向返航
+            # 🔍 调试信息：检查当前阶段（问题已确认，注释掉）
+            # if env.current_step % 25 == 0:  # 每5秒打印一次
+            #     logging.info(f"🔍 {agent_id} Short Skate返航中: 当前阶段={self.current_phase.value}, 经过时间={elapsed_time:.1f}s")
+            
             if direction in ["right", "left"]:
                 return self._maintain_heading_precise(env, agent_id, 180.0)  # 友方返航南方
             else:
