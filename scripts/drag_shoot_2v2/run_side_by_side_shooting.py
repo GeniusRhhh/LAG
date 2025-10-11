@@ -455,7 +455,7 @@ def main():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='并排射击战术仿真')
-    parser.add_argument('--runs', type=int, default=30, help='运行次数（默认为1）')
+    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
     args = parser.parse_args()
 
     if args.runs > 1:

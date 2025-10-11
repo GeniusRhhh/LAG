@@ -945,6 +945,12 @@ class PincerAttackTacticalTask(MultipleCombatTask):
 
     def step(self, env):
         """执行钳形夹击战术步骤 - 基于DragShootTacticalTask的step方法"""
+        # 更新统一雷达系统状态（与拖曳射击保持一致）
+        current_time = env.current_step * env.time_interval
+        if self.radar_manager:
+            self.radar_manager.update_friendly_radar_states(env, current_time)
+            self.radar_manager.update_enemy_radar_states(env, current_time)
+        
         # 为每个智能体生成战术动作
         obs = {}
         share_obs = {}

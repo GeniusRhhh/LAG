@@ -65,6 +65,11 @@ class RadarTarget:
     snr: float = 0.0                       # 信噪比
     multipath_factor: float = 1.0          # 多径效应因子
     atmospheric_loss: float = 0.0          # 大气损耗
+    aspect_angle: float = 0.0              # 视角角度（相对目标机头）
+    radial_velocity: float = 0.0           # 径向速度 (m/s)
+    in_notch: bool = False                 # 是否在多普勒盲区
+    clutter_factor: float = 1.0            # 杂波影响因子
+    rwr_threat_level: int = 0              # RWR威胁等级 0-5
 
 
 @dataclass
@@ -231,15 +236,33 @@ class UnifiedRadarManager:
             "humidity": 50.0           # 湿度 (%)
         }
 
-        logging.info("📡 统一雷达管理系统初始化完成 (APG-68 + N001VE 功能级建模)")
+        # RWR（雷达告警接收机）状态
+        self.rwr_states = {
+            "A0100": {"threat_level": 0, "threat_sources": [], "last_warning": 0.0},
+            "A0200": {"threat_level": 0, "threat_sources": [], "last_warning": 0.0},
+            "B0100": {"threat_level": 0, "threat_sources": [], "last_warning": 0.0},
+            "B0200": {"threat_level": 0, "threat_sources": [], "last_warning": 0.0}
+        }
+
+        # 飞机RCS基准值（正面）
+        self.aircraft_rcs_baseline = {
+            "F16": 5.0,    # F-16C 正面RCS约5m²
+            "Su27": 12.0   # Su-27 正面RCS约12m²
+        }
+
+        logging.info("📡 统一雷达管理系统初始化完成 (APG-68 + N001VE 完整战术级建模)")
+        logging.info("   ✅ RCS动态建模 | ✅ 多普勒盲区 | ✅ 地面杂波 | ✅ RWR系统")
 
     # ==================== 友方雷达系统方法 (APG-68功能级建模) ====================
 
     def update_friendly_radar_states(self, env, current_time: float):
-        """更新友方雷达状态 - APG-68(V)9功能级建模"""
+        """更新友方雷达状态 - APG-68(V)9完备战术级建模"""
         for agent_id in self.friendly_radar_states.keys():
             if agent_id in env.agents and env.agents[agent_id].is_alive:
                 self._update_single_friendly_radar(env, agent_id, current_time)
+        
+        # 更新RWR状态
+        self._update_rwr_states(env, current_time)
 
     def _update_single_friendly_radar(self, env, agent_id: str, current_time: float):
         """更新单个友方雷达状态 - APG-68(V)9完整功能级建模"""
@@ -296,11 +319,14 @@ class UnifiedRadarManager:
                         del self.friendly_radar_targets[agent_id][target_id]
                     continue
 
-                # 计算APG-68真实探测概率
-                detection_prob = self._calculate_apg68_detection_probability(
-                    distance, bearing, elevation, velocity, current_time)
+                # 计算完整的战术级探测概率
+                detection_prob, radar_data = self._calculate_apg68_detection_probability_complete(
+                    agent, target, target_id, distance, bearing, elevation, velocity, current_time)
                 
-                logging.debug(f"📊 {agent_id} 探测概率: {detection_prob:.3f}")
+                logging.debug(f"📊 {agent_id} 探测概率: {detection_prob:.3f} "
+                            f"RCS={radar_data.get('rcs', 0):.1f}m² "
+                            f"径向速度={radar_data.get('radial_velocity', 0):.0f}m/s "
+                            f"Notch={radar_data.get('in_notch', False)}")
 
                 # 探测成功
                 if random.random() < detection_prob:
@@ -360,13 +386,19 @@ class UnifiedRadarManager:
         except Exception as e:
             logging.error(f"❌ {agent_id} APG-68雷达扫描错误: {e}")
 
-    def _calculate_apg68_detection_probability(self, distance: float, bearing: float,
-                                              elevation: float, velocity: float, current_time: float) -> float:
-        """计算真实的APG-68雷达探测概率 - 基于真实物理模型"""
+    def _calculate_apg68_detection_probability_complete(self, agent, target, target_id: str,
+                                                       distance: float, bearing: float,
+                                                       elevation: float, velocity: float,
+                                                       current_time: float) -> tuple:
+        """
+        计算完整的APG-68雷达探测概率 - 完备战术级建模
+        
+        返回: (detection_probability, radar_data_dict)
+        """
         try:
             # 基础距离衰减 - APG-68性能优于N001VE
             if distance > self.apg68_radar.max_detection_range:  # > 105km
-                return 0.0
+                return 0.0, {}
             elif distance > 95000:  # 95-105km：边缘探测
                 base_prob = 0.45
             elif distance > 85000:  # 85-95km：接近跟踪距离
@@ -378,38 +410,71 @@ class UnifiedRadarManager:
             else:  # < 35km：近距离高概率
                 base_prob = 0.96
 
-            # 雷达截面积因子（Su-27约10-15m²，比F-16大）
-            rcs_factor = min(1.0, math.log10(12.0 + 1) / 2.0)
+            # ===== 新增：完备战术级因子 =====
+            
+            # 1. 动态RCS因子（姿态相关）
+            dynamic_rcs = self._calculate_dynamic_rcs(agent, target, target_id)
+            rcs_factor = min(1.2, math.log10(dynamic_rcs + 1) / math.log10(13))  # 归一化到0.8-1.2
+            
+            # 2. 计算径向速度和多普勒盲区
+            radial_velocity = self._calculate_radial_velocity(agent, target)
+            in_notch = self._check_notch_condition(radial_velocity, self.apg68_radar)
+            
+            # 多普勒盲区 → 探测概率急剧下降
+            if in_notch:
+                notch_factor = 0.15  # APG-68有一定的杂波抑制，保留15%
+                logging.warning(f"🎯 {agent.uid} Notch检测: {target_id} 径向速度={radial_velocity:.1f}m/s（盲区）")
+            else:
+                # 高速接近目标更容易探测
+                notch_factor = min(1.25, 1.0 + abs(radial_velocity) / 400.0)
+            
+            # 3. 地面杂波因子
+            try:
+                target_altitude = target.get_position()[2]
+            except:
+                target_altitude = 1000.0  # 默认中高空
+            
+            clutter_factor = self._calculate_ground_clutter_factor(
+                elevation, target_altitude, distance, self.apg68_radar)
 
-            # 角度因子 - APG-68宽波束搜索（±120°），简化为固定值
-            # 注：bearing是绝对方位角，实际应用中机械扫描能覆盖所有方向
+            # 4. 角度因子 - APG-68宽波束搜索（±120°），简化为固定值
             angle_factor = 0.92
 
-            # 仰角因子 - APG-68优秀的下视能力
+            # 5. 仰角因子 - APG-68优秀的下视能力
             elevation_factor = max(0.80, 1.0 - abs(elevation) / 60.0)
 
-            # 多普勒因子 - APG-68优秀的多普勒处理能力
-            doppler_factor = min(1.20, 1.0 + velocity / 550.0)
-
-            # 大气衰减因子（APG-68优化的X波段设计）
+            # 6. 大气衰减因子（APG-68优化的X波段设计）
             atmospheric_factor = max(0.80, 1.0 - (distance / self.apg68_radar.max_detection_range) *
                                    self.apg68_radar.atmospheric_absorption * 500)
 
-            # 天气影响（APG-68对恶劣天气适应性更好）
+            # 7. 天气影响（APG-68对恶劣天气适应性更好）
             weather_factor = self.environmental_conditions["weather_factor"]
 
-            # 下视下射能力加成（APG-68强项）
+            # 8. 下视下射能力加成（APG-68强项）
             look_down_bonus = 1.1 if elevation < -10.0 and self.apg68_radar.has_look_down_shoot_down else 1.0
 
-            # 综合探测概率（APG-68总体性能优于N001VE）
+            # ===== 综合探测概率（APG-68完备模型） =====
             total_prob = (base_prob * rcs_factor * angle_factor * elevation_factor *
-                         doppler_factor * atmospheric_factor * weather_factor * look_down_bonus)
+                         notch_factor * clutter_factor * atmospheric_factor * 
+                         weather_factor * look_down_bonus)
 
-            return min(1.0, max(0.0, total_prob))
+            total_prob = min(1.0, max(0.0, total_prob))
+            
+            # 返回探测概率和详细数据
+            radar_data = {
+                "rcs": dynamic_rcs,
+                "radial_velocity": radial_velocity,
+                "in_notch": in_notch,
+                "clutter_factor": clutter_factor,
+                "base_prob": base_prob,
+                "final_prob": total_prob
+            }
+
+            return total_prob, radar_data
 
         except Exception as e:
-            logging.error(f"❌ APG-68探测概率计算错误: {e}")
-            return 0.5
+            logging.error(f"❌ APG-68完整探测概率计算错误: {e}")
+            return 0.5, {}
 
     def _update_friendly_radar_tracks(self, env, agent_id: str, current_time: float):
         """更新友方雷达目标跟踪 - APG-68 TWS模式"""
@@ -430,12 +495,32 @@ class UnifiedRadarManager:
                 time_factor = min(1.0, (current_time - target.last_update) / 4.0)
                 distance_factor = max(0.15, 1.0 - target.distance / self.apg68_radar.max_track_range)
                 
-                # APG-68跟踪质量更新
-                target.detection_probability *= (1.0 - time_factor * self.apg68_radar.track_loss_probability)
+                # 计算目标机动影响
+                try:
+                    target_agent = env.agents.get(target_id)
+                    if target_agent and hasattr(target_agent, 'get_rpy'):
+                        # 获取角加速度（通过姿态变化率估算）
+                        roll, pitch, yaw = target_agent.get_rpy()
+                        # 简化：高姿态角 = 高机动
+                        maneuver_factor = 1.0 + 0.5 * (abs(roll) / (math.pi/2))  # roll影响最大
+                        maneuver_factor = min(2.0, maneuver_factor)  # 最多2倍丢失概率
+                    else:
+                        maneuver_factor = 1.0
+                except:
+                    maneuver_factor = 1.0
+                
+                # APG-68跟踪质量更新（考虑机动）
+                track_loss_prob = self.apg68_radar.track_loss_probability * time_factor * maneuver_factor
+                target.detection_probability *= (1.0 - track_loss_prob)
+                
+                # 更新跟踪质量（用于决策）
+                target.track_quality = distance_factor * (1.0 - time_factor) * (1.0 / maneuver_factor)
+                target.track_quality = max(0.0, min(1.0, target.track_quality))
 
                 # 移除跟踪丢失的目标
-                if random.random() < self.apg68_radar.track_loss_probability * time_factor:
+                if random.random() < track_loss_prob:
                     expired_targets.append(target_id)
+                    logging.debug(f"📡 {agent_id} 跟踪丢失: {target_id} (机动因子={maneuver_factor:.2f})")
 
             # 移除跟踪丢失的目标
             for target_id in expired_targets:
@@ -557,14 +642,302 @@ class UnifiedRadarManager:
         except Exception as e:
             logging.error(f"❌ 仰角计算错误: {e}")
             return 0.0
+
+    # ==================== 新增：完备战术级雷达建模方法 ====================
+
+    def _calculate_dynamic_rcs(self, agent, target, target_id: str) -> float:
+        """
+        计算动态RCS - 基于目标姿态角
+        
+        RCS随视角变化：
+        - 正面（0°）：最小
+        - 侧面（90°）：最大（+200%）
+        - 尾部（180°）：小（+20%，发动机喷口）
+        - 俯仰角影响：±30%
+        """
+        try:
+            # 确定基准RCS
+            if target_id.startswith("A"):
+                baseline_rcs = self.aircraft_rcs_baseline["F16"]
+            else:
+                baseline_rcs = self.aircraft_rcs_baseline["Su27"]
+
+            # 计算视角角度（aspect angle）
+            aspect_angle = self._calculate_aspect_angle(agent, target)
+            
+            # 水平视角RCS调制（0-180度）
+            aspect_rad = math.radians(abs(aspect_angle))
+            if aspect_rad <= math.pi / 2:  # 0-90度：前半球
+                # 正面最小，侧面最大
+                horizontal_factor = 1.0 + 1.5 * math.sin(aspect_rad)  # 1.0 → 2.5
+            else:  # 90-180度：后半球
+                # 侧面到尾部
+                horizontal_factor = 2.5 - 1.3 * math.sin(aspect_rad)  # 2.5 → 1.2
+            
+            # 俯仰角影响（腹部/背部RCS更大）
+            try:
+                target_pitch = target.get_rpy()[1]  # pitch角
+                pitch_factor = 1.0 + 0.3 * abs(math.sin(target_pitch))
+            except:
+                pitch_factor = 1.0
+            
+            # 速度制动板/武器挂架影响（简化）
+            try:
+                velocity_mag = np.linalg.norm(target.get_velocity())
+                # 低速可能打开制动板
+                if velocity_mag < 150:  # <150 m/s
+                    config_factor = 1.4  # +40% RCS
+                else:
+                    config_factor = 1.2  # 武器挂架影响 +20%
+            except:
+                config_factor = 1.2
+
+            dynamic_rcs = baseline_rcs * horizontal_factor * pitch_factor * config_factor
+            
+            logging.debug(f"🎯 动态RCS: {target_id} 基准={baseline_rcs:.1f}m² "
+                         f"视角={aspect_angle:.0f}° 系数={horizontal_factor:.2f} "
+                         f"最终={dynamic_rcs:.1f}m²")
+            
+            return dynamic_rcs
+
+        except Exception as e:
+            logging.error(f"❌ 动态RCS计算错误: {e}")
+            # 返回基准值
+            return self.aircraft_rcs_baseline.get("Su27" if target_id.startswith("B") else "F16", 5.0)
+
+    def _calculate_aspect_angle(self, agent, target) -> float:
+        """
+        计算视角角度（相对目标机头方向）
+        0° = 正面, 90° = 侧面, 180° = 尾部
+        """
+        try:
+            # 计算从目标指向雷达的向量
+            agent_pos = np.array(agent.get_position())
+            target_pos = np.array(target.get_position())
+            to_radar_vec = agent_pos - target_pos
+            to_radar_vec_2d = to_radar_vec[:2]  # 只考虑水平面
+            
+            # 目标机头方向
+            try:
+                target_heading = target.get_rpy()[2]  # yaw角（弧度）
+                target_heading_vec = np.array([
+                    math.cos(target_heading),
+                    math.sin(target_heading)
+                ])
+            except:
+                # 如果无法获取航向，使用速度方向
+                target_vel = np.array(target.get_velocity()[:2])
+                if np.linalg.norm(target_vel) > 1.0:
+                    target_heading_vec = target_vel / np.linalg.norm(target_vel)
+                else:
+                    return 90.0  # 默认侧面
+            
+            # 归一化
+            to_radar_norm = to_radar_vec_2d / (np.linalg.norm(to_radar_vec_2d) + 1e-6)
+            
+            # 计算夹角
+            cos_angle = np.dot(target_heading_vec, to_radar_norm)
+            aspect_angle = math.degrees(math.acos(np.clip(cos_angle, -1.0, 1.0)))
+            
+            return aspect_angle
+
+        except Exception as e:
+            logging.error(f"❌ 视角计算错误: {e}")
+            return 90.0  # 默认侧面
+
+    def _calculate_radial_velocity(self, agent, target) -> float:
+        """计算径向速度（接近/远离速度）"""
+        try:
+            agent_pos = np.array(agent.get_position())
+            target_pos = np.array(target.get_position())
+            target_vel = np.array(target.get_velocity())
+            
+            # 从目标到雷达的方向向量
+            los_vec = agent_pos - target_pos
+            los_distance = np.linalg.norm(los_vec)
+            if los_distance < 1.0:
+                return 0.0
+            los_unit = los_vec / los_distance
+            
+            # 目标速度在LOS方向的投影（负值=接近，正值=远离）
+            radial_velocity = np.dot(target_vel, los_unit)
+            
+            return radial_velocity
+
+        except Exception as e:
+            logging.error(f"❌ 径向速度计算错误: {e}")
+            return 0.0
+
+    def _check_notch_condition(self, radial_velocity: float, radar_model) -> bool:
+        """
+        检查是否在多普勒盲区（Notch）
+        
+        多普勒雷达的固有限制：
+        - 径向速度过小 → 多普勒频移过小 → 被滤波器滤除
+        - APG-68: 盲区 < 50 m/s（优秀的杂波抑制）
+        - N001VE: 盲区 < 80 m/s（较差的杂波抑制）
+        """
+        if isinstance(radar_model, APG68RadarModel):
+            notch_threshold = 50.0  # m/s
+        else:  # N001VE
+            notch_threshold = 80.0  # m/s
+        
+        return abs(radial_velocity) < notch_threshold
+
+    def _calculate_ground_clutter_factor(self, elevation: float, altitude: float, 
+                                        distance: float, radar_model) -> float:
+        """
+        计算地面杂波影响因子
+        
+        地面杂波影响：
+        - 低空目标（<100m）+ 下视 → 强杂波干扰
+        - APG-68有优秀的DPCA（Displaced Phase Center Antenna）杂波抑制
+        - N001VE杂波抑制能力较弱
+        """
+        try:
+            # 目标高度低于100m时开始受杂波影响
+            if altitude > 100:
+                return 1.0  # 无杂波影响
+            
+            # 下视角度（负仰角）
+            if elevation >= 0:
+                return 1.0  # 仰视无地面杂波
+            
+            # 杂波强度随高度和下视角增加
+            altitude_factor = (100 - altitude) / 100.0  # 0-1，高度越低影响越大
+            angle_factor = abs(elevation) / 45.0  # 0-1，下视角越大影响越大
+            
+            # 基础杂波强度
+            base_clutter = 0.3 + 0.5 * altitude_factor * angle_factor
+            
+            # 雷达杂波抑制能力
+            if isinstance(radar_model, APG68RadarModel):
+                # APG-68有DPCA，杂波抑制能力强
+                clutter_suppression = 0.7  # 抑制70%杂波
+            else:  # N001VE
+                # N001VE杂波抑制较弱
+                clutter_suppression = 0.4  # 只能抑制40%杂波
+            
+            # 最终杂波影响因子（1.0=无影响，0=完全淹没）
+            clutter_factor = 1.0 - base_clutter * (1.0 - clutter_suppression)
+            
+            return max(0.1, clutter_factor)  # 最低保留10%探测概率
+
+        except Exception as e:
+            logging.error(f"❌ 地面杂波计算错误: {e}")
+            return 1.0
+
+    def _update_rwr_states(self, env, current_time: float):
+        """
+        更新RWR（雷达告警接收机）状态
+        
+        威胁等级：
+        0 = 无威胁
+        1 = SEARCH（搜索模式照射）
+        2 = TRACK（跟踪模式照射）
+        3 = LOCK（锁定模式照射）
+        4 = MISSILE_LAUNCH（检测到导弹发射）
+        5 = MISSILE_GUIDANCE（检测到导弹制导雷达）
+        """
+        try:
+            # 友方RWR检测敌方雷达
+            for friendly_id in ["A0100", "A0200"]:
+                if friendly_id not in env.agents or not env.agents[friendly_id].is_alive:
+                    continue
+                
+                threat_sources = []
+                max_threat = 0
+                
+                for enemy_id in ["B0100", "B0200"]:
+                    if enemy_id not in env.agents or not env.agents[enemy_id].is_alive:
+                        continue
+                    
+                    # 检查敌方雷达状态
+                    enemy_radar_state = self.enemy_radar_states.get(enemy_id, RadarStatus.SEARCH)
+                    enemy_targets = self.enemy_radar_targets.get(enemy_id, {})
+                    
+                    threat_level = 0
+                    if friendly_id in enemy_targets:
+                        if enemy_radar_state == RadarStatus.LOCK:
+                            threat_level = 3
+                            logging.warning(f"🚨 {friendly_id} RWR: {enemy_id} 雷达锁定告警！")
+                        elif enemy_radar_state == RadarStatus.TRACK:
+                            threat_level = 2
+                            logging.info(f"⚠️ {friendly_id} RWR: {enemy_id} 雷达跟踪告警")
+                        elif enemy_radar_state == RadarStatus.SEARCH:
+                            threat_level = 1
+                    
+                    if threat_level > 0:
+                        threat_sources.append({
+                            "source": enemy_id,
+                            "level": threat_level,
+                            "bearing": self._calculate_bearing(
+                                env.agents[friendly_id], 
+                                env.agents[enemy_id]
+                            )
+                        })
+                        max_threat = max(max_threat, threat_level)
+                
+                self.rwr_states[friendly_id] = {
+                    "threat_level": max_threat,
+                    "threat_sources": threat_sources,
+                    "last_warning": current_time if max_threat > 0 else self.rwr_states[friendly_id]["last_warning"]
+                }
+            
+            # 敌方RWR检测友方雷达（对称）
+            for enemy_id in ["B0100", "B0200"]:
+                if enemy_id not in env.agents or not env.agents[enemy_id].is_alive:
+                    continue
+                
+                threat_sources = []
+                max_threat = 0
+                
+                for friendly_id in ["A0100", "A0200"]:
+                    if friendly_id not in env.agents or not env.agents[friendly_id].is_alive:
+                        continue
+                    
+                    friendly_radar_state = self.friendly_radar_states.get(friendly_id, RadarStatus.SEARCH)
+                    friendly_targets = self.friendly_radar_targets.get(friendly_id, {})
+                    
+                    threat_level = 0
+                    if enemy_id in friendly_targets:
+                        if friendly_radar_state == RadarStatus.LOCK:
+                            threat_level = 3
+                            logging.warning(f"🚨 {enemy_id} RWR: {friendly_id} 雷达锁定告警！")
+                        elif friendly_radar_state == RadarStatus.TRACK:
+                            threat_level = 2
+                        elif friendly_radar_state == RadarStatus.SEARCH:
+                            threat_level = 1
+                    
+                    if threat_level > 0:
+                        threat_sources.append({
+                            "source": friendly_id,
+                            "level": threat_level,
+                            "bearing": self._calculate_bearing(
+                                env.agents[enemy_id],
+                                env.agents[friendly_id]
+                            )
+                        })
+                        max_threat = max(max_threat, threat_level)
+                
+                self.rwr_states[enemy_id] = {
+                    "threat_level": max_threat,
+                    "threat_sources": threat_sources,
+                    "last_warning": current_time if max_threat > 0 else self.rwr_states[enemy_id]["last_warning"]
+                }
+
+        except Exception as e:
+            logging.error(f"❌ RWR更新错误: {e}")
     
     # ==================== 敌方雷达系统方法 ====================
 
     def update_enemy_radar_states(self, env, current_time: float):
-        """更新敌方雷达状态 - 真实N001VE雷达系统"""
+        """更新敌方雷达状态 - 真实N001VE雷达系统（完备战术级建模）"""
         for agent_id in self.enemy_radar_states.keys():
             if agent_id in env.agents and env.agents[agent_id].is_alive:
                 self._update_single_enemy_radar(env, agent_id, current_time)
+        
+        # RWR状态已在友方更新中统一处理
     
     def _update_single_enemy_radar(self, env, agent_id: str, current_time: float):
         """更新单个敌方雷达状态 - 真实N001VE雷达物理特性"""
@@ -623,9 +996,9 @@ class UnifiedRadarManager:
                         del self.enemy_radar_targets[agent_id][target_id]
                     continue
 
-                # 计算真实探测概率
-                detection_prob = self._calculate_realistic_detection_probability(
-                    distance, bearing, elevation, velocity, current_time)
+                # 计算完整的战术级探测概率
+                detection_prob, radar_data = self._calculate_n001ve_detection_probability_complete(
+                    agent, target, target_id, distance, bearing, elevation, velocity, current_time)
 
                 # 探测成功
                 if random.random() < detection_prob:
@@ -678,13 +1051,19 @@ class UnifiedRadarManager:
             logging.error(f"❌ 目标速度计算错误: {e}")
             return 0.0
 
-    def _calculate_realistic_detection_probability(self, distance: float, bearing: float,
-                                                 elevation: float, velocity: float, current_time: float) -> float:
-        """计算真实的N001VE雷达探测概率 - 基于真实物理模型"""
+    def _calculate_n001ve_detection_probability_complete(self, agent, target, target_id: str,
+                                                        distance: float, bearing: float,
+                                                        elevation: float, velocity: float,
+                                                        current_time: float) -> tuple:
+        """
+        计算完整的N001VE雷达探测概率 - 完备战术级建模
+        
+        返回: (detection_probability, radar_data_dict)
+        """
         try:
             # 基础距离衰减 - 基于雷达方程但调整为实用值（N001VE max: 90km）
             if distance > self.n001ve_radar.max_detection_range:  # > 90km
-                return 0.0
+                return 0.0, {}
             elif distance > 80000:  # 80-90km：边缘探测
                 base_prob = 0.40
             elif distance > 70000:  # 70-80km：中等概率
@@ -696,35 +1075,67 @@ class UnifiedRadarManager:
             else:  # < 35km：最佳探测区
                 base_prob = 0.95
 
-            # 雷达截面积因子（F-16约5m²）
-            rcs_factor = min(1.0, math.log10(5.0 + 1) / 2.0)
+            # ===== 新增：完备战术级因子 =====
+            
+            # 1. 动态RCS因子（姿态相关）
+            dynamic_rcs = self._calculate_dynamic_rcs(agent, target, target_id)
+            rcs_factor = min(1.15, math.log10(dynamic_rcs + 1) / math.log10(7))  # 归一化到0.7-1.15
+            
+            # 2. 计算径向速度和多普勒盲区
+            radial_velocity = self._calculate_radial_velocity(agent, target)
+            in_notch = self._check_notch_condition(radial_velocity, self.n001ve_radar)
+            
+            # 多普勒盲区 → 探测概率急剧下降（N001VE更严重）
+            if in_notch:
+                notch_factor = 0.08  # N001VE杂波抑制较差，只保留8%
+                logging.warning(f"🎯 {agent.uid} Notch检测: {target_id} 径向速度={radial_velocity:.1f}m/s（盲区）")
+            else:
+                # 高速接近目标更容易探测
+                notch_factor = min(1.20, 1.0 + abs(radial_velocity) / 450.0)
+            
+            # 3. 地面杂波因子
+            try:
+                target_altitude = target.get_position()[2]
+            except:
+                target_altitude = 1000.0  # 默认中高空
+            
+            clutter_factor = self._calculate_ground_clutter_factor(
+                elevation, target_altitude, distance, self.n001ve_radar)
 
-            # 角度因子 - N001VE机械扫描（±70°），简化为固定值
-            # 注：bearing是绝对方位角，实际应用中机械扫描能覆盖所有方向
+            # 4. 角度因子 - N001VE机械扫描（±70°），简化为固定值
             angle_factor = 0.90
 
-            # 仰角因子 - 低仰角性能更好（提高最小值）
+            # 5. 仰角因子 - 低仰角性能更好（提高最小值）
             elevation_factor = max(0.8, 1.0 - abs(elevation) / 45.0)
 
-            # 多普勒因子 - 高速目标更容易探测
-            doppler_factor = min(1.2, 1.0 + velocity / 500.0)
-
-            # 大气衰减因子（减少衰减影响）
+            # 6. 大气衰减因子（减少衰减影响）
             atmospheric_factor = max(0.8, 1.0 - (distance / self.n001ve_radar.max_detection_range) *
                                    self.n001ve_radar.atmospheric_absorption * 500)
 
-            # 天气影响
+            # 7. 天气影响
             weather_factor = self.environmental_conditions["weather_factor"]
 
-            # 综合探测概率
+            # ===== 综合探测概率（N001VE完备模型） =====
             total_prob = (base_prob * rcs_factor * angle_factor * elevation_factor *
-                         doppler_factor * atmospheric_factor * weather_factor)
+                         notch_factor * clutter_factor * atmospheric_factor * weather_factor)
 
-            return min(1.0, max(0.0, total_prob))
+            total_prob = min(1.0, max(0.0, total_prob))
+            
+            # 返回探测概率和详细数据
+            radar_data = {
+                "rcs": dynamic_rcs,
+                "radial_velocity": radial_velocity,
+                "in_notch": in_notch,
+                "clutter_factor": clutter_factor,
+                "base_prob": base_prob,
+                "final_prob": total_prob
+            }
+
+            return total_prob, radar_data
 
         except Exception as e:
-            logging.error(f"❌ 雷达探测概率计算错误: {e}")
-            return 0.5
+            logging.error(f"❌ N001VE完整探测概率计算错误: {e}")
+            return 0.5, {}
     
     def _calculate_doppler_shift(self, velocity: float, bearing: float) -> float:
         """计算多普勒频移"""
@@ -807,13 +1218,31 @@ class UnifiedRadarManager:
                 # 基于距离和时间更新跟踪质量
                 time_factor = min(1.0, (current_time - target.last_update) / 5.0)
                 distance_factor = max(0.1, 1.0 - target.distance / self.n001ve_radar.max_track_range)
-                target.track_quality = distance_factor * (1.0 - time_factor)
+                
+                # 计算目标机动影响（N001VE对机动更敏感）
+                try:
+                    target_agent = env.agents.get(target_id)
+                    if target_agent and hasattr(target_agent, 'get_rpy'):
+                        roll, pitch, yaw = target_agent.get_rpy()
+                        # N001VE对机动目标更敏感
+                        maneuver_factor = 1.0 + 0.8 * (abs(roll) / (math.pi/2))
+                        maneuver_factor = min(2.5, maneuver_factor)  # 最多2.5倍丢失概率
+                    else:
+                        maneuver_factor = 1.0
+                except:
+                    maneuver_factor = 1.0
+                
+                target.track_quality = distance_factor * (1.0 - time_factor) * (1.0 / maneuver_factor)
+                target.track_quality = max(0.0, min(1.0, target.track_quality))
 
-                # 检查跟踪丢失
+                # 检查跟踪丢失（考虑机动）
+                track_loss_prob = self.n001ve_radar.track_loss_probability * maneuver_factor
                 if (target.track_quality < 0.2 or
                     target.distance > self.n001ve_radar.max_track_range or
-                    random.random() < self.n001ve_radar.track_loss_probability):
+                    random.random() < track_loss_prob):
                     expired_targets.append(target_id)
+                    if maneuver_factor > 1.2:
+                        logging.debug(f"📡 {agent_id} 跟踪丢失: {target_id} (高机动目标)")
 
             # 移除跟踪丢失的目标
             for target_id in expired_targets:
@@ -944,6 +1373,77 @@ class UnifiedRadarManager:
     def get_enemy_ecm_type(self, agent_id: str) -> Optional[ECMType]:
         """获取敌方ECM类型"""
         return self.ecm_states.get(agent_id, {}).get("type", None)
+    
+    # ==================== 新增：导弹发射雷达集成接口 ====================
+    
+    def can_launch_missile(self, agent_id: str, target_id: str) -> tuple:
+        """
+        检查是否可以发射导弹 - 完整雷达集成检查
+        
+        返回: (can_launch: bool, reason: str, track_quality: float)
+        """
+        try:
+            # 确定是友方还是敌方
+            if agent_id.startswith("A"):
+                radar_state = self.friendly_radar_states.get(agent_id, RadarStatus.SEARCH)
+                targets = self.friendly_radar_targets.get(agent_id, {})
+                radar_model = self.apg68_radar
+                side = "friendly"
+            else:
+                radar_state = self.enemy_radar_states.get(agent_id, RadarStatus.SEARCH)
+                targets = self.enemy_radar_targets.get(agent_id, {})
+                radar_model = self.n001ve_radar
+                side = "enemy"
+            
+            # 1. 检查目标是否被跟踪
+            if target_id not in targets:
+                return False, f"目标{target_id}未被雷达跟踪", 0.0
+            
+            target = targets[target_id]
+            
+            # 2. 检查雷达状态（至少需要TRACK）
+            if radar_state == RadarStatus.SEARCH:
+                return False, "雷达处于搜索模式，需要至少TRACK模式", target.track_quality
+            
+            # 3. 检查跟踪质量（Track Quality）
+            min_track_quality = 0.3  # 最低跟踪质量要求
+            if target.track_quality < min_track_quality:
+                return False, f"跟踪质量不足 ({target.track_quality:.2f} < {min_track_quality})", target.track_quality
+            
+            # 4. 检查距离（必须在最大跟踪距离内）
+            if target.distance > radar_model.max_track_range:
+                return False, f"目标距离超出跟踪范围 ({target.distance/1000:.1f}km > {radar_model.max_track_range/1000:.0f}km)", target.track_quality
+            
+            # 5. 检查多普勒盲区（Notch）
+            if hasattr(target, 'in_notch') and target.in_notch:
+                return False, "目标在多普勒盲区（Notch），无法制导", target.track_quality
+            
+            # 6. 检查探测概率
+            if target.detection_probability < 0.2:
+                return False, f"探测概率过低 ({target.detection_probability:.2f})", target.track_quality
+            
+            # 7. 建议：LOCK模式发射更好
+            if radar_state == RadarStatus.LOCK:
+                return True, "雷达STT锁定，最佳发射条件", target.track_quality
+            elif radar_state == RadarStatus.TRACK:
+                if target.track_quality > 0.7:
+                    return True, "雷达TWS跟踪，高质量跟踪，可发射", target.track_quality
+                else:
+                    return True, "雷达TWS跟踪，跟踪质量中等，可发射但精度降低", target.track_quality
+            
+            return False, "未知雷达状态", target.track_quality
+            
+        except Exception as e:
+            logging.error(f"❌ 导弹发射检查错误: {e}")
+            return False, f"检查异常: {str(e)}", 0.0
+    
+    def get_rwr_threat_level(self, agent_id: str) -> int:
+        """获取RWR威胁等级"""
+        return self.rwr_states.get(agent_id, {}).get("threat_level", 0)
+    
+    def get_rwr_threat_sources(self, agent_id: str) -> List[Dict]:
+        """获取RWR威胁源列表"""
+        return self.rwr_states.get(agent_id, {}).get("threat_sources", [])
     
     def update_environmental_conditions(self, weather_factor: float = 1.0,
                                        terrain_height: float = 0.0,
