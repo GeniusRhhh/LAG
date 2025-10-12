@@ -254,9 +254,12 @@ class UnifiedRadarManager:
         }
 
         # 飞机RCS基准值（正面）
+        # 飞机基准RCS（正面雷达散射截面积，单位：m²）
+        # 注意：这是正面RCS，侧面/尾部会通过视角因子动态调制（侧面×2.5，尾部×1.2）
+        # 修正：基于真实雷达测量数据，正面RCS显著小于平均RCS
         self.aircraft_rcs_baseline = {
-            "F16": 5.0,    # F-16C 正面RCS约5m²
-            "Su27": 12.0   # Su-27 正面RCS约12m²
+            "F16": 1.5,    # F-16C 正面RCS约1.5m²（真实测量：1-2m²，侧面8-15m²）
+            "Su27": 6.0    # Su-27 正面RCS约6.0m²（真实测量：5-8m²，侧面25-35m²）
         }
 
         logging.info("📡 统一雷达管理系统初始化完成 (APG-68 + N001VE 完整战术级建模)")
@@ -290,8 +293,11 @@ class UnifiedRadarManager:
             # 3. 更新雷达工作模式
             self._update_friendly_radar_mode(env, agent_id, current_time)
 
-            # 4. 处理电子战影响
+            # 4. 处理电子战影响（友方雷达受敌方ECM干扰）
             self._process_friendly_ecm(env, agent_id, current_time)
+            
+            # 5. 友方随机激活自己的ECM来干扰敌方雷达
+            self._activate_friendly_ecm_if_needed(env, agent_id, current_time)
 
         except Exception as e:
 
@@ -375,7 +381,7 @@ class UnifiedRadarManager:
                             detection_probability=detection_prob,
                             last_update=current_time,
                             doppler_shift=self._calculate_doppler_shift(velocity, bearing),
-                            snr=self._calculate_snr(distance, bearing),
+                            snr=self._calculate_snr(distance, bearing, self.apg68_radar),
                             multipath_factor=self._calculate_multipath_factor(distance, elevation),
                             atmospheric_loss=self._calculate_atmospheric_loss(distance)
                         )
@@ -390,7 +396,7 @@ class UnifiedRadarManager:
                         target_obj.detection_probability = detection_prob
                         target_obj.last_update = current_time
                         target_obj.doppler_shift = self._calculate_doppler_shift(velocity, bearing)
-                        target_obj.snr = self._calculate_snr(distance, bearing)
+                        target_obj.snr = self._calculate_snr(distance, bearing, self.apg68_radar)
                         target_obj.multipath_factor = self._calculate_multipath_factor(distance, elevation)
                         target_obj.atmospheric_loss = self._calculate_atmospheric_loss(distance)
                 else:
@@ -413,18 +419,18 @@ class UnifiedRadarManager:
         返回: (detection_probability, radar_data_dict)
         """
         try:
-            # 基础距离衰减 - APG-68性能优于N001VE
+            # 基础距离衰减 - APG-68性能优于N001VE（修正：远距离概率与SNR理论对应）
             if distance > self.apg68_radar.max_detection_range:  # > 105km
                 return 0.0, {}
-            elif distance > 95000:  # 95-105km：边缘探测
-                base_prob = 0.45
-            elif distance > 85000:  # 85-95km：接近跟踪距离
-                base_prob = 0.75
-            elif distance > 60000:  # 60-85km：高概率区域
+            elif distance > 95000:  # 95-105km：边缘探测（SNR ~3dB）
+                base_prob = 0.25  # 修正：从0.45降至0.25，符合低SNR探测概率
+            elif distance > 85000:  # 85-95km：接近跟踪距离（SNR ~5dB）
+                base_prob = 0.50  # 修正：从0.75降至0.50，符合中等SNR
+            elif distance > 60000:  # 60-85km：高概率区域（SNR ~10dB）
                 base_prob = 0.88
-            elif distance > 35000:  # 35-60km：最佳探测区域
+            elif distance > 35000:  # 35-60km：最佳探测区域（SNR ~13dB）
                 base_prob = 0.93
-            else:  # < 35km：近距离高概率
+            else:  # < 35km：近距离高概率（SNR >15dB）
                 base_prob = 0.96
 
             # ===== 新增：完备战术级因子 =====
@@ -542,8 +548,10 @@ class UnifiedRadarManager:
             closest_target = min(targets.items(), key=lambda x: x[1].distance)
             target_id, target_data = closest_target
 
-            # 基于距离决定雷达模式
-            if target_data.distance <= self.apg68_radar.max_lock_range:
+            # 基于距离和跟踪质量决定雷达模式
+            # APG-68性能更强，使用稍低的质量阈值（0.5 vs N001VE的0.6）
+            if (target_data.distance <= self.apg68_radar.max_lock_range and
+                target_data.track_quality > 0.5):
                 # STT锁定模式
                 self.friendly_radar_states[agent_id] = RadarStatus.LOCK
                 
@@ -558,7 +566,8 @@ class UnifiedRadarManager:
                     self.friendly_lock_targets[agent_id] = None
                     logging.debug(f"📡 {agent_id} 锁定丢失: {target_id}")
 
-            elif target_data.distance <= self.apg68_radar.max_track_range:
+            elif (target_data.distance <= self.apg68_radar.max_track_range and
+                  target_data.track_quality > 0.3):
                 # TWS跟踪模式（可跟踪多目标）
                 self.friendly_radar_states[agent_id] = RadarStatus.TRACK
                 self.friendly_lock_targets[agent_id] = None
@@ -573,28 +582,71 @@ class UnifiedRadarManager:
             self.friendly_radar_states[agent_id] = RadarStatus.SEARCH
 
     def _process_friendly_ecm(self, env, agent_id: str, current_time: float):
-        """处理友方电子对抗 - APG-68 ECCM能力"""
+        """处理友方雷达受敌方ECM干扰 - APG-68 ECCM能力"""
         try:
-            ecm_state = self.ecm_states.get(agent_id, {})
-            
-            if ecm_state.get("active", False):
-                # 检查ECM是否过期
-                if current_time - ecm_state["start_time"] > ecm_state["duration"]:
-                    ecm_state["active"] = False
-                    ecm_state["type"] = None
-                    logging.debug(f"🛡️ {agent_id} ECM结束")
-                else:
-                    # ECM激活期间，APG-68有更强的抗干扰能力
-                    for target_id in list(self.friendly_radar_targets[agent_id].keys()):
+            # 遍历友方雷达跟踪的每个敌方目标
+            for target_id in list(self.friendly_radar_targets[agent_id].keys()):
+                # 检查该敌方目标是否激活了ECM来干扰我方雷达
+                enemy_ecm_state = self.ecm_states.get(target_id, {})
+                
+                if enemy_ecm_state.get("active", False):
+                    # 检查ECM是否过期
+                    if current_time - enemy_ecm_state["start_time"] > enemy_ecm_state["duration"]:
+                        enemy_ecm_state["active"] = False
+                        enemy_ecm_state["type"] = None
+                        logging.debug(f"🛡️ 敌方目标 {target_id} ECM结束")
+                    else:
+                        # 敌方ECM激活期间，降低友方雷达的探测概率
+                        # APG-68具备更强的ECCM能力，受干扰影响较小
                         target = self.friendly_radar_targets[agent_id][target_id]
-                        # APG-68 ECCM能力更强
-                        if ecm_state["type"] == ECMType.NOISE_JAMMING:
-                            target.detection_probability *= 0.5  # APG-68抗干扰能力强
-                        elif ecm_state["type"] == ECMType.DECEPTION_JAMMING:
-                            target.detection_probability *= 0.6
+                        
+                        if enemy_ecm_state["type"] == ECMType.NOISE_JAMMING:
+                            target.detection_probability *= 0.5  # APG-68抗噪声干扰能力强
+                        elif enemy_ecm_state["type"] == ECMType.DECEPTION_JAMMING:
+                            target.detection_probability *= 0.6  # APG-68抗欺骗干扰能力强
+                        # 箔条干扰未实现（APG-68的优秀ECCM能力可忽略箔条干扰）
 
         except Exception as e:
-            logging.error(f"❌ {agent_id} ECM处理错误: {e}")
+            logging.error(f"❌ {agent_id} 友方雷达受ECM干扰处理错误: {e}")
+    
+    def _activate_friendly_ecm_if_needed(self, env, agent_id: str, current_time: float):
+        """友方威胁驱动ECM激活 - 基于RWR告警等级智能激活"""
+        try:
+            ecm_state = self.ecm_states[agent_id]
+            
+            # 如果ECM已激活，无需重复激活
+            if ecm_state.get("active", False):
+                return
+            
+            # 获取当前最高威胁等级
+            rwr_data = self.rwr_states.get(agent_id, {})
+            max_threat_level = rwr_data.get("threat_level", 0)
+            
+            # 威胁驱动激活策略：
+            # - 威胁等级 ≥ 3 (LOCK): 80%概率激活（被锁定，高威胁）
+            # - 威胁等级 = 2 (TRACK): 30%概率激活（被跟踪，中等威胁）
+            # - 威胁等级 = 1 (SEARCH): 5%概率激活（被搜索，低威胁）
+            # - 威胁等级 = 0 (无威胁): 不激活
+            
+            if max_threat_level >= 3:  # LOCK或导弹威胁
+                activation_prob = 0.80
+                threat_reason = "雷达锁定/导弹威胁"
+            elif max_threat_level == 2:  # TRACK
+                activation_prob = 0.30
+                threat_reason = "雷达跟踪"
+            elif max_threat_level == 1:  # SEARCH
+                activation_prob = 0.05
+                threat_reason = "雷达搜索"
+            else:
+                return  # 无威胁，不激活
+            
+            # 基于威胁等级的概率激活
+            if random.random() < activation_prob:
+                self._activate_ecm(agent_id, current_time)
+                logging.info(f"🛡️ {agent_id} 因{threat_reason}(威胁等级{max_threat_level})激活ECM")
+                    
+        except Exception as e:
+            logging.error(f"❌ {agent_id} 友方ECM激活检查错误: {e}")
 
     def get_friendly_radar_state(self, agent_id: str) -> RadarStatus:
         """获取友方雷达状态"""
@@ -959,8 +1011,11 @@ class UnifiedRadarManager:
             # 更新雷达工作模式
             self._update_enemy_radar_mode(env, agent_id, current_time)
 
-            # 处理电子战效果
+            # 处理电子战效果（敌方雷达受友方ECM干扰）
             self._process_electronic_warfare(env, agent_id, current_time)
+            
+            # 敌方随机激活自己的ECM来干扰友方雷达
+            self._activate_enemy_ecm_if_needed(env, agent_id, current_time)
 
         except Exception as e:
             logging.error(f"❌ {agent_id} 敌方雷达状态更新错误: {e}")
@@ -1016,7 +1071,7 @@ class UnifiedRadarManager:
                             detection_probability=detection_prob,
                             last_update=current_time,
                             doppler_shift=self._calculate_doppler_shift(velocity, bearing),
-                            snr=self._calculate_snr(distance, bearing),
+                            snr=self._calculate_snr(distance, bearing, self.n001ve_radar),
                             multipath_factor=self._calculate_multipath_factor(distance, elevation),
                             atmospheric_loss=self._calculate_atmospheric_loss(distance)
                         )
@@ -1031,7 +1086,7 @@ class UnifiedRadarManager:
                         target.detection_probability = detection_prob
                         target.last_update = current_time
                         target.doppler_shift = self._calculate_doppler_shift(velocity, bearing)
-                        target.snr = self._calculate_snr(distance, bearing)
+                        target.snr = self._calculate_snr(distance, bearing, self.n001ve_radar)
                         target.multipath_factor = self._calculate_multipath_factor(distance, elevation)
                         target.atmospheric_loss = self._calculate_atmospheric_loss(distance)
                 else:
@@ -1065,18 +1120,18 @@ class UnifiedRadarManager:
         返回: (detection_probability, radar_data_dict)
         """
         try:
-            # 基础距离衰减 - 基于雷达方程但调整为实用值（N001VE max: 90km）
+            # 基础距离衰减 - 基于雷达方程但调整为实用值（N001VE max: 90km，修正远距离概率）
             if distance > self.n001ve_radar.max_detection_range:  # > 90km
                 return 0.0, {}
-            elif distance > 80000:  # 80-90km：边缘探测
-                base_prob = 0.40
-            elif distance > 70000:  # 70-80km：中等概率
-                base_prob = 0.70
-            elif distance > 55000:  # 55-70km：高概率
+            elif distance > 80000:  # 80-90km：边缘探测（SNR ~3dB）
+                base_prob = 0.20  # 修正：从0.40降至0.20，符合N001VE性能略弱于APG-68
+            elif distance > 70000:  # 70-80km：中等概率（SNR ~5dB）
+                base_prob = 0.45  # 修正：从0.70降至0.45
+            elif distance > 55000:  # 55-70km：高概率（SNR ~10dB）
                 base_prob = 0.85
-            elif distance > 35000:  # 35-55km：极高概率
+            elif distance > 35000:  # 35-55km：极高概率（SNR ~13dB）
                 base_prob = 0.92
-            else:  # < 35km：最佳探测区
+            else:  # < 35km：最佳探测区（SNR >15dB）
                 base_prob = 0.95
 
 
@@ -1164,22 +1219,47 @@ class UnifiedRadarManager:
             logging.error(f"❌ 多普勒频移计算错误: {e}")
             return 0.0
 
-    def _calculate_snr(self, distance: float, bearing: float) -> float:
-        """计算信噪比"""
+    def _calculate_snr(self, distance: float, bearing: float, radar_model=None) -> float:
+        """
+        计算信噪比 - 用于数据记录和模型验证
+        
+        注：当前实现中，SNR不直接用于探测概率计算，而是作为物理参考指标。
+        探测概率采用距离分段模型（_calculate_xxx_detection_probability_complete），
+        这是对"距离→SNR→探测概率"链路的工程简化。
+        
+        SNR的作用：
+        1. 数据记录：输出到CSV用于后期分析
+        2. 模型验证：验证距离分段模型的物理合理性
+        3. 未来扩展：保留切换到SNR驱动模型的能力
+        """
         try:
-            # 基础SNR (dB) - N001VE雷达参数
-            base_snr = 40.0
+            # 根据雷达类型选择基础SNR
+            if radar_model is None:
+                radar_model = self.n001ve_radar
+                
+            # 基础SNR (dB) - 在参考距离(10km)、正对波束时的典型值
+            if isinstance(radar_model, APG68RadarModel):
+                base_snr = 42.0  # APG-68性能更好
+            else:
+                base_snr = 40.0  # N001VE
 
-            # 距离衰减 (R^4 law)
+            # 距离衰减 (R^4 law) - 雷达方程核心
             distance_loss = -40 * math.log10(distance / 10000)
 
-            # 角度损失
-            angle_loss = -3 * (abs(bearing) / (self.n001ve_radar.search_beam_width / 2))
+            # 角度损失 - 天线方向图影响
+            beam_width = radar_model.search_beam_width
+            angle_loss = -3 * (abs(bearing) / (beam_width / 2))
 
-            # 大气损失
+            # 大气损失 - X波段典型值
             atmospheric_loss = -0.1 * (distance / 1000)  # 0.1 dB/km
 
             total_snr = base_snr + distance_loss + angle_loss + atmospheric_loss
+            
+            # SNR阈值参考：
+            # SNR > 13 dB: 高概率探测 (Pd > 0.9)
+            # SNR = 10 dB: 中等概率 (Pd ≈ 0.7)
+            # SNR < 7 dB:  低概率探测 (Pd < 0.3)
+            
             return total_snr
         except Exception as e:
             logging.error(f"❌ SNR计算错误: {e}")
@@ -1290,35 +1370,72 @@ class UnifiedRadarManager:
             self.enemy_radar_states[agent_id] = RadarStatus.SEARCH
     
     def _process_electronic_warfare(self, env, agent_id: str, current_time: float):
-        """处理电子战效果"""
+        """处理敌方雷达受友方ECM干扰 - N001VE相对较弱的ECCM能力"""
+        try:
+            # 遍历敌方雷达跟踪的每个友方目标
+            for target_id in list(self.enemy_radar_targets[agent_id].keys()):
+                # 检查该友方目标是否激活了ECM来干扰敌方雷达
+                friendly_ecm_state = self.ecm_states.get(target_id, {})
+                
+                if friendly_ecm_state.get("active", False):
+                    # 检查ECM是否过期
+                    if current_time - friendly_ecm_state["start_time"] > friendly_ecm_state["duration"]:
+                        friendly_ecm_state["active"] = False
+                        friendly_ecm_state["type"] = None
+                        logging.debug(f"🛡️ 友方目标 {target_id} ECM结束")
+                    else:
+                        # 友方ECM激活期间，降低敌方雷达的探测概率
+                        # N001VE的ECCM能力较弱，受干扰影响较大
+                        target = self.enemy_radar_targets[agent_id][target_id]
+                        
+                        if friendly_ecm_state["type"] == ECMType.NOISE_JAMMING:
+                            target.detection_probability *= 0.3  # N001VE抗噪声干扰能力弱
+                        elif friendly_ecm_state["type"] == ECMType.DECEPTION_JAMMING:
+                            target.detection_probability *= 0.5  # N001VE抗欺骗干扰能力一般
+                        elif friendly_ecm_state["type"] == ECMType.CHAFF:
+                            target.detection_probability *= 0.2  # N001VE抗箔条干扰能力弱
+                            
+        except Exception as e:
+            logging.error(f"❌ {agent_id} 敌方雷达受ECM干扰处理错误: {e}")
+
+    def _activate_enemy_ecm_if_needed(self, env, agent_id: str, current_time: float):
+        """敌方威胁驱动ECM激活 - 基于RWR告警等级智能激活"""
         try:
             ecm_state = self.ecm_states[agent_id]
-
-            # 检查ECM状态
-            if ecm_state["active"]:
-                # 检查ECM持续时间
-                if current_time - ecm_state["start_time"] > ecm_state["duration"]:
-                    ecm_state["active"] = False
-                    ecm_state["type"] = None
-                    logging.debug(f"🛡️ {agent_id} ECM结束")
-                else:
-                    # ECM激活期间，降低探测概率
-                    for target_id in list(self.enemy_radar_targets[agent_id].keys()):
-                        target = self.enemy_radar_targets[agent_id][target_id]
-                        # 根据ECM类型调整探测概率
-                        if ecm_state["type"] == ECMType.NOISE_JAMMING:
-                            target.detection_probability *= 0.3
-                        elif ecm_state["type"] == ECMType.DECEPTION_JAMMING:
-                            target.detection_probability *= 0.5
-                        elif ecm_state["type"] == ECMType.CHAFF:
-                            target.detection_probability *= 0.2
+            
+            # 如果ECM已激活，无需重复激活
+            if ecm_state.get("active", False):
+                return
+            
+            # 获取当前最高威胁等级
+            rwr_data = self.rwr_states.get(agent_id, {})
+            max_threat_level = rwr_data.get("threat_level", 0)
+            
+            # 威胁驱动激活策略（敌方N001VE雷达性能较弱，更依赖ECM防御）：
+            # - 威胁等级 ≥ 3 (LOCK): 90%概率激活（被锁定，立即激活）
+            # - 威胁等级 = 2 (TRACK): 40%概率激活（被跟踪，积极防御）
+            # - 威胁等级 = 1 (SEARCH): 10%概率激活（被搜索，预防性激活）
+            # - 威胁等级 = 0 (无威胁): 不激活
+            
+            if max_threat_level >= 3:  # LOCK或导弹威胁
+                activation_prob = 0.90  # 敌方更积极（ECCM能力弱）
+                threat_reason = "雷达锁定/导弹威胁"
+            elif max_threat_level == 2:  # TRACK
+                activation_prob = 0.40
+                threat_reason = "雷达跟踪"
+            elif max_threat_level == 1:  # SEARCH
+                activation_prob = 0.10
+                threat_reason = "雷达搜索"
             else:
-                # 随机激活ECM
-                if random.random() < 0.01:  # 1%概率每次更新
-                    self._activate_ecm(agent_id, current_time)
-
+                return  # 无威胁，不激活
+            
+            # 基于威胁等级的概率激活
+            if random.random() < activation_prob:
+                self._activate_ecm(agent_id, current_time)
+                logging.info(f"🛡️ {agent_id} 因{threat_reason}(威胁等级{max_threat_level})激活ECM")
+                    
         except Exception as e:
-            logging.error(f"❌ {agent_id} 电子战处理错误: {e}")
+            logging.error(f"❌ {agent_id} 敌方ECM激活检查错误: {e}")
 
     def _activate_ecm(self, agent_id: str, current_time: float):
         """激活电子对抗措施"""
@@ -1364,6 +1481,80 @@ class UnifiedRadarManager:
     def get_enemy_ecm_type(self, agent_id: str) -> Optional[ECMType]:
         """获取敌方ECM类型"""
         return self.ecm_states.get(agent_id, {}).get("type", None)
+    
+    def is_being_jammed(self, agent_id: str) -> bool:
+        """
+        查询本机是否正在受到ECM干扰
+        
+        Args:
+            agent_id: 本机ID (如 "A0100" 或 "B0100")
+            
+        Returns:
+            bool: True表示本机正在受到至少一个敌方的ECM干扰，False表示未受干扰
+        """
+        try:
+            # 判断本机是友方还是敌方
+            is_friendly = agent_id in ["A0100", "A0200"]
+            
+            if is_friendly:
+                # 友方飞机：检查敌方目标是否对其进行ECM干扰
+                enemy_ids = ["B0100", "B0200"]
+            else:
+                # 敌方飞机：检查友方目标是否对其进行ECM干扰
+                enemy_ids = ["A0100", "A0200"]
+            
+            # 检查任一敌方是否激活了ECM
+            for enemy_id in enemy_ids:
+                ecm_state = self.ecm_states.get(enemy_id, {})
+                if ecm_state.get("active", False):
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"❌ 查询 {agent_id} 受干扰状态错误: {e}")
+            return False
+    
+    def get_jamming_sources(self, agent_id: str) -> Dict[str, ECMType]:
+        """
+        获取正在干扰本机的敌方列表及干扰类型
+        
+        Args:
+            agent_id: 本机ID (如 "A0100" 或 "B0100")
+            
+        Returns:
+            Dict[str, ECMType]: 
+                key: 敌方ID
+                value: 干扰类型 (ECMType.NOISE_JAMMING / DECEPTION_JAMMING / CHAFF)
+                
+        Example:
+            {"B0100": ECMType.NOISE_JAMMING, "B0200": ECMType.CHAFF}
+            表示B0100正在用噪声干扰本机，B0200正在用箔条干扰本机
+        """
+        try:
+            jamming_sources = {}
+            
+            # 判断本机是友方还是敌方
+            is_friendly = agent_id in ["A0100", "A0200"]
+            
+            if is_friendly:
+                # 友方飞机：检查敌方目标
+                enemy_ids = ["B0100", "B0200"]
+            else:
+                # 敌方飞机：检查友方目标
+                enemy_ids = ["A0100", "A0200"]
+            
+            # 遍历所有敌方，收集正在进行ECM干扰的
+            for enemy_id in enemy_ids:
+                ecm_state = self.ecm_states.get(enemy_id, {})
+                if ecm_state.get("active", False):
+                    jamming_sources[enemy_id] = ecm_state.get("type")
+            
+            return jamming_sources
+            
+        except Exception as e:
+            logging.error(f"❌ 获取 {agent_id} 干扰源错误: {e}")
+            return {}
     
     def update_environmental_conditions(self, weather_factor: float = 1.0,
                                        terrain_height: float = 0.0,
@@ -1613,6 +1804,16 @@ def is_enemy_ecm_active(agent_id: str) -> bool:
     """检查敌方ECM是否激活 - 统一接口"""
     radar_manager = get_unified_radar_manager()
     return radar_manager.is_enemy_ecm_active(agent_id)
+
+def is_being_jammed(agent_id: str) -> bool:
+    """查询本机是否正在受到ECM干扰 - 统一接口"""
+    radar_manager = get_unified_radar_manager()
+    return radar_manager.is_being_jammed(agent_id)
+
+def get_jamming_sources(agent_id: str) -> Dict[str, ECMType]:
+    """获取正在干扰本机的敌方列表及干扰类型 - 统一接口"""
+    radar_manager = get_unified_radar_manager()
+    return radar_manager.get_jamming_sources(agent_id)
 
 def get_radar_performance_summary() -> Dict[str, Any]:
     """获取雷达性能摘要 - 统一接口"""
