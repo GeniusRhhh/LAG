@@ -39,7 +39,7 @@ class ActionConfig:
 class BasicActionDataGenerator:
     """基础动作数据生成器"""
     
-    def __init__(self, output_dir: str = "scripts/drag_shoot_2v2/basic_action_data"):
+    def __init__(self, output_dir: str = "scripts/tacticalTemplateProject/basic_action_data"):
         self.output_dir = output_dir
         self.setup_logging()
         self.setup_output_directories()

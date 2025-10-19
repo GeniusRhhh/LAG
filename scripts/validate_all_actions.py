@@ -14,7 +14,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ActionValidator:
-    def __init__(self, data_dir: str = "scripts/drag_shoot_2v2/basic_action_data"):
+    def __init__(self, data_dir: str = "scripts/tacticalTemplateProject/basic_action_data"):
         self.data_dir = data_dir
         self.validation_results = {}
         
