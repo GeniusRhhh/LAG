@@ -1,0 +1,204 @@
+# 2v2回转射击战术配置文件
+# 双机在DOR前做short skate，到达安全回转距离后回转重新交战，类钳形包夹
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 1500           # episode length: 300s - 回转射击需要更长时间
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# 飞机配置 - 使用正确的经纬度设置90km距离
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 119.95,     # 己方长机，左侧5海里（约9.26km）
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.05,     # 己方僚机，右侧5海里（约9.26km）
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 敌方长机
+      ic_lat_geod_deg: 60.8,      # 90km距离 (0.8度纬度差约90km)
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  },
+  B0200: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,     # 敌方僚机，右侧1km偏移
+      ic_lat_geod_deg: 60.8,      # 90km距离
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  }
+}
+
+# 武器系统配置
+max_attack_angle: 60
+max_attack_distance: 70000    # 70km最大攻击距离
+min_attack_interval: 30
+
+# 战场中心 (longitude, latitude, altitude)
+battle_field_center: [120.0, 60.4, 0.0]  # 中点位置
+
+# 回转射击战术距离配置
+tactical_distances: {
+  # 战术阶段控制距离 (米)
+  NLT_MELD_max: 90000,        # 90km
+  NLT_MELD_min: 81000,        # 81km
+  MELD_MTR_max: 81000,        # 81km
+  MELD_MTR_min: 45000,        # 45km
+  MTR_TR_max: 45000,          # 45km
+  MTR_TR_min: 41000,          # 41km
+  TR_DOR_max: 41000,          # 41km - 第一次脱离+回转交战
+  TR_DOR_min: 19600,          # 19.6km
+  DOR_DR_max: 19600,          # 19.6km - 第二次脱离返航
+  DOR_DR_min: 14500,          # 14.5km
+  
+  # 导弹发射距离
+  leader_launch_range: 41000,   # 长机41km发射（MTR-TR阶段末期）
+  wingman_launch_range: 41000,  # 僚机41km发射（MTR-TR阶段末期）
+  enemy_launch_ranges: [45000, 41000, 19600],  # 敌方发射距离
+  
+  # MultipleCombatEnv必需的标准距离
+  detection_range: 100000,      # 探测距离100km
+  engagement_range: 90000,      # 交战距离90km (必需)
+  launch_range: 41000,          # 发射距离41km (必需)
+  mar_range: 19600,             # 最小规避距离19.6km (必需)
+  wez_range: 45000,             # 武器交战区45km
+  rmax: 60000,                  # 最大射程60km
+  rmin: 500,                    # 最小射程500m
+
+  # 雷达控制距离
+  track_range: 81000,           # 跟踪距离81km
+  lock_range: 45000,            # 锁定距离45km
+  return_search_range: 19600,   # 返航解锁距离19.6km
+}
+
+# 回转射击战术参数
+turn_around_shooting_tactics: {
+  # 机动参数
+  short_skate_angle: 45.0,            # Short Skate转弯角度
+  turn_rate: 8.0,                     # 转弯率8度/秒
+  initial_escape_duration: 10.0,      # TR_DOR初始平稳飞行时间（秒）
+  
+  # 关键距离参数
+  first_short_skate_distance: 35000,  # 第一次short skate触发距离（35km）
+  turn_back_distance: 25000,          # 回转重新交战的距离（25km）
+  second_short_skate_distance: 19600, # 第二次short skate触发距离（19.6km）
+  turn_back_complete_distance: 20000, # 回转完成距离（20km）
+  
+  # 己方战术行为定义
+  friendly_tactics: {
+    NLT_MELD: {
+      leader_action: "level_flight",
+      wingman_action: "level_flight",
+      description: "保持间距，平稳飞行"
+    },
+    MELD_MTR: {
+      leader_action: "level_flight", 
+      wingman_action: "level_flight",
+      description: "保持间距，平稳飞行"
+    },
+    MTR_TR: {
+      leader_action: "level_flight",
+      wingman_action: "level_flight",
+      launch_enabled: true,
+      description: "保持间距，平稳飞行。快结束时发射导弹"
+    },
+    TR_DOR: {
+      # 第一次脱离+回转交战
+      leader_action: "turn_around_maneuver",
+      leader_params: {
+        first_skate_direction: "left",    # 朝外侧（左）
+        turn_back_direction: "right",     # 朝内侧（右）
+        final_heading: 0.0
+      },
+      wingman_action: "turn_around_maneuver",
+      wingman_params: {
+        first_skate_direction: "right",   # 朝外侧（右）
+        turn_back_direction: "left",      # 朝内侧（左）
+        final_heading: 0.0
+      },
+      description: "平稳飞行一段后进行short skate（朝外侧），到达安全距离后回转重新交战（朝内侧）"
+    },
+    DOR_DR: {
+      # 第二次脱离返航
+      leader_action: "second_short_skate",
+      leader_params: {
+        skate_direction: "right",         # 朝外侧（右）
+        return_heading: 180.0
+      },
+      wingman_action: "second_short_skate",
+      wingman_params: {
+        skate_direction: "left",          # 朝外侧（左）
+        return_heading: 180.0
+      },
+      description: "再次做short skate返航（朝外侧），平稳飞行返航，朝180度"
+    }
+  },
+  
+  # 敌方战术行为
+  enemy_tactics: {
+    default_action: "level_flight",
+    launch_enabled: true,
+    description: "平稳飞行并适时发射导弹"
+  }
+}
+
+# reward config (继承现有配置)
+PostureReward_scale: 5.0
+PostureReward_potential: true
+PostureReward_orientation_version: v2
+PostureReward_range_version: v3
+
+AltitudeReward_safe_altitude: 4.0
+AltitudeReward_danger_altitude: 3.5
+AltitudeReward_Kv: 0.2
+
+# 数据记录配置
+data_recording: {
+  enabled: true,
+  output_dir: "turn_around_shooting_results",
+  record_interval: 0.2,
+  save_trajectory: true,
+  save_radar_status: true,
+  save_missile_status: true,
+  save_acmi: true
+}
+
+
