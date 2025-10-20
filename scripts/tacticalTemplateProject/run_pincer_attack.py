@@ -63,14 +63,23 @@ def _get_missile_status(missile_sim) -> str:
 
 def setup_logging():
     """设置日志"""
+    # 创建输出目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, "pincer_attack_results")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 日志文件保存到结果目录
+    log_file = os.path.join(output_dir, f'pincer_attack_simulation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(f'pincer_attack_simulation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log', encoding='utf-8'),
+            logging.FileHandler(log_file, encoding='utf-8'),
             logging.StreamHandler()
         ]
     )
+    logging.info(f"日志文件: {log_file}")
 
 
 def record_pincer_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):

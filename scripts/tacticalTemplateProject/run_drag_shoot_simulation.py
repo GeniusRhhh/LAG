@@ -1095,7 +1095,7 @@ def main():
         print("下一步可以:")
         print("1. 查看生成的CSV数据文件")
         print("2. 使用现有的TacView查看ACMI文件")
-        print("3. 运行数据分析脚本生成图表")
+        print("3. 运行数据分析脚本生图表")
     else:
         print("\n[X] 仿真失败，请检查配置和日志")
 
