@@ -27,31 +27,31 @@ class TurnAroundShootingTermination(BaseTerminationCondition):
     def get_termination(self, task, env, agent_id, info={}):
         current_alt = env.agents[agent_id].get_property_value(c.position_h_sl_m)
         if current_alt <= self.altitude_limit:
-            self.log(f"{agent_id} altitude too low: {current_alt:.1f}m")
+            logging.warning(f"⚠️ TERMINATION: {agent_id} altitude too low: {current_alt:.1f}m")
             return True, False, info
 
         if env.current_step >= self.max_steps:
-            self.log(f"Time limit reached")
+            logging.info(f"⏰ TERMINATION: Time limit reached (step {env.current_step})")
             return True, False, info
 
         if env.agents[agent_id].get_property_value(c.detect_extreme_state):
-            self.log(f"{agent_id} extreme state")
+            logging.warning(f"⚠️ TERMINATION: {agent_id} extreme state detected")
             return True, False, info
 
         if (abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_x_norm)) > 15.0 or
             abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_y_norm)) > 15.0 or
             abs(env.agents[agent_id].get_property_value(c.accelerations_n_pilot_z_norm) + 1) > 15.0):
-            self.log(f"{agent_id} overload")
+            logging.warning(f"⚠️ TERMINATION: {agent_id} overload detected")
             return True, False, info
 
         red_alive = [aid for aid in ["A0100", "A0200"] if aid in env.agents and env.agents[aid].is_alive]
         blue_alive = [aid for aid in ["B0100", "B0200"] if aid in env.agents and env.agents[aid].is_alive]
 
         if len(red_alive) == 0:
-            self.log("Red eliminated")
+            logging.info(f"🏆 TERMINATION: Red eliminated, Blue wins!")
             return True, True, {"termination_reason": "red_eliminated", "winner": "blue"}
         elif len(blue_alive) == 0:
-            self.log("Blue eliminated")
+            logging.info(f"🏆 TERMINATION: Blue eliminated, Red wins!")
             return True, True, {"termination_reason": "blue_eliminated", "winner": "red"}
 
         return False, False, info
@@ -150,6 +150,16 @@ class TurnAroundShootingTacticalTask(MultipleCombatTask):
             'A0200': {'first_skate_done': False, 'turned_back': False, 'second_skate_done': False}
         }
         
+        # ✅ 全局同步状态 - 确保长机僚机同时触发
+        self.global_skate_triggers = {
+            'first_triggered': False,
+            'first_trigger_time': 0,
+            'second_triggered': False, 
+            'second_trigger_time': 0,
+            'third_triggered': False,
+            'third_trigger_time': 0
+        }
+        
         self.last_missile_launch_time = {"A0100": -999, "A0200": -999, "B0100": -999, "B0200": -999}
         self.friendly_burst_launch = {"A0100": 0, "A0200": 0}
         self.missile_launched = {"A0100": False, "A0200": False, "B0100": False, "B0200": False}
@@ -193,13 +203,16 @@ class TurnAroundShootingTacticalTask(MultipleCombatTask):
         blue_alive = [aid for aid in ["B0100", "B0200"] if aid in env.agents and env.agents[aid].is_alive]
 
         if env.current_step % 50 == 0:
-            logging.info(f"CHECK - Step {env.current_step}: Red={red_alive}, Blue={blue_alive}")
+            current_time = env.current_step * env.time_interval
+            logging.info(f"📊 CHECK - 时间{current_time:.1f}s Step{env.current_step}: Red存活={len(red_alive)}{red_alive}, Blue存活={len(blue_alive)}{blue_alive}")
 
         if len(red_alive) == 0:
-            logging.info("Red eliminated")
+            logging.warning(f"🔴 GAME OVER: Red全灭，Blue获胜！Step={env.current_step}")
+            logging.warning(f"   Red状态: A0100={env.agents.get('A0100', None) and env.agents['A0100'].is_alive}, A0200={env.agents.get('A0200', None) and env.agents['A0200'].is_alive}")
             return True, {"termination_reason": "red_eliminated", "winner": "blue"}
         elif len(blue_alive) == 0:
-            logging.info("Blue eliminated")
+            logging.warning(f"🔵 GAME OVER: Blue全灭，Red获胜！Step={env.current_step}")
+            logging.warning(f"   Blue状态: B0100={env.agents.get('B0100', None) and env.agents['B0100'].is_alive}, B0200={env.agents.get('B0200', None) and env.agents['B0200'].is_alive}")
             return True, {"termination_reason": "blue_eliminated", "winner": "red"}
 
         return False, info
@@ -318,30 +331,34 @@ class TurnAroundShootingTacticalTask(MultipleCombatTask):
         if env.current_step % 50 == 0:
             logging.info(f"📏 距离={distance/1000:.1f}km, 当前阶段={self.current_phase.value}")
 
-        # 战术阶段定义（距离从大到小递减）：
-        # >= 81km: NLT_MELD (接敌)
-        # 45-81km: MELD_MTR (接近)
-        # 41-45km: MTR_TR (导弹发射准备)
-        # 19.6-41km: TR_DOR (第一次脱离+回转交战) ← 关键阶段
-        # < 19.6km: DOR_DR (第二次脱离返航)
+        # ✅ 阶段只能前进，不能后退（防止循环）
+        phase_order = [
+            TacticalPhase.NLT_MELD,
+            TacticalPhase.MELD_MTR,
+            TacticalPhase.MTR_TR,
+            TacticalPhase.TR_DOR,
+            TacticalPhase.DOR_DR
+        ]
+        current_phase_index = phase_order.index(self.current_phase)
         
-        if distance < self.tactical_distances['TR_DOR_min']:
-            # < 19.6km
-            self.current_phase = TacticalPhase.DOR_DR
-        elif distance < self.tactical_distances['MTR_TR_min']:
-            # 19.6km <= 距离 < 41km → TR_DOR阶段
-            self.current_phase = TacticalPhase.TR_DOR
-        elif distance < self.tactical_distances['MELD_MTR_min']:
-            # 41km <= 距离 < 45km
-            self.current_phase = TacticalPhase.MTR_TR
-        elif distance < self.tactical_distances['NLT_MELD_min']:
-            # 45km <= 距离 < 81km
-            self.current_phase = TacticalPhase.MELD_MTR
+        # 根据距离判断新阶段
+        new_phase = self.current_phase
+        
+        if distance >= self.tactical_distances['NLT_MELD_min']:
+            new_phase = TacticalPhase.NLT_MELD
+        elif distance >= self.tactical_distances['MELD_MTR_min']:
+            new_phase = TacticalPhase.MELD_MTR
+        elif distance >= self.tactical_distances['MTR_TR_min']:
+            new_phase = TacticalPhase.MTR_TR
+        elif distance >= self.tactical_distances['TR_DOR_min']:
+            new_phase = TacticalPhase.TR_DOR
         else:
-            # >= 81km
-            self.current_phase = TacticalPhase.NLT_MELD
-
-        if old_phase != self.current_phase:
+            new_phase = TacticalPhase.DOR_DR
+        
+        # 只允许前进到更后的阶段
+        new_phase_index = phase_order.index(new_phase)
+        if new_phase_index > current_phase_index:
+            self.current_phase = new_phase
             current_time = env.current_step * env.time_interval
             self.phase_start_time = current_time
             self.phase_start_step = env.current_step
@@ -357,149 +374,257 @@ class TurnAroundShootingTacticalTask(MultipleCombatTask):
             return self._get_enemy_command_indices(env, agent_id)
 
     def _get_leader_command_indices(self, env, agent_id: str):
-        leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-        if leader_blue and leader_blue.is_alive:
+        """长机指令 - 使用全局同步触发机制"""
+        # 更新全局触发状态（只在长机时计算，避免重复）
+        if agent_id == "A0100":
+            self._update_global_triggers(env)
+        
+        # 获取距离用于日志显示
+        leader_blue = None
+        for blue_id in ["B0100", "B0200"]:
+            if blue_id in env._jsbsims and env._jsbsims[blue_id].is_alive:
+                leader_blue = env._jsbsims[blue_id]
+                break
+        
+        if leader_blue:
             distance = self._calculate_distance(env.agents[agent_id], leader_blue)
         else:
-            distance = 100000
+            distance = 100000  # 敌机全灭，设置大距离
+        
+        # 调试日志：每50步打印一次距离和阶段
+        if env.current_step % 50 == 0:
+            logging.info(f"🔍 {agent_id} 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km, 状态={self.turn_around_states[agent_id]}")
 
-        if agent_id in self.short_skate_states:
-            current_time = env.current_step * env.time_interval
-            return self._execute_turn_around_maneuver(env, agent_id, current_time, distance)
-
+        # 阶段1-3: 保持0度平稳飞行
         if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
             return self._maintain_heading_precise(env, agent_id, 0.0)
 
+        # 阶段4: TR-DOR - 使用全局同步触发
         elif self.current_phase == TacticalPhase.TR_DOR:
-            current_time = env.current_step * env.time_interval
             state = self.turn_around_states[agent_id]
             
+            # 第1次short skate: 基于全局触发
             if not state['first_skate_done']:
-                # 第一次short skate：距离<35km时触发（不依赖导弹发射）
-                if distance < self.turn_around_config['first_short_skate_distance']:
-                    logging.info(f"🔄 {agent_id} 触发第一次short skate，距离{distance/1000:.1f}km")
-                    return self._execute_turn_around_maneuver(env, agent_id, current_time, distance)
+                if self.global_skate_triggers['first_triggered']:
+                    if agent_id not in self.short_skate_states:
+                        logging.info(f"🔄 {agent_id}(长机) 执行第1次short skate（朝外侧左转）")
+                    return self._execute_short_skate_precise(env, agent_id, "left")
                 else:
                     return self._maintain_heading_precise(env, agent_id, 0.0)
-            elif not state['turned_back']:
-                # 回转重新交战：距离<25km时触发
-                if distance < self.turn_around_config['turn_back_distance']:
-                    logging.info(f"🔄 {agent_id} 触发回转重新交战，距离{distance/1000:.1f}km")
-                    return self._execute_turn_around_maneuver(env, agent_id, current_time, distance)
-                else:
-                    return self._maintain_heading_precise(env, agent_id, 180.0)
-            else:
-                # 回转完成，保持朝向0度继续交战
-                return self._maintain_heading_precise(env, agent_id, 0.0)
-
-        elif self.current_phase == TacticalPhase.DOR_DR:
-            current_time = env.current_step * env.time_interval
-            state = self.turn_around_states[agent_id]
             
-            if not state['second_skate_done']:
-                return self._execute_turn_around_maneuver(env, agent_id, current_time, distance)
+            # 第2次short skate: 基于全局触发（朝内侧回转交战）
+            elif not state['turned_back']:
+                if self.global_skate_triggers['second_triggered']:
+                    if agent_id not in self.short_skate_states:
+                        logging.info(f"🔄 {agent_id}(长机) 执行第2次short skate（朝内侧左转回转交战）")
+                    return self._execute_short_skate_precise(env, agent_id, "left")
+                else:
+                    # 保持180度等待全局触发
+                    return self._maintain_heading_precise(env, agent_id, 180.0)
+            
             else:
-                return self._maintain_heading_precise(env, agent_id, 180.0)
+                # 回转完成，检查是否需要第3次short skate
+                if not state['second_skate_done']:
+                    # 第3次short skate: 基于全局触发
+                    if self.global_skate_triggers['third_triggered']:
+                        if agent_id not in self.short_skate_states:
+                            logging.info(f"🔄 {agent_id}(长机) 执行第3次short skate（朝外侧左转返航）")
+                        return self._execute_short_skate_precise(env, agent_id, "left")
+                    else:
+                        # 保持0度交战，等待第3次触发
+                        return self._maintain_heading_precise(env, agent_id, 0.0)
+                else:
+                    # 第3次完成，保持180度返航
+                    return self._maintain_heading_precise(env, agent_id, 180.0)
+
+        # 阶段5: DOR-DR - 继续返航
+        elif self.current_phase == TacticalPhase.DOR_DR:
+            # 保持180度返航
+            return self._maintain_heading_precise(env, agent_id, 180.0)
         
         return self._maintain_heading_precise(env, agent_id, 0.0)
 
-    def _get_wingman_command_indices(self, env, agent_id: str):
-        return self._get_leader_command_indices(env, agent_id)
+    def _update_global_triggers(self, env):
+        """更新全局触发状态 - 确保长机僚机同步"""
+        current_time = env.current_step * env.time_interval
+        
+        # 获取平均距离用于触发判定
+        total_distance = 0
+        count = 0
+        for red_id in ["A0100", "A0200"]:
+            if red_id in env.agents and env.agents[red_id].is_alive:
+                for blue_id in ["B0100", "B0200"]:
+                    if blue_id in env._jsbsims and env._jsbsims[blue_id].is_alive:
+                        distance = self._calculate_distance(env.agents[red_id], env._jsbsims[blue_id])
+                        total_distance += distance
+                        count += 1
+        
+        avg_distance = total_distance / count if count > 0 else 100000
+        
+        # 第1次触发：基于距离
+        if not self.global_skate_triggers['first_triggered']:
+            if avg_distance < self.turn_around_config['first_short_skate_distance']:
+                self.global_skate_triggers['first_triggered'] = True
+                self.global_skate_triggers['first_trigger_time'] = current_time
+                logging.info(f"🌐 全局第1次short skate触发，平均距离{avg_distance/1000:.1f}km，时间{current_time:.1f}s")
+        
+        # 第2次触发：基于时间
+        if self.global_skate_triggers['first_triggered'] and not self.global_skate_triggers['second_triggered']:
+            time_since_first = current_time - self.global_skate_triggers['first_trigger_time']
+            if time_since_first > 15.0:
+                self.global_skate_triggers['second_triggered'] = True
+                self.global_skate_triggers['second_trigger_time'] = current_time
+                logging.info(f"🌐 全局第2次short skate触发，时间{time_since_first:.1f}s后")
+        
+        # 第3次触发：基于时间（第2次后10秒）
+        if self.global_skate_triggers['second_triggered'] and not self.global_skate_triggers['third_triggered']:
+            time_since_second = current_time - self.global_skate_triggers['second_trigger_time']
+            if time_since_second > 10.0:
+                self.global_skate_triggers['third_triggered'] = True
+                self.global_skate_triggers['third_trigger_time'] = current_time
+                logging.info(f"🌐 全局第3次short skate触发，第2次后{time_since_second:.1f}s")
 
-    def _execute_turn_around_maneuver(self, env, agent_id, current_time, distance):
+    def _get_wingman_command_indices(self, env, agent_id: str):
+        """僚机指令 - 完全重写战术回转逻辑"""
+        # 寻找存活的敌机
+        leader_blue = None
+        for blue_id in ["B0100", "B0200"]:
+            if blue_id in env._jsbsims and env._jsbsims[blue_id].is_alive:
+                leader_blue = env._jsbsims[blue_id]
+                break
+        
+        if leader_blue:
+            distance = self._calculate_distance(env.agents[agent_id], leader_blue)
+        else:
+            distance = 100000  # 敌机全灭，设置大距离
+        
+        # 调试日志：每50步打印一次距离和阶段
+        if env.current_step % 50 == 0:
+            logging.info(f"🔍 {agent_id} 阶段={self.current_phase.value}, 距离={distance/1000:.1f}km, 状态={self.turn_around_states[agent_id]}")
+
+        # 阶段1-3: 保持0度平稳飞行
+        if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_TR]:
+            return self._maintain_heading_precise(env, agent_id, 0.0)
+
+        # 阶段4: TR-DOR - 使用全局同步触发
+        elif self.current_phase == TacticalPhase.TR_DOR:
+            state = self.turn_around_states[agent_id]
+            
+            # 第1次short skate: 基于全局触发
+            if not state['first_skate_done']:
+                if self.global_skate_triggers['first_triggered']:
+                    if agent_id not in self.short_skate_states:
+                        logging.info(f"🔄 {agent_id}(僚机) 执行第1次short skate（朝外侧右转）")
+                    return self._execute_short_skate_precise(env, agent_id, "right")
+                else:
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
+            
+            # 第2次short skate: 基于全局触发（朝内侧回转交战）
+            elif not state['turned_back']:
+                if self.global_skate_triggers['second_triggered']:
+                    if agent_id not in self.short_skate_states:
+                        logging.info(f"🔄 {agent_id}(僚机) 执行第2次short skate（朝内侧右转回转交战）")
+                    return self._execute_short_skate_precise(env, agent_id, "right")
+                else:
+                    # 保持180度等待全局触发
+                    return self._maintain_heading_precise(env, agent_id, 180.0)
+            
+            else:
+                # 回转完成，检查是否需要第3次short skate
+                if not state['second_skate_done']:
+                    # 第3次short skate: 基于全局触发
+                    if self.global_skate_triggers['third_triggered']:
+                        if agent_id not in self.short_skate_states:
+                            logging.info(f"🔄 {agent_id}(僚机) 执行第3次short skate（朝外侧右转返航）")
+                        return self._execute_short_skate_precise(env, agent_id, "right")
+                    else:
+                        # 保持0度交战，等待第3次触发
+                        return self._maintain_heading_precise(env, agent_id, 0.0)
+                else:
+                    # 第3次完成，保持180度返航
+                    return self._maintain_heading_precise(env, agent_id, 180.0)
+
+        # 阶段5: DOR-DR - 继续返航
+        elif self.current_phase == TacticalPhase.DOR_DR:
+            # 保持180度返航
+            return self._maintain_heading_precise(env, agent_id, 180.0)
+        
+        return self._maintain_heading_precise(env, agent_id, 0.0)
+
+    def _execute_short_skate_precise(self, env, agent_id, direction):
+        """执行精确的Short Skate机动 - 完全复制pincer_attack的实现
+        
+        Args:
+            direction: "left" 左转, "right" 右转
+        
+        流程：
+            1. 前10秒：转向中间航向（左转315°，右转45°）
+            2. 10秒后：转向最终航向（180°或0°）
+        """
         current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
         
+        # 高度保护
         if current_altitude < 2000.0:
             altitude_cmd_id = self._convert_altitude_to_index(500.0)
             if env.current_step % 50 == 0:
-                logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，强制爬升")
+                logging.warning(f" {agent_id} 高度{current_altitude:.0f}m过低，强制爬升")
             return altitude_cmd_id, 8, 3
         
+        # 初始化Short Skate状态
         if agent_id not in self.short_skate_states:
-            state = self.turn_around_states[agent_id]
-            is_leader = (agent_id == "A0100")
-            
-            # 根据机动类型和角色确定目标航向
-            if not state['first_skate_done']:
-                # 第一次short skate: 朝外侧
-                # 长机朝左（-90°），僚机朝右（+90°）
-                if is_leader:
-                    target_heading = 270.0  # 朝左（西）
-                else:
-                    target_heading = 90.0   # 朝右（东）
-                maneuver_name = 'first_skate_outward'
-            elif not state['turned_back']:
-                # 回转重新交战: 朝内侧
-                # 长机朝右（+90°），僚机朝左（-90°）
-                if is_leader:
-                    target_heading = 90.0   # 朝右（东）
-                else:
-                    target_heading = 270.0  # 朝左（西）
-                maneuver_name = 'turn_back_inward'
+            # 确定中间航向 - 减小角度，不要太弧
+            if direction == "right":
+                target_heading = 30.0  # 右转30°（减小弧度）
+            elif direction == "left":
+                target_heading = 330.0  # 左转30°（减小弧度）
             else:
-                # 第二次short skate: 朝外侧返航
-                # 长机朝右（+90°），僚机朝左（-90°）
-                if is_leader:
-                    target_heading = 90.0   # 朝右（东）
-                else:
-                    target_heading = 270.0  # 朝左（西）
-                maneuver_name = 'second_skate_outward'
+                target_heading = 0.0
             
             self.short_skate_states[agent_id] = {
-                "target_heading": target_heading,
-                "maneuver_name": maneuver_name,
-                "start_time": current_time,
-                "is_leader": is_leader
+                'start_time': env.current_step * env.time_interval,
+                'phase': 'turn',
+                'target_heading': target_heading
             }
+        
+        # 执行Short Skate机动
+        skate_state = self.short_skate_states[agent_id]
+        current_time = env.current_step * env.time_interval
+        elapsed_time = current_time - skate_state['start_time']
+        
+        if elapsed_time < 6.0:  # 前6秒执行转弯（缩短时间）
+            return self._maintain_heading_precise(env, agent_id, skate_state['target_heading'])
+        else:  # 6秒后转向最终航向
+            # 确定最终航向
+            turn_around_state = self.turn_around_states[agent_id]
+            if not turn_around_state['first_skate_done']:
+                final_heading = 180.0  # 第1次：脱离到180°
+            elif not turn_around_state['turned_back']:
+                final_heading = 0.0    # 第2次：回转到0°
+            else:
+                final_heading = 180.0  # 第3次：返航到180°
             
-            direction = "左" if (is_leader and maneuver_name == 'first_skate_outward') or (not is_leader and maneuver_name != 'first_skate_outward') else "右"
-            logging.info(f"🔄 {agent_id}({'长机' if is_leader else '僚机'}) 开始{maneuver_name}: 朝{direction}转向{target_heading}°")
-        
-        state_maneuver = self.short_skate_states[agent_id]
-        target_heading = state_maneuver['target_heading']
-        maneuver_name = state_maneuver['maneuver_name']
-        current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
-        
-        if current_altitude < 3000.0:
-            altitude_cmd_id = self._convert_altitude_to_index(200.0)
-        else:
-            altitude_cmd_id = 7
-        
-        heading_diff = self._normalize_angle_diff(target_heading - current_heading)
-        
-        if abs(heading_diff) < 5.0:
-            # 机动完成，更新状态
-            if maneuver_name == 'first_skate_outward':
-                self.turn_around_states[agent_id]['first_skate_done'] = True
-                logging.info(f"✅ {agent_id} 完成第一次short skate（朝外侧），航向{current_heading:.1f}°")
-            elif maneuver_name == 'turn_back_inward':
-                self.turn_around_states[agent_id]['turned_back'] = True
-                logging.info(f"✅ {agent_id} 完成回转重新交战（朝内侧），航向{current_heading:.1f}°")
-            elif maneuver_name == 'second_skate_outward':
-                self.turn_around_states[agent_id]['second_skate_done'] = True
-                logging.info(f"✅ {agent_id} 完成第二次short skate（朝外侧），航向{current_heading:.1f}°")
+            # 检查是否完成
+            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            heading_diff = self._normalize_angle_diff(final_heading - current_heading)
             
-            del self.short_skate_states[agent_id]
-            return altitude_cmd_id, 8, 3
-        
-        if abs(heading_diff) > 30.0:
-            heading_cmd_id = 5 if heading_diff < 0 else 11
-        elif abs(heading_diff) > 10.0:
-            heading_cmd_id = 6 if heading_diff < 0 else 10
-        else:
-            heading_cmd_id = 7 if heading_diff < 0 else 9
-        
-        if env.current_step % 50 == 0:
-            logging.info(f"🔄 {agent_id} {maneuver_name}: {current_heading:.1f}° → {target_heading:.1f}° (差{heading_diff:.1f}°)")
-        
-        return altitude_cmd_id, heading_cmd_id, 3
-
-    def _normalize_angle_diff(self, angle_diff):
-        while angle_diff > 180:
-            angle_diff -= 360
-        while angle_diff < -180:
-            angle_diff += 360
-        return angle_diff
+            if abs(heading_diff) < 5.0:
+                # 机动完成，更新状态
+                if not turn_around_state['first_skate_done']:
+                    self.turn_around_states[agent_id]['first_skate_done'] = True
+                    self.turn_around_states[agent_id]['first_skate_time'] = current_time
+                    logging.info(f"✅ {agent_id} 完成第1次short skate，最终航向{current_heading:.1f}°")
+                elif not turn_around_state['turned_back']:
+                    self.turn_around_states[agent_id]['turned_back'] = True
+                    self.turn_around_states[agent_id]['turned_back_time'] = current_time
+                    logging.info(f"✅ {agent_id} 完成第2次short skate，最终航向{current_heading:.1f}°")
+                else:
+                    self.turn_around_states[agent_id]['second_skate_done'] = True
+                    self.turn_around_states[agent_id]['second_skate_time'] = current_time
+                    logging.info(f"✅ {agent_id} 完成第3次short skate，最终航向{current_heading:.1f}°")
+                
+                del self.short_skate_states[agent_id]
+            
+            return self._maintain_heading_precise(env, agent_id, final_heading)
 
     def _maintain_heading_precise(self, env, agent_id, target_heading):
         current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
@@ -567,14 +692,21 @@ class TurnAroundShootingTacticalTask(MultipleCombatTask):
 
             target_id = list(locked_targets.keys())[0]
             if target_id in env.agents and env.agents[target_id].is_alive:
-                missile_uid = env.agents[agent_id].launch_missile(target_id)
-                if missile_uid:
-                    self.last_missile_launch_time[agent_id] = current_time
-                    logging.info(f"✈️  {agent_id} 发射导弹 -> {target_id} at t={current_time:.1f}s")
+                target = env.agents[target_id]
+                self._launch_missile(env, agent_id, target, current_time)
+                self.last_missile_launch_time[agent_id] = current_time
 
         except Exception as e:
             logging.error(f"导弹发射错误 {agent_id}: {e}")
 
+    def _normalize_angle_diff(self, angle_diff):
+        """标准化角度差到[-180, 180]范围"""
+        while angle_diff > 180:
+            angle_diff -= 360
+        while angle_diff < -180:
+            angle_diff += 360
+        return angle_diff
+    
     def _convert_altitude_to_index(self, altitude_cmd):
         if altitude_cmd < 0:
             logging.warning(f"🛡️ 俯冲指令{altitude_cmd:.0f}m已禁用")
@@ -679,6 +811,70 @@ class TurnAroundShootingTacticalTask(MultipleCombatTask):
                         
         except Exception as e:
             logging.error(f"❌ RWR威胁检测错误: {e}")
+    
+    def _launch_missile(self, env, agent_id: str, target, current_time: float):
+        """发射导弹 - 根据发射平台选择导弹类型"""
+        try:
+            aircraft = env.agents[agent_id]
+            
+            # 检查导弹数量
+            if aircraft.num_missiles <= 0:
+                logging.warning(f"⚠️ {agent_id} 导弹已用尽，无法发射")
+                return
+
+            # 创建导弹ID
+            missile_count = 2 - aircraft.num_missiles + 1
+            base_id = agent_id[0] + agent_id[2:]
+            missile_uid = f"{base_id}{missile_count}"
+            
+            # 检查是否已存在（防止重复发射）
+            if missile_uid in env._tempsims:
+                logging.warning(f"⚠️ 导弹{missile_uid}已存在，跳过发射")
+                return
+
+            # 根据发射平台选择导弹类型
+            if agent_id.startswith('A'):  # 我方飞机 - 使用AIM-120C7
+                from envs.JSBSim.core.simulatior import MissileSimulator
+                missile = MissileSimulator.create(
+                    parent=aircraft,
+                    target=target,
+                    uid=missile_uid
+                )
+                missile_type = "AIM-120C-7"
+            else:  # 敌方飞机 - 使用R-27ER
+                from r27er_missile import R27ERMissileSimulator
+                missile = R27ERMissileSimulator.create(
+                    parent=aircraft,
+                    target=target,
+                    uid=missile_uid
+                )
+                missile_type = "R-27ER"
+
+            # 添加到环境
+            env.add_temp_simulator(missile)
+
+            # 初始化导弹记录
+            if not hasattr(env, '_missile_records'):
+                env._missile_records = {}
+            
+            env._missile_records[missile_uid] = {
+                'launcher': agent_id,
+                'target': target.uid,
+                'type': missile_type,
+                'status': 'LAUNCHED',
+                'launch_time': current_time,
+                'launch_position': aircraft.get_position().copy(),
+                'launch_velocity': aircraft.get_velocity().copy()
+            }
+
+            # 更新状态
+            aircraft.num_missiles -= 1
+            logging.info(f"✈️  {agent_id} 发射{missile_type}导弹 {missile_uid} -> {target.uid} at t={current_time:.1f}s")
+
+        except Exception as e:
+            logging.error(f"❌ 导弹发射失败 {agent_id}: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 if __name__ == "__main__":

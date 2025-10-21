@@ -22,7 +22,6 @@ def check_pytorch_gpu():
         # 检查 CUDA 可用性
         cuda_available = torch.cuda.is_available()
         print(f"\n{'✅' if cuda_available else '❌'} CUDA 可用性: {cuda_available}")
-        wei
         if cuda_available:
             # GPU 详细信息
             gpu_count = torch.cuda.device_count()

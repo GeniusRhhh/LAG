@@ -170,6 +170,9 @@ class UnifiedEnemyTacticalAI:
 
     def handle_missile_launch(self, env, agent_id: str, current_time: float):
         """处理敌方导弹发射逻辑"""
+        # 🔴 临时禁用导弹发射，专注观察机动过程
+        return
+        
         if not agent_id.startswith('B'):  # 只处理敌方
             return
 
@@ -1236,7 +1239,7 @@ class UnifiedEnemyTacticalAI:
                 logging.info(f"🛡️ {agent_id} 俯冲受限，改为水平机动")
                 return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, 0, 5)  # 水平转弯+加速
 
-            logging.info(f"敌方{agent_id}执行俯冲脱离: 转弯{turn_angle:.1f}°, 俯冲{dive_altitude:.0f}m")
+            #logging.info(f"敌方{agent_id}执行俯冲脱离: 转弯{turn_angle:.1f}°, 俯冲{dive_altitude:.0f}m")
             return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, -1, 5)  # 温和俯冲+加速
         except Exception as e:
             logging.error(f"动作执行失败 {agent_id} - dive_escape: {e}")
@@ -1253,7 +1256,7 @@ class UnifiedEnemyTacticalAI:
             target_heading = (current_heading + turn_angle) % 360.0
 
             # 🛡️ 完全安全的高度变化 - 完全禁用俯冲
-            altitude_change = random.choice([0, 1])  # 🛡️ 所有情况下都只允许平飞或爬升
+            altitude_change = random.choice([7, 8, 9])  # 保持高度或温和爬升（修复：原错误用0,1都是俯冲！）
             logging.info(f"🛡️ {agent_id} 高度{current_altitude:.0f}m，干扰弹机动使用安全高度变化")
 
             speed_change = 5  # 加速脱离
@@ -1271,7 +1274,7 @@ class UnifiedEnemyTacticalAI:
             current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
 
             # 🛡️ 螺旋俯冲已禁用，改为安全的螺旋转弯
-            logging.info(f"🛡️ {agent_id} 螺旋俯冲已改为安全螺旋转弯（高度{current_altitude:.0f}m）")
+            #logging.info(f"🛡️ {agent_id} 螺旋俯冲已改为安全螺旋转弯（高度{current_altitude:.0f}m）")
 
             # 温和的螺旋转弯（180度或360度）
             spiral_angle = random.choice([180.0, -180.0, 360.0, -360.0])  # 减少转弯角度
@@ -1280,10 +1283,10 @@ class UnifiedEnemyTacticalAI:
             # 🛡️ 完全禁用俯冲，改为水平或爬升
             safe_altitude_threshold = 5000.0
             if current_altitude < safe_altitude_threshold:
-                altitude_change = 1  # 强制爬升
+                altitude_change = 9  # 温和爬升150m（修复：原错误用1会导致严重俯冲1000m！）
                 logging.info(f"🛡️ {agent_id} 高度较低，螺旋转弯配合爬升")
             else:
-                altitude_change = random.choice([0, 1])  # 水平或爬升
+                altitude_change = random.choice([7, 8, 9])  # 保持高度或温和爬升（修复：原错误用0,1都是俯冲！）
 
             logging.info(f"敌方{agent_id}执行安全螺旋转弯: 螺旋{spiral_angle:.1f}°, 高度变化={altitude_change}")
             return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, altitude_change, 4)  # 螺旋转弯+中等加速
@@ -1440,10 +1443,10 @@ class UnifiedEnemyTacticalAI:
         split_angle = state['split_angle']
 
         # 安全的高度指令 - 根据当前高度决定
-        if current_altitude > 12000:  # 高空时可以保持或轻微下降
-            altitude_cmd = random.choice([8, 9])  # 保持高度或轻微下降
+        if current_altitude > 12000:  # 高空时可以保持或轻微爬升
+            altitude_cmd = random.choice([7, 8, 9])  # 保持高度或轻微/温和爬升
         else:  # 中低空时优先爬升
-            altitude_cmd = 0  # 爬升
+            altitude_cmd = 9  # 温和爬升150m（修复：原错误用0会导致极度俯冲1500m！）
 
         # 减少日志频率，避免刷屏
         if not hasattr(self, '_last_defensive_log_step'):
@@ -1529,7 +1532,7 @@ class UnifiedEnemyTacticalAI:
 
         if altitude_change > 0:
             # 爬升指令
-            altitude_cmd = 0  # 爬升
+            altitude_cmd = 9  # 温和爬升150m（修复：原错误用0会导致极度俯冲1500m！）
             logging.info(f"🛡️ {agent_id} 执行爬升{altitude_change:.0f}m（当前高度{current_altitude:.0f}m）")
         else:
             # 俯冲指令 - 🛡️ 智能安全检查
@@ -1537,16 +1540,16 @@ class UnifiedEnemyTacticalAI:
 
             if current_altitude < 2000.0:
                 # 高度过低，完全禁用俯冲
-                altitude_cmd = 0  # 改为爬升
+                altitude_cmd = 10  # 小幅爬升300m（修复：原错误用0会导致极度俯冲1500m！）
                 logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲{altitude_change:.0f}m已禁用，改为爬升")
             elif target_altitude < 1800.0:
                 # 俯冲会导致过低，限制俯冲深度
                 safe_altitude_change = current_altitude - 1800.0  # 最低到1800m
-                altitude_cmd = -1  # 温和俯冲
+                altitude_cmd = 6  # 轻微俯冲50m（修复：原错误用-1实际是极度爬升1500m）
                 logging.warning(f"🛡️ {agent_id} 俯冲受限：原计划{altitude_change:.0f}m，限制为{safe_altitude_change:.0f}m")
             else:
                 # 安全俯冲
-                altitude_cmd = -1  # 温和俯冲
+                altitude_cmd = 6  # 轻微俯冲50m（修复：原错误用-1实际是极度爬升1500m）
                 logging.info(f"🛡️ {agent_id} 执行安全俯冲{altitude_change:.0f}m（当前高度{current_altitude:.0f}m → {target_altitude:.0f}m）")
 
         return altitude_cmd, 8, 3  # 保持航向和速度

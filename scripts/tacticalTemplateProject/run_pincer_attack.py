@@ -20,6 +20,7 @@ sys.path.append(parent_dir)
 from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
 from envs.JSBSim.core.catalog import Catalog as c
 from pincer_attack_tactical_task_complete import PincerAttackTacticalTask
+from tactical_situation_recorder import TacticalSituationRecorder
 
 
 def _get_missile_status(missile_sim) -> str:
@@ -82,7 +83,7 @@ def setup_logging():
     logging.info(f"日志文件: {log_file}")
 
 
-def record_pincer_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
+def record_pincer_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, situation_recorder):
     """记录钳形夹击仿真数据 - 使用统一数据记录器，包含动作标注"""
     # 记录当前数据长度，用于确定新增数据
     prev_traj_len = len(trajectory_data)
@@ -107,9 +108,38 @@ def record_pincer_simulation_data(env, current_time, trajectory_data, radar_data
     trajectory_data.extend(temp_recorder.trajectory_data)
     radar_data.extend(temp_recorder.radar_data)
     missile_data.extend(temp_recorder.missile_data)
+    
+    # === 记录战术态势数据（新增）===
+    if situation_recorder is not None:
+        # 获取敌方机动意图（从unified_enemy_ai，与trajectory表保持一致）
+        action_b0100 = "Unknown"
+        action_b0200 = "Unknown"
+        
+        # 从统一敌方AI系统获取action_intent（与trajectory表的Action_Intent一致）
+        if tactical_task and hasattr(tactical_task, 'unified_enemy_ai') and tactical_task.unified_enemy_ai is not None:
+            try:
+                # 获取B0100的action_intent
+                if 'B0100' in env.agents and env.agents['B0100'].is_alive:
+                    annotation_b0100 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0100')
+                    action_b0100 = annotation_b0100.get('Action_Intent', 'Unknown')
+                
+                # 获取B0200的action_intent
+                if 'B0200' in env.agents and env.agents['B0200'].is_alive:
+                    annotation_b0200 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0200')
+                    action_b0200 = annotation_b0200.get('Action_Intent', 'Unknown')
+            except Exception as e:
+                logging.warning(f"获取敌方action_intent失败: {e}")
+        
+        # 记录态势帧
+        situation_recorder.record_frame(
+            env=env,
+            current_time=current_time,
+            action_intent_b0100=action_b0100,
+            action_intent_b0200=action_b0200
+        )
 
 
-def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None, tactical_task=None):
+def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None, tactical_task=None, situation_recorder=None):
     """保存钳形夹击CSV数据文件 - 纯净轨迹数据"""
     from unified_data_recorder import UnifiedDataRecorder
     # from pincer_tactical_action_extractor import PincerTacticalActionExtractor  # 已禁用动作标注系统
@@ -127,6 +157,13 @@ def save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, mis
 
     # 动作标注系统已禁用 - 生成纯净轨迹数据
     print("[CHECK] 钳形攻击纯净轨迹数据生成完成")
+    
+    # === 保存战术态势数据（新增）===
+    if situation_recorder is not None:
+        situation_file = os.path.join(output_dir, f"pincer_tactical_situation_{timestamp}.csv")
+        situation_recorder.save_to_csv(situation_file)
+        saved_files['tactical_situation'] = situation_file
+        print(f"[CHECK] 战术态势数据已保存: {situation_file}")
 
     return saved_files
 
@@ -375,6 +412,10 @@ def run_pincer_attack_simulation():
         trajectory_data = []
         radar_data = []
         missile_data = []
+        
+        # 初始化战术态势记录器（新增）
+        situation_recorder = TacticalSituationRecorder()
+        logging.info("战术态势记录器已初始化")
 
         # 仿真循环
         step_count = 0
@@ -403,7 +444,7 @@ def run_pincer_attack_simulation():
                 logging.warning(f"Failed to render step {step_count}: {e}")
 
             # 记录数据
-            record_pincer_simulation_data(env, current_time, trajectory_data, radar_data, missile_data)
+            record_pincer_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, situation_recorder)
 
             # 每25步打印一次状态 (5秒)
             if step_count % 25 == 0:
@@ -438,7 +479,7 @@ def run_pincer_attack_simulation():
         simulation_log = captured_output.getvalue()
 
         # 保存CSV数据 - 传入仿真日志和战术任务
-        save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log, tactical_task)
+        save_pincer_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log, tactical_task, situation_recorder)
 
         # 保存基本结果摘要
         save_simulation_results(env, step_count, current_time)
@@ -449,6 +490,7 @@ def run_pincer_attack_simulation():
         print(f"  CSV数据目录: {output_dir}")
         print(f"  轨迹数据: pincer_trajectory_{timestamp}.csv")
         print(f"  雷达数据: pincer_radar_status_{timestamp}.csv")
+        print(f"  战术态势: pincer_tactical_situation_{timestamp}.csv (25列)")
         if missile_data:
             print(f"  导弹数据: pincer_missile_trajectory_{timestamp}.csv")
             print(f"  导弹分析: pincer_missile_analysis_{timestamp}.csv")
@@ -656,7 +698,7 @@ def main():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='钳形夹击战术仿真')
-    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    parser.add_argument('--runs', type=int, default=10, help='运行次数（默认为1）')
     args = parser.parse_args()
 
     if args.runs > 1:

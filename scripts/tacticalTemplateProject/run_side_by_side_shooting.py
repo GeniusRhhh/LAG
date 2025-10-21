@@ -24,6 +24,7 @@ from envs.JSBSim.model.baseline_actor import BaselineActor
 from envs.JSBSim.utils.utils import get_root_dir
 import torch
 from enum import Enum
+from tactical_situation_recorder import TacticalSituationRecorder
 
 
 class TacticalPhase(Enum):
@@ -182,7 +183,7 @@ def check_simulation_end(env):
     return False
 
 
-def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder, tactical_task=None):
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder, tactical_task=None, situation_recorder=None):
     """记录仿真数据到CSV格式 - 使用统一数据记录器"""
     # 记录当前数据长度，用于确定新增数据
     prev_traj_len = len(data_recorder.trajectory_data)
@@ -196,9 +197,38 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
     trajectory_data.extend(data_recorder.trajectory_data[prev_traj_len:])
     radar_data.extend(data_recorder.radar_data[prev_radar_len:])
     missile_data.extend(data_recorder.missile_data[prev_missile_len:])
+    
+    # === 记录战术态势数据（新增）===
+    if situation_recorder is not None:
+        # 获取敌方机动意图（从unified_enemy_ai，与trajectory表保持一致）
+        action_b0100 = "Unknown"
+        action_b0200 = "Unknown"
+        
+        # 从统一敌方AI系统获取action_intent（与trajectory表的Action_Intent一致）
+        if tactical_task and hasattr(tactical_task, 'unified_enemy_ai') and tactical_task.unified_enemy_ai is not None:
+            try:
+                # 获取B0100的action_intent
+                if 'B0100' in env.agents and env.agents['B0100'].is_alive:
+                    annotation_b0100 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0100')
+                    action_b0100 = annotation_b0100.get('Action_Intent', 'Unknown')
+                
+                # 获取B0200的action_intent
+                if 'B0200' in env.agents and env.agents['B0200'].is_alive:
+                    annotation_b0200 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0200')
+                    action_b0200 = annotation_b0200.get('Action_Intent', 'Unknown')
+            except Exception as e:
+                logging.warning(f"获取敌方action_intent失败: {e}")
+        
+        # 记录态势帧
+        situation_recorder.record_frame(
+            env=env,
+            current_time=current_time,
+            action_intent_b0100=action_b0100,
+            action_intent_b0200=action_b0200
+        )
 
 
-def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None):
+def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None, situation_recorder=None):
     """保存CSV数据文件 - 使用统一数据记录器"""
     from unified_data_recorder import UnifiedDataRecorder
 
@@ -212,6 +242,16 @@ def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_da
 
     # 使用统一格式保存文件 - 传入仿真日志
     saved_files = recorder.save_csv_files(output_dir, timestamp, simulation_log)
+    
+    # === 保存战术态势数据（新增）===
+    if situation_recorder is not None:
+        try:
+            situation_file = os.path.join(output_dir, f"tactical_situation_{timestamp}.csv")
+            situation_recorder.save_to_csv(situation_file)
+            saved_files.append(situation_file)
+            print(f"✅ 战术态势数据已保存: {situation_file}")
+        except Exception as e:
+            logging.error(f"保存战术态势数据失败: {e}")
 
     return saved_files
 
@@ -285,6 +325,10 @@ def run_side_by_side_shooting_simulation():
         trajectory_data = []
         radar_data = []
         missile_data = []
+        
+        # 创建战术态势记录器
+        situation_recorder = TacticalSituationRecorder()
+        logging.info("战术态势记录器已初始化")
 
         # 创建持久的数据记录器实例
         from unified_data_recorder import UnifiedDataRecorder
@@ -331,7 +375,7 @@ def run_side_by_side_shooting_simulation():
                     logging.warning(f"Failed to render step {step}: {e}")
 
                 # 记录数据 - 使用持久的数据记录器，传递tactical_task参数
-                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder, env.task)
+                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, data_recorder, env.task, situation_recorder)
                 
                 # 检查是否有飞机被击落
                 if isinstance(dones, dict):
@@ -385,7 +429,7 @@ def run_side_by_side_shooting_simulation():
 
         # 保存CSV数据
         print("\n[DISK] 保存仿真数据...")
-        save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data)
+        save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, None, situation_recorder)
 
         # ACMI文件已在每步生成
         print(f"[DATA] ACMI文件已生成: {acmi_filepath}")
@@ -455,7 +499,7 @@ def main():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='并排射击战术仿真')
-    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    parser.add_argument('--runs', type=int, default=10, help='运行次数（默认为1）')
     args = parser.parse_args()
 
     if args.runs > 1:

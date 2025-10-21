@@ -22,21 +22,30 @@ from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
 from envs.JSBSim.core.catalog import Catalog as c
 from turn_around_shooting_tactical_task import TurnAroundShootingTacticalTask
 from turn_around_enemy_ai_adapter import create_turn_around_enemy_ai_integration
+from tactical_situation_recorder import TacticalSituationRecorder
 
 
-def setup_logging():
+def setup_logging(output_dir):
     """设置日志"""
+    # 确保输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 日志文件保存在结果目录下
+    log_file = os.path.join(output_dir, f'turn_around_simulation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(f'turn_around_simulation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log', encoding='utf-8'),
+            logging.FileHandler(log_file, encoding='utf-8'),
             logging.StreamHandler()
         ]
     )
+    
+    logging.info(f"📝 日志文件: {log_file}")
 
 
-def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data):
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, situation_recorder=None):
     """记录仿真数据 - 使用统一数据记录器"""
     from unified_data_recorder import UnifiedDataRecorder
 
@@ -51,26 +60,80 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
     temp_recorder.record_radar_data(env, current_time)
     temp_recorder.record_missile_data(env, current_time)
 
-    # 将数据添加到现有列表中
-    trajectory_data.extend(temp_recorder.trajectory_data)
-    radar_data.extend(temp_recorder.radar_data)
-    missile_data.extend(temp_recorder.missile_data)
+    # 将数据添加到现有列表中（添加类型检查）
+    if isinstance(temp_recorder.trajectory_data, list):
+        trajectory_data.extend(temp_recorder.trajectory_data)
+    if isinstance(temp_recorder.radar_data, list):
+        radar_data.extend(temp_recorder.radar_data)
+    if isinstance(temp_recorder.missile_data, list):
+        missile_data.extend(temp_recorder.missile_data)
+    
+    # === 记录战术态势数据（新增）===
+    if situation_recorder is not None:
+        # 获取敌方机动意图（从unified_enemy_ai，与trajectory表保持一致）
+        action_b0100 = "Unknown"
+        action_b0200 = "Unknown"
+        
+        # 从统一敌方AI系统获取action_intent（与trajectory表的Action_Intent一致）
+        if tactical_task and hasattr(tactical_task, 'unified_enemy_ai') and tactical_task.unified_enemy_ai is not None:
+            try:
+                # 获取B0100的action_intent
+                if 'B0100' in env.agents and env.agents['B0100'].is_alive:
+                    annotation_b0100 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0100')
+                    action_b0100 = annotation_b0100.get('Action_Intent', 'Unknown')
+                
+                # 获取B0200的action_intent
+                if 'B0200' in env.agents and env.agents['B0200'].is_alive:
+                    annotation_b0200 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0200')
+                    action_b0200 = annotation_b0200.get('Action_Intent', 'Unknown')
+            except Exception as e:
+                logging.warning(f"获取敌方action_intent失败: {e}")
+        
+        # 记录态势帧
+        situation_recorder.record_frame(
+            env=env,
+            current_time=current_time,
+            action_intent_b0100=action_b0100,
+            action_intent_b0200=action_b0200
+        )
 
 
-def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None):
+def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None, situation_recorder=None):
     """保存CSV数据文件"""
     from unified_data_recorder import UnifiedDataRecorder
 
     # 创建统一数据记录器
     recorder = UnifiedDataRecorder("turn_around_shooting")
 
-    # 将数据添加到记录器
-    recorder.trajectory_data = trajectory_data
-    recorder.radar_data = radar_data
-    recorder.missile_data = missile_data
+    # 将数据添加到记录器（确保是列表类型）
+    recorder.trajectory_data = trajectory_data if isinstance(trajectory_data, list) else []
+    recorder.radar_data = radar_data if isinstance(radar_data, list) else []
+    recorder.missile_data = missile_data if isinstance(missile_data, list) else []
+    
+    logging.info(f"📊 准备保存数据: trajectory={len(recorder.trajectory_data)}, radar={len(recorder.radar_data)}, missile={len(recorder.missile_data)}")
 
-    # 使用统一格式保存文件
-    saved_files = recorder.save_csv_files(output_dir, timestamp, simulation_log)
+    # 使用统一格式保存文件（返回dict）
+    saved_files_dict = recorder.save_csv_files(output_dir, timestamp, simulation_log)
+    
+    # === 保存战术态势数据（新增）===
+    if situation_recorder is not None:
+        try:
+            logging.info(f"📊 开始保存战术态势数据...")
+            logging.info(f"   记录器类型: {type(situation_recorder)}")
+            logging.info(f"   data_records类型: {type(situation_recorder.data_records)}")
+            logging.info(f"   数据帧数: {len(situation_recorder.data_records) if isinstance(situation_recorder.data_records, (list, dict)) else 'N/A'}")
+            
+            situation_file = os.path.join(output_dir, f"tactical_situation_{timestamp}.csv")
+            situation_recorder.save_to_csv(situation_file)
+            saved_files_dict['tactical_situation'] = situation_file
+            print(f"✅ 战术态势数据已保存: {situation_file}")
+        except Exception as e:
+            logging.error(f"保存战术态势数据失败: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+    
+    # 转换为list返回（兼容旧代码）
+    saved_files = list(saved_files_dict.values())
 
     print("[CHECK] 回转射击战术轨迹数据生成完成")
 
@@ -141,15 +204,22 @@ def print_tactical_info():
     print("战术描述: 双机在DOR前做short skate，到达安全回转距离后回转重新交战")
     print("")
     print("战术阶段:")
-    print("  1. NLT-MELD (90-81km): 保持间距，平稳飞行")
-    print("  2. MELD-MTR (81-45km): 保持间距，平稳飞行")
-    print("  3. MTR-TR (45-41km): 保持间距，平稳飞行，快结束时发射导弹")
-    print("  4. TR-DOR (41-19.6km): 第一次脱离+回转交战")
-    print("     - 平稳飞行一段后进行short skate（长机朝左，僚机朝右）-> 朝180度")
-    print("     - 到达安全距离后回转重新交战（长机朝右，僚机朝左）-> 朝0度")
-    print("  5. DOR-DR (19.6-14.5km): 第二次脱离返航")
-    print("     - 再次做short skate（长机朝右，僚机朝左）-> 朝180度")
-    print("     - 平稳飞行返航")
+    print("  1. NLT-MELD (≥81km): 保持0°朝向敌方，平稳飞行")
+    print("  2. MELD-MTR (81-45km): 保持0°朝向敌方，平稳飞行")
+    print("  3. MTR-TR (45-41km): 保持0°朝向敌方，发射导弹")
+    print("  4. TR-DOR (41-19.6km): 战术回转阶段")
+    print("     ① 距离35km: 第一次short skate脱离")
+    print("        长机: 左转(0°→315°→180°)")
+    print("        僚机: 右转(0°→45°→180°)")
+    print("        完成后保持180°飞行")
+    print("     ② 距离25km: 回转重新交战")
+    print("        长机: 右转(180°→45°→0°)")
+    print("        僚机: 左转(180°→315°→0°)")
+    print("        完成后保持0°继续接近")
+    print("  5. DOR-DR (<19.6km): 最终返航short skate")
+    print("     长机: 右转(0°→45°→180°)")
+    print("     僚机: 左转(0°→315°→180°)")
+    print("     完成后保持180°平稳返航")
     print("")
     print("配置文件: turn_around_shooting_tactical.yaml")
     print("=" * 80)
@@ -192,13 +262,14 @@ def print_simulation_status(env, current_time, step_count):
 
 def run_turn_around_simulation():
     """运行回转射击战术仿真"""
-    setup_logging()
-    print_tactical_info()
-
-    # 创建输出目录
+    # 创建输出目录（先创建，再设置日志）
     output_dir = os.path.join(current_dir, "turn_around_shooting_results")
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 设置日志（传入输出目录）
+    setup_logging(output_dir)
+    print_tactical_info()
 
     # 创建环境
     logging.info("创建回转射击战术环境...")
@@ -228,6 +299,10 @@ def run_turn_around_simulation():
     trajectory_data = []
     radar_data = []
     missile_data = []
+    
+    # 创建战术态势记录器
+    situation_recorder = TacticalSituationRecorder()
+    logging.info("战术态势记录器已初始化")
 
     # 准备ACMI文件路径
     acmi_filepath = os.path.join(output_dir, f"turn_around_2v2_{timestamp}.acmi")
@@ -269,7 +344,7 @@ def run_turn_around_simulation():
                 logging.warning(f"Failed to render step {step_count}: {e}")
             
             # 记录数据
-            record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data)
+            record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, situation_recorder)
             
             # 打印进度
             if step_count % 25 == 0:
@@ -305,7 +380,7 @@ def run_turn_around_simulation():
         
         # 保存CSV文件
         simulation_log = None
-        save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log)
+        save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log, situation_recorder)
         
         # 生成导弹分析
         if not missile_df.empty:

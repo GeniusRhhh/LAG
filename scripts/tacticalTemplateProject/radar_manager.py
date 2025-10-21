@@ -459,21 +459,39 @@ class UnifiedRadarManager:
             
             clutter_factor = self._calculate_ground_clutter_factor(
                 elevation, target_altitude, distance, self.apg68_radar)
+            
+            # 4. 地形遮蔽检查
+            is_terrain_masked = self._check_terrain_masking(
+                target_altitude, distance, elevation, self.apg68_radar)
+            
+            if is_terrain_masked:
+                # 目标被地形遮蔽，探测概率为0
+                logging.debug(f"🏔️ {agent.uid} 目标 {target_id} 被地形遮蔽："
+                            f"高度={target_altitude:.0f}m，距离={distance/1000:.1f}km，仰角={elevation:.1f}°")
+                return 0.0, {
+                    "rcs": dynamic_rcs,
+                    "radial_velocity": radial_velocity,
+                    "in_notch": in_notch,
+                    "clutter_factor": clutter_factor,
+                    "terrain_masked": True,
+                    "base_prob": 0.0,
+                    "final_prob": 0.0
+                }
 
-            # 4. 角度因子 - APG-68宽波束搜索（±120°），简化为固定值
+            # 5. 角度因子 - APG-68宽波束搜索（±120°），简化为固定值
             angle_factor = 0.92
 
-            # 5. 仰角因子 - APG-68优秀的下视能力
+            # 6. 仰角因子 - APG-68优秀的下视能力
             elevation_factor = max(0.80, 1.0 - abs(elevation) / 60.0)
 
-            # 6. 大气衰减因子（APG-68优化的X波段设计）
+            # 7. 大气衰减因子（APG-68优化的X波段设计）
             atmospheric_factor = max(0.80, 1.0 - (distance / self.apg68_radar.max_detection_range) *
                                    self.apg68_radar.atmospheric_absorption * 500)
 
-            # 7. 天气影响（APG-68对恶劣天气适应性更好）
+            # 8. 天气影响（APG-68对恶劣天气适应性更好）
             weather_factor = self.environmental_conditions["weather_factor"]
 
-            # 8. 下视下射能力加成（APG-68强项）
+            # 9. 下视下射能力加成（APG-68强项）
             look_down_bonus = 1.1 if elevation < -10.0 and self.apg68_radar.has_look_down_shoot_down else 1.0
 
             # ===== 综合探测概率（APG-68完备模型） =====
@@ -489,6 +507,7 @@ class UnifiedRadarManager:
                 "radial_velocity": radial_velocity,
                 "in_notch": in_notch,
                 "clutter_factor": clutter_factor,
+                "terrain_masked": False,
                 "base_prob": base_prob,
                 "final_prob": total_prob
             }
@@ -892,6 +911,56 @@ class UnifiedRadarManager:
             logging.error(f"❌ 地面杂波计算错误: {e}")
             return 1.0
 
+    def _check_terrain_masking(self, target_altitude: float, distance: float, 
+                               elevation: float, radar_model) -> bool:
+        """
+        检查目标是否被地形遮蔽
+        
+        地形遮蔽条件：
+        - 目标高度低于地形遮蔽阈值
+        - 雷达下视角（elevation < 0）
+        - 距离越远，遮蔽判定越宽松（考虑地球曲率和雷达视线）
+        
+        Args:
+            target_altitude: 目标海拔高度 (m)
+            distance: 雷达到目标距离 (m)
+            elevation: 雷达仰角 (度，负值为下视)
+            radar_model: 雷达模型
+            
+        Returns:
+            bool: True表示被地形遮蔽，False表示可见
+        """
+        try:
+            # 获取地形高度和遮蔽阈值
+            terrain_height = self.environmental_conditions.get("terrain_height", 0.0)
+            
+            if isinstance(radar_model, APG68RadarModel):
+                masking_threshold = radar_model.terrain_masking_threshold  # 300m
+            else:  # N001VE
+                masking_threshold = radar_model.terrain_masking_threshold  # 500m
+            
+            # 计算目标相对地形的高度
+            target_relative_height = target_altitude - terrain_height
+            
+            # 仅在下视角时检查地形遮蔽
+            if elevation >= 0:
+                return False  # 仰视无地形遮蔽
+            
+            # 基于距离的动态遮蔽阈值（距离越远，雷达视线越平，遮蔽判定越宽松）
+            # 公式：动态阈值 = 基础阈值 × (1 + distance / 50km)
+            dynamic_threshold = masking_threshold * (1.0 + distance / 50000.0)
+            
+            # 判断是否被遮蔽
+            if target_relative_height < dynamic_threshold:
+                # 目标高度过低，被地形遮蔽
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"❌ 地形遮蔽检查错误: {e}")
+            return False  # 出错时假设无遮蔽
+
     def _update_rwr_states(self, env, current_time: float):
         """
         更新RWR（雷达告警接收机）状态
@@ -1176,19 +1245,37 @@ class UnifiedRadarManager:
             
             clutter_factor = self._calculate_ground_clutter_factor(
                 elevation, target_altitude, distance, self.n001ve_radar)
+            
+            # 4. 地形遮蔽检查
+            is_terrain_masked = self._check_terrain_masking(
+                target_altitude, distance, elevation, self.n001ve_radar)
+            
+            if is_terrain_masked:
+                # 目标被地形遮蔽，探测概率为0
+                logging.debug(f"🏔️ {agent.uid} 目标 {target_id} 被地形遮蔽："
+                            f"高度={target_altitude:.0f}m，距离={distance/1000:.1f}km，仰角={elevation:.1f}°")
+                return 0.0, {
+                    "rcs": dynamic_rcs,
+                    "radial_velocity": radial_velocity,
+                    "in_notch": in_notch,
+                    "clutter_factor": clutter_factor,
+                    "terrain_masked": True,
+                    "base_prob": 0.0,
+                    "final_prob": 0.0
+                }
 
-            # 4. 角度因子 - N001VE机械扫描（±70°），简化为固定值
+            # 5. 角度因子 - N001VE机械扫描（±70°），简化为固定值
             angle_factor = 0.90
 
-            # 5. 仰角因子 - 低仰角性能更好（提高最小值）
+            # 6. 仰角因子 - 低仰角性能更好（提高最小值）
             elevation_factor = max(0.8, 1.0 - abs(elevation) / 45.0)
 
-            # 6. 大气衰减因子（减少衰减影响）
+            # 7. 大气衰减因子（减少衰减影响）
             atmospheric_factor = max(0.8, 1.0 - (distance / self.n001ve_radar.max_detection_range) *
                                    self.n001ve_radar.atmospheric_absorption * 500)
 
 
-            # 7. 天气影响
+            # 8. 天气影响
             weather_factor = self.environmental_conditions["weather_factor"]
 
 
@@ -1205,6 +1292,7 @@ class UnifiedRadarManager:
                 "radial_velocity": radial_velocity,
                 "in_notch": in_notch,
                 "clutter_factor": clutter_factor,
+                "terrain_masked": False,
                 "base_prob": base_prob,
                 "final_prob": total_prob
             }

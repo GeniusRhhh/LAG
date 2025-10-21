@@ -27,7 +27,7 @@ aircraft_configs: {
       ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
       ic_u_fps: 820.0,            # 250m/s ≈ 820英尺/秒
     },
-    missile: 4
+    missile: 2
   },
   A0200: {
     color: Red,
@@ -39,7 +39,7 @@ aircraft_configs: {
       ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
       ic_u_fps: 820.0,            # 250m/s ≈ 820英尺/秒
     },
-    missile: 4
+    missile: 2
   },
   B0100: {
     color: Blue,
@@ -51,19 +51,19 @@ aircraft_configs: {
       ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
       ic_u_fps: 820.0,            # 250m/s ≈ 820英尺/秒
     },
-    missile: 4
+    missile: 2
   },
   B0200: {
     color: Blue,
     model: f16,
     init_state: {
-      ic_long_gc_deg: 120.01,     # 敌方僚机，右侧1km偏移
+      ic_long_gc_deg: 120.06,     # 敌方僚机，右侧1km偏移
       ic_lat_geod_deg: 60.8,      # 90km距离
       ic_h_sl_ft: 26247,          # 8000米高度（安全高度）
       ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
       ic_u_fps: 820.0,            # 250m/s ≈ 820英尺/秒
     },
-    missile: 4
+    missile: 2
   }
 }
 

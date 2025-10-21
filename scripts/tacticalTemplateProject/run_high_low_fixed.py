@@ -23,9 +23,10 @@ sys.path.append(parent_dir)
 from envs.JSBSim.envs.multiplecombat_env import MultipleCombatEnv
 from envs.JSBSim.core.catalog import Catalog as c
 from scripts.tacticalTemplateProject.high_low_attack_fixed import HighLowAttackTacticalTask
+from tactical_situation_recorder import TacticalSituationRecorder
 
 
-def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, tactical_task=None):
+def record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, tactical_task=None, situation_recorder=None):
     """记录仿真数据 - 完全复制拖曳射击"""
     from unified_data_recorder import UnifiedDataRecorder
 
@@ -39,9 +40,38 @@ def record_simulation_data(env, current_time, trajectory_data, radar_data, missi
     trajectory_data.extend(temp_recorder.trajectory_data)
     radar_data.extend(temp_recorder.radar_data)
     missile_data.extend(temp_recorder.missile_data)
+    
+    # === 记录战术态势数据（新增）===
+    if situation_recorder is not None:
+        # 获取敌方机动意图（从unified_enemy_ai，与trajectory表保持一致）
+        action_b0100 = "Unknown"
+        action_b0200 = "Unknown"
+        
+        # 从统一敌方AI系统获取action_intent（与trajectory表的Action_Intent一致）
+        if tactical_task and hasattr(tactical_task, 'unified_enemy_ai') and tactical_task.unified_enemy_ai is not None:
+            try:
+                # 获取B0100的action_intent
+                if 'B0100' in env.agents and env.agents['B0100'].is_alive:
+                    annotation_b0100 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0100')
+                    action_b0100 = annotation_b0100.get('Action_Intent', 'Unknown')
+                
+                # 获取B0200的action_intent
+                if 'B0200' in env.agents and env.agents['B0200'].is_alive:
+                    annotation_b0200 = tactical_task.unified_enemy_ai.get_action_annotation_for_csv('B0200')
+                    action_b0200 = annotation_b0200.get('Action_Intent', 'Unknown')
+            except Exception as e:
+                logging.warning(f"获取敌方action_intent失败: {e}")
+        
+        # 记录态势帧
+        situation_recorder.record_frame(
+            env=env,
+            current_time=current_time,
+            action_intent_b0100=action_b0100,
+            action_intent_b0200=action_b0200
+        )
 
 
-def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None):
+def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log=None, situation_recorder=None):
     """保存CSV数据文件 - 完全复制拖曳射击"""
     from unified_data_recorder import UnifiedDataRecorder
 
@@ -55,6 +85,15 @@ def save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_da
 
     # 使用统一格式保存文件
     saved_files = recorder.save_csv_files(output_dir, timestamp, simulation_log)
+    
+    # === 保存战术态势数据（新增）===
+    if situation_recorder is not None:
+        try:
+            situation_file = os.path.join(output_dir, f"tactical_situation_{timestamp}.csv")
+            situation_recorder.save_to_csv(situation_file)
+            saved_files['tactical_situation'] = situation_file
+        except Exception as e:
+            logging.error(f"保存战术态势数据失败: {e}")
 
     return saved_files
 
@@ -112,6 +151,10 @@ def run_high_low_attack_simulation():
         radar_data = []
         missile_data = []
         
+        # 创建战术态势记录器
+        situation_recorder = TacticalSituationRecorder()
+        logging.info("战术态势记录器已初始化")
+        
         # 获取智能体列表
         agents = list(env.agents.keys())
         
@@ -153,7 +196,7 @@ def run_high_low_attack_simulation():
 
             # 记录数据
             try:
-                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, env.task)
+                record_simulation_data(env, current_time, trajectory_data, radar_data, missile_data, env.task, situation_recorder)
             except Exception as e:
                 logging.warning(f"Failed to record data at step {step_count}: {e}")
 
@@ -187,7 +230,7 @@ def run_high_low_attack_simulation():
         
         # 保存CSV数据
         try:
-            saved_files = save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log)
+            saved_files = save_csv_data(output_dir, timestamp, trajectory_data, radar_data, missile_data, simulation_log, situation_recorder)
             print("CSV数据文件已保存:")
             for file_type, file_path in saved_files.items():
                 print(f"  {file_type}: {file_path}")
@@ -307,7 +350,7 @@ def main():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='上下夹击战术仿真')
-    parser.add_argument('--runs', type=int, default=1, help='运行次数（默认为1）')
+    parser.add_argument('--runs', type=int, default=10, help='运行次数（默认为1）')
     args = parser.parse_args()
 
     if args.runs > 1:
