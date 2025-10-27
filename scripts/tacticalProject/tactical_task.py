@@ -463,12 +463,9 @@ class TacticalTask(MultipleCombatTask):
             input_obs[3:12] = raw_obs[:9]
             input_obs = np.nan_to_num(input_obs, nan=0.0)
             
-            # 调试：打印输入给baseline的指令（每30步）
-            # if env.current_step % 30 == 0:
-            #     logging.warning(f"📥 [baseline输入] {agent_id}")
-            #     logging.warning(f"   指令索引: alt={altitude_cmd_id} hdg={heading_cmd_id} vel={velocity_cmd_id}")
-            #     logging.warning(f"   归一化值: alt={input_obs[0]:.3f} hdg={input_obs[1]:.3f} vel={input_obs[2]:.3f}")
-            #     logging.warning(f"   观测前3维: {raw_obs[:3]}")
+            # 调试：打印输入给baseline的指令（每60步）
+            if env.current_step % 60 == 0 and agent_id.startswith('A'):
+                logging.info(f"   → baseline输入: 归一化值 alt={input_obs[0]:.3f} hdg={input_obs[1]:.3f} vel={input_obs[2]:.3f}")
             
             input_obs = np.expand_dims(input_obs, axis=0)
             
@@ -688,6 +685,10 @@ class TacticalTask(MultipleCombatTask):
         distance = self._calculate_distance(env)
         adjusted_distance = distance  # 初始化为实际距离
         
+        # 如果指定了agent_id，且是敌方，直接返回（敌方不使用我方战术系统）
+        if agent_id and agent_id.startswith('B'):
+            return
+        
         # 如果指定了agent_id，考虑僚机滞后
         if agent_id:
             is_lead = agent_id.endswith('100')
@@ -705,8 +706,17 @@ class TacticalTask(MultipleCombatTask):
             new_phase = self._determine_phase_by_distance(adjusted_distance)
             
             # 更新该飞机的阶段（添加滞后避免频繁切换）
-            old_phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
-            if new_phase != old_phase:
+            old_phase = self.agent_phases.get(agent_id, None)
+            
+            # 首次初始化：如果是NLT阶段且是长机，立即执行NLT决策
+            if old_phase is None and new_phase == TacticalPhase.NLT_MELD:
+                if agent_id.endswith('100'):  # 长机
+                    logging.info(f"⚡ 我方{agent_id}: 首次进入{new_phase.value}阶段 (距离{adjusted_distance/1000:.0f}km)")
+                    self.agent_phases[agent_id] = new_phase
+                    self._make_decision_at_phase(env, agent_id, new_phase)
+                else:
+                    self.agent_phases[agent_id] = new_phase
+            elif new_phase != old_phase:
                 current_time = env.current_step * env.time_interval
                 # 只在重要阶段转换时打印（简化）
                 if new_phase in [TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR, TacticalPhase.TR_DOR]:
@@ -1175,15 +1185,9 @@ class TacticalTask(MultipleCombatTask):
         heading_cmd_id = 8   # 保持航向
         velocity_cmd_id = 3  # 保持速度
         
-        # 针对长机A0100的超精确航向控制（目标0°）
-        if agent_id == "A0100" and target_heading == 0.0:
-            # 超精确控制：0.5度精度
-            if abs(heading_diff) > 0.5:
-                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
-        else:
-            # 其他飞机的标准精确控制：1度精度
-            if abs(heading_diff) > 1.0:
-                heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
+        # 精度控制：3度精度（防止过于灵敏）
+        if abs(heading_diff) > 3.0:
+            heading_cmd_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
         
         return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
     
@@ -1561,12 +1565,12 @@ class TacticalTask(MultipleCombatTask):
                 if dist_to_north <= radius:
                     in_boundary = True
             
-            # 如果在边界内且高度正常，返回False
-            if in_boundary and not near_z:
+            # 如果在边界内且高度正常，返回False - 允许战术自由执行
+            if in_boundary and not out_z:  # 改为out_z而不是near_z，只在严格超出时拦截
                 return False, None
             
+            # 只有严格超出边界时才拦截战术执行
             # 计算返回目标点（返回到跑马道中心线Y=0）
-            # 保持当前X坐标，但将Y坐标引导回中心线
             target_x = x  # 保持当前南北位置
             target_y = 0  # 返回中心线
             cap_center_z = (self.cap_boundary['z_min'] + self.cap_boundary['z_max']) / 2
@@ -1598,17 +1602,11 @@ class TacticalTask(MultipleCombatTask):
             else:
                 alt_cmd = 7   # 保持高度
             
-            # 如果严格超出边界
-            if not in_boundary or out_z:
-                logging.warning(f"🚨 [{agent_id}] 超出CAP跑马道! "
-                              f"位置:({x/1000:.1f},{y/1000:.1f},{z/1000:.0f}m) "
-                              f"返回中心线 航向调整{heading_diff:+.1f}°")
-                return True, (alt_cmd, heading_cmd, 5)  # 加速返回
-            
-            # 接近边界（缓冲区内）- 只记录debug，不输出info
-            else:
-                logging.debug(f"[{agent_id}] 接近CAP边界，轻微调整")
-                return True, (alt_cmd, heading_cmd, 4)
+            # 严格超出边界才返回True
+            logging.warning(f"🚨 [{agent_id}] 超出CAP跑马道! "
+                          f"位置:({x/1000:.1f},{y/1000:.1f},{z/1000:.0f}m) "
+                          f"返回中心线 航向调整{heading_diff:+.1f}°")
+            return True, (alt_cmd, heading_cmd, 5)  # 加速返回
             
         except Exception as e:
             logging.error(f"CAP边界检查失败: {e}")
@@ -1634,6 +1632,11 @@ class TacticalTask(MultipleCombatTask):
                 return 7, 8, 3
         
         # ===== 我方战术系统 =====
+        # 只对我方（A开头）执行战术系统
+        if not agent_id.startswith('A'):
+            logging.error(f"⚠️ 错误：敌方{agent_id}进入我方战术系统！")
+            return 7, 8, 3  # 平飞
+        
         # 1. 更新全局阶段
         self._update_tactical_phase(env)
         
@@ -2148,9 +2151,18 @@ class TacticalTask(MultipleCombatTask):
         
         # 长机动作序列
         if is_lead:
-            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
+                return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif self.current_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time)
@@ -2174,9 +2186,18 @@ class TacticalTask(MultipleCombatTask):
             elif wingman_phase == TacticalPhase.MELD_MTR:
                 # 快速回正到0°
                 return self._maintain_heading_precise(env, agent_id, 0.0)
-            elif wingman_phase in [TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            elif wingman_phase == TacticalPhase.MTR_LR:
                 return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif wingman_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段保持350°航向，完成中制导
+                return self._maintain_heading_precise(env, agent_id, 350.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time)
@@ -2216,7 +2237,7 @@ class TacticalTask(MultipleCombatTask):
         
         # 长机动作序列（前机）
         if is_lead:
-            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
                 # 长机初期加速（缩短时间，减少航向偏离）
                 if current_time < 4.0:
                     # 前4秒加速（快速建立速度差）
@@ -2224,7 +2245,16 @@ class TacticalTask(MultipleCombatTask):
                 else:
                     # 之后恢复正常速度平飞
                     return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif self.current_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
+                return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     # 左侧返航
@@ -2247,7 +2277,7 @@ class TacticalTask(MultipleCombatTask):
             if wingman_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR]:
                 # 建立后方队形：主动调整速度和航向
                 return self._establish_rear_formation(env, agent_id, current_time)
-            elif wingman_phase in [TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            elif wingman_phase == TacticalPhase.MTR_LR:
                 # 保持后方队形：跟随长机 - 优先检查是否刚完成Crank
                 if hasattr(self, 'wingman_crank_state') and self.wingman_crank_state.get("completed", False):
                     # 刚完成一字型，继续使用establish逻辑保持队形
@@ -2257,7 +2287,20 @@ class TacticalTask(MultipleCombatTask):
                         return self._establish_rear_formation(env, agent_id, current_time)
                 # 正常保持后方队形
                 return self._maintain_rear_formation(env, agent_id)
+            elif wingman_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持后方队形，完成中制导
+                if hasattr(self, 'wingman_crank_state') and self.wingman_crank_state.get("completed", False):
+                    recent_completion = current_time - self.wingman_crank_state.get("completed_time", 0) < 60.0
+                    if recent_completion:
+                        return self._establish_rear_formation(env, agent_id, current_time)
+                return self._maintain_rear_formation(env, agent_id)
             elif wingman_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     # 右侧返航
@@ -2297,9 +2340,18 @@ class TacticalTask(MultipleCombatTask):
         
         # 长机动作序列
         if is_lead:
-            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
+                return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif self.current_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
@@ -2317,9 +2369,18 @@ class TacticalTask(MultipleCombatTask):
             else:
                 wingman_phase = self.current_phase
             
-            if wingman_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            if wingman_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
+                return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif wingman_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
@@ -2359,10 +2420,19 @@ class TacticalTask(MultipleCombatTask):
         if is_lead:
             target_altitude = 6096.0  # 保持低空6000m
             
-            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
                 # 保持低空0°航向
                 return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif self.current_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
+                return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time, 'left')
@@ -2396,10 +2466,19 @@ class TacticalTask(MultipleCombatTask):
                 else:
                     # 已到达高度，保持10°右偏
                     return self._maintain_heading_precise(env, agent_id, 10.0)
-            elif wingman_phase in [TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
-                # 保持高空10°右偏（不是0°！）
+            elif wingman_phase == TacticalPhase.MTR_LR:
+                # 保持高空10°右偏
+                return self._maintain_heading_precise(env, agent_id, 10.0)
+            elif wingman_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段保持10°右偏，完成中制导
                 return self._maintain_heading_precise(env, agent_id, 10.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     # 俯冲后右侧返航
@@ -2433,16 +2512,36 @@ class TacticalTask(MultipleCombatTask):
         
         # 长机动作（左侧包抄）
         if is_lead:
-            if self.current_phase == TacticalPhase.NLT_MELD:
+            # 使用飞机的独立阶段，而不是全局阶段
+            lead_phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
+            
+            # 调试：打印长机的阶段和目标航向
+            if env.current_step % 60 == 0:
+                logging.info(f"  🎯 [钳形攻势-长机] {agent_id} 阶段:{lead_phase.value}")
+            
+            if lead_phase == TacticalPhase.NLT_MELD:
                 # 初期保持0°，延迟展开
+                if env.current_step % 60 == 0:
+                    logging.info(f"     → 目标航向:0°")
                 return self._maintain_heading_precise(env, agent_id, 0.0)
-            elif self.current_phase == TacticalPhase.MELD_MTR:
+            elif lead_phase == TacticalPhase.MELD_MTR:
                 # MELD-MTR阶段：展开到左侧315°（-45°）
+                if env.current_step % 60 == 0:
+                    logging.info(f"     → 目标航向:315°")
                 return self._maintain_heading_precise(env, agent_id, 315.0)
-            elif self.current_phase in [TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            elif lead_phase == TacticalPhase.MTR_LR:
                 # MTR-LR阶段：收拢到0°形成钳形夹击
                 return self._maintain_heading_precise(env, agent_id, 0.0)
-            elif self.current_phase == TacticalPhase.TR_DOR:
+            elif lead_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
+                return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif lead_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     # 内侧返航：右转（与左侧Crank相反）
@@ -2467,10 +2566,19 @@ class TacticalTask(MultipleCombatTask):
             elif wingman_phase == TacticalPhase.MELD_MTR:
                 # MELD-MTR阶段：展开到右侧45°
                 return self._maintain_heading_precise(env, agent_id, 45.0)
-            elif wingman_phase in [TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
+            elif wingman_phase == TacticalPhase.MTR_LR:
                 # MTR-LR阶段：收拢到0°形成钳形夹击
                 return self._maintain_heading_precise(env, agent_id, 0.0)
+            elif wingman_phase == TacticalPhase.LR_TR:
+                # LR阶段（78km）：发射主动雷达弹，中制导开始
+                last_launch = self.last_missile_launch_time.get(agent_id, -999)
+                if last_launch < 0:  # 还未发射
+                    self.missile_launched[agent_id] = True  # 标记需要发射
+                
+                # LR阶段继续保持航向，完成中制导
+                return self._maintain_heading_precise(env, agent_id, 0.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
+                # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
                     # 内侧返航：左转（与右侧Crank相反）
@@ -2834,14 +2942,22 @@ class TacticalTask(MultipleCombatTask):
         # 获取战术指令索引
         altitude_cmd_id, heading_cmd_id, velocity_cmd_id = self._get_tactical_command_indices(env, agent_id)
         
-        # 关键调试日志：每10步打印一次指令（排查转圈问题）
-        if env.current_step % 10 == 0:
+        # 关键调试日志：每60步打印一次指令
+        if env.current_step % 60 == 0 and agent_id.startswith('A'):
             alt_change = self.norm_delta_altitude[altitude_cmd_id] * 1000
             hdg_change = np.rad2deg(self.norm_delta_heading[heading_cmd_id])
             vel_change = self.norm_delta_velocity[velocity_cmd_id] * 100
             current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
-            
-            # 调试输出已删除
+            phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
+            logging.info(f"🔧 [{agent_id}] 阶段:{phase.value} 当前航向:{current_heading:.1f}° 指令:alt={altitude_cmd_id},hdg={heading_cmd_id}({hdg_change:+.1f}°),vel={velocity_cmd_id}")
+        
+        # 敌方导弹发射检查（在LR_TR阶段）
+        if agent_id.startswith('B') and hasattr(self, 'enemy_ai'):
+            phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
+            if phase == TacticalPhase.LR_TR:
+                # 在LR阶段（78km）敌方也发射导弹
+                current_time = env.current_step * env.time_interval
+                self.enemy_ai.handle_missile_launch(env, agent_id, current_time)
         
         # 使用baseline模型生成底层控制
         return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)

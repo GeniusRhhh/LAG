@@ -688,7 +688,7 @@ class UnifiedEnemyTacticalAI:
             old_phase = self.current_phase.get(agent_id, EnemyTacticalPhase.MELD_MTR)
             if old_phase != new_phase:
                 self.current_phase[agent_id] = new_phase
-                logging.info(f"敌方{agent_id}战术阶段转换: {old_phase.value} → {new_phase.value} (距离: {distance/1000:.1f}km)")
+                # logging.info(f"敌方{agent_id}战术阶段转换: {old_phase.value} → {new_phase.value} (距离: {distance/1000:.1f}km)")
 
         except Exception as e:
             logging.error(f"战术阶段更新失败 {agent_id}: {e}")
@@ -756,7 +756,7 @@ class UnifiedEnemyTacticalAI:
             if old_mode != selected_mode:
                 self.tactical_mode[agent_id] = selected_mode
                 self.last_mode_switch[agent_id] = current_time
-                logging.info(f"敌方{agent_id}战术模式切换: {old_mode.value} → {selected_mode.value} (威胁: {threat.threat_level.name})")
+                # logging.info(f"敌方{agent_id}战术模式切换: {old_mode.value} → {selected_mode.value} (威胁: {threat.threat_level.name})")
 
             return selected_mode
 
@@ -856,7 +856,7 @@ class UnifiedEnemyTacticalAI:
 
             # 🛡️ 低高度强制爬升
             if current_altitude < 2000.0:
-                logging.error(f"🚨 {agent_id} 高度{current_altitude:.0f}m过低，强制爬升！")
+                # logging.error(f"🚨 {agent_id} 高度{current_altitude:.0f}m过低，强制爬升！")
                 return self._execute_altitude_change(env, agent_id, 500.0)  # 爬升500米
 
             # 生成动作参数（如果还没有）- 🛡️ 现在包含智能高度感知
@@ -1297,7 +1297,7 @@ class UnifiedEnemyTacticalAI:
             else:
                 altitude_change = random.choice([7, 8, 9])  # 保持高度或温和爬升（修复：原错误用0,1都是俯冲！）
 
-            logging.info(f"敌方{agent_id}执行安全螺旋转弯: 螺旋{spiral_angle:.1f}°, 高度变化={altitude_change}")
+            # logging.info(f"敌方{agent_id}执行安全螺旋转弯: 螺旋{spiral_angle:.1f}°, 高度变化={altitude_change}")
             return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, altitude_change, 4)  # 螺旋转弯+中等加速
         except Exception as e:
             logging.error(f"动作执行失败 {agent_id} - spiral_dive: {e}")
@@ -1380,7 +1380,7 @@ class UnifiedEnemyTacticalAI:
             'turn_cold_angle': turn_cold_angle
         }
 
-        logging.info(f"敌方{agent_id}启动Short Skate: Crank={crank_angle:.1f}°, Turn Cold={turn_cold_angle:.1f}°")
+        # logging.info(f"敌方{agent_id}启动Short Skate: Crank={crank_angle:.1f}°, Turn Cold={turn_cold_angle:.1f}°")
 
     def _execute_aggressive_approach(self, env, agent_id: str) -> Tuple[int, int, int]:
         """执行攻击接近机动"""
@@ -1498,7 +1498,7 @@ class UnifiedEnemyTacticalAI:
                         if ss_state['phase'] == 'escape':
                             # Short Skate完成，转入直接返航
                             state['phase'] = 'direct_return'
-                            logging.info(f"敌方{agent_id}返航: 战术返航 → 直接返航")
+                            # logging.info(f"敌方{agent_id}返航: 战术返航 → 直接返航")
 
                     return result
                 else:
@@ -1530,10 +1530,10 @@ class UnifiedEnemyTacticalAI:
             'use_short_skate': use_short_skate
         }
 
-        if use_short_skate:
-            logging.info(f"敌方{agent_id}开始战术返航 (包含Short Skate)")
-        else:
-            logging.info(f"敌方{agent_id}开始直接返航")
+        # if use_short_skate:
+        #     logging.info(f"敌方{agent_id}开始战术返航 (包含Short Skate)")
+        # else:
+        #     logging.info(f"敌方{agent_id}开始直接返航")
 
     def _execute_altitude_change(self, env, agent_id: str, altitude_change: float) -> Tuple[int, int, int]:
         """执行高度变化 - 🛡️ 智能高度感知安全机制"""
@@ -1646,7 +1646,7 @@ class UnifiedEnemyTacticalAI:
         if hasattr(self, 'return_states') and agent_id in self.return_states:
             del self.return_states[agent_id]
 
-        logging.info(f"敌方{agent_id}状态已重置")
+        # logging.info(f"敌方{agent_id}状态已重置")
 
     def get_agent_status(self, agent_id: str) -> Dict[str, Any]:
         """获取智能体当前状态信息 - 用于调试和监控"""
