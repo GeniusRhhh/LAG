@@ -23,6 +23,9 @@ aircraft_configs: {
       ic_h_sl_ft: 20000,
       ic_psi_true_deg: 0.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   },
   A0200: {
@@ -34,6 +37,9 @@ aircraft_configs: {
       ic_h_sl_ft: 20000,
       ic_psi_true_deg: 0.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   },
   B0100: {
@@ -45,6 +51,9 @@ aircraft_configs: {
       ic_lat_geod_deg: 60.1,
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   },
   B0200: {
@@ -56,6 +65,9 @@ aircraft_configs: {
       ic_lat_geod_deg: 60.1,
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   }
 }

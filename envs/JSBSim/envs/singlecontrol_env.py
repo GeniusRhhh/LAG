@@ -31,9 +31,22 @@ class SingleControlEnv(BaseEnv):
     def reset_simulators(self):
         if self.init_states is None:
             self.init_states = [sim.init_state.copy() for sim in self.agents.values()]
+        
+        # 根据飞机型号设置不同的速度范围
+        agent = list(self.agents.values())[0]
+        if agent.model == 'su27sk':
+            # SU-27: 更重，需要更高的速度避免失速
+            min_velocity = 600.  # ~183 m/s
+            max_velocity = 1200. # ~366 m/s
+        else:
+            # F-16或其他
+            min_velocity = 400.
+            max_velocity = 1200.
+        
         init_heading = self.np_random.uniform(0., 180.)
-        init_altitude = self.np_random.uniform(14000., 30000.)
-        init_velocities_u = self.np_random.uniform(400., 1200.)
+        init_altitude = self.np_random.uniform(20000., 30000.)  # 提高最低高度
+        init_velocities_u = self.np_random.uniform(min_velocity, max_velocity)
+        
         for init_state in self.init_states:
             init_state.update({
                 'ic_psi_true_deg': init_heading,
@@ -55,7 +68,11 @@ class SingleControlEnv(BaseEnv):
         # Apply actions
         action = self._unpack(action)
         for agent_id in self.agents.keys():
-            a_action = self.task.normalize_action(self, agent_id, action[agent_id])
+            # action[agent_id]可能是(1, 4)或(4,)，需要确保是(4,)
+            agent_action = action[agent_id]
+            if isinstance(agent_action, np.ndarray) and agent_action.ndim > 1:
+                agent_action = agent_action.squeeze()
+            a_action = self.task.normalize_action(self, agent_id, agent_action)
             self.agents[agent_id].set_property_values(self.task.action_var, a_action)
 
         # Run simulation

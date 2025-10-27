@@ -85,7 +85,11 @@ class BaseSimulator(ABC):
         lon, lat, alt = self.get_geodetic()
         roll, pitch, yaw = self.get_rpy() * 180 / np.pi
         log_msg = f"{self.uid},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
-        log_msg += f"Name={self.model.upper()},"
+        # 格式化飞机名称用于ACMI显示
+        display_name = self.model.upper()
+        if display_name == "SU27SK":
+            display_name = "SU27"
+        log_msg += f"Name={display_name},"
         log_msg += f"Color={self.color}"
         return log_msg
 
@@ -277,9 +281,20 @@ class AircraftSimulator(BaseSimulator):
 
         self.jsbsim_exec = jsbsim.FGFDMExec(os.path.join(get_root_dir(), 'data'))
         self.jsbsim_exec.set_debug_level(0)
+        logging.debug(f"🛩️  {self.uid} 正在加载飞机模型: {self.model}")
         self.jsbsim_exec.load_model(self.model)
+        
+        # 验证模型加载成功并输出关键参数（只在第一次加载时输出）
+        if not hasattr(self.__class__, f'_loaded_{self.model}'):
+            try:
+                wing_area = self.jsbsim_exec['metrics/Sw-sqft']
+                empty_weight = self.jsbsim_exec['inertia/empty-weight-lbs']
+                logging.info(f"✅ {self.model.upper()} 模型加载: 翼面积={wing_area:.1f}ft² | 空重={empty_weight:.0f}lbs")
+                setattr(self.__class__, f'_loaded_{self.model}', True)
+            except:
+                logging.debug(f"✅ {self.uid} 模型加载成功: {self.model}")
 
-        # 预处理 JSBSim 属性，添加默认访问权限
+        # JSBSim 
         jsbsim_props = self.jsbsim_exec.query_property_catalog("")
         processed_props = []
         for prop in jsbsim_props:
@@ -490,6 +505,9 @@ class AircraftSimulator(BaseSimulator):
             if prop.access == "R" and prop.update:
                 prop.update(self)
             return self.jsbsim_exec.get_property_value(prop.name_jsbsim)
+        elif isinstance(prop, str):
+            # 支持直接使用字符串属性名
+            return self.jsbsim_exec.get_property_value(prop)
         logging.error(f"Invalid prop type: {type(prop)}")
         raise ValueError(f"prop type unhandled: {type(prop)}")
 
@@ -499,6 +517,9 @@ class AircraftSimulator(BaseSimulator):
             self.jsbsim_exec.set_property_value(prop.name_jsbsim, value)
             if "W" in prop.access and prop.update:
                 prop.update(self)
+        elif isinstance(prop, str):
+            # 支持直接使用字符串属性名
+            self.jsbsim_exec.set_property_value(prop, value)
         else:
             logging.error(f"Invalid prop type: {type(prop)}")
             raise ValueError(f"prop type unhandled: {type(prop)}")

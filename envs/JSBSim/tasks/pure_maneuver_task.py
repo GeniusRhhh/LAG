@@ -35,8 +35,9 @@ class PureManeuverTask(MultipleCombatTask):
         self.initial_heading = {}
         self.initial_altitude = {}
         self.trajectory_data = {}
-        self.my_lowlevel_policy = BaselineActor()
-        self.enemy_baseline_policy = BaselineActor()
+        # SU27模型使用use_mlp_actlayer=True训练
+        self.my_lowlevel_policy = BaselineActor(use_mlp_actlayer=True)
+        self.enemy_baseline_policy = BaselineActor(use_mlp_actlayer=True)
         self._inner_rnn_states = {}
         self._enemy_rnn_states = {}
 
@@ -70,9 +71,23 @@ class PureManeuverTask(MultipleCombatTask):
         logging.info("PureManeuverTask初始化完成 - 支持基础机动和组合机动")
 
     def _load_baseline_models(self):
-        """加载baseline模型"""
+        """加载baseline模型 - 优先加载SU27模型"""
+        import os
         try:
-            model_path = get_root_dir() + '/model/baseline_model.pt'
+            root_dir = get_root_dir()
+            # 优先尝试加载su27_baseline.pt
+            su27_model_path = os.path.join(root_dir, 'model', 'su27_baseline.pt')
+            default_model_path = os.path.join(root_dir, 'model', 'baseline_model.pt')
+            
+            if os.path.exists(su27_model_path):
+                model_path = su27_model_path
+                logging.info(f"✅ 加载SU27 baseline模型: {model_path}")
+            elif os.path.exists(default_model_path):
+                model_path = default_model_path
+                logging.info(f"⚠️ 使用默认baseline模型(F16): {model_path}")
+            else:
+                raise FileNotFoundError(f"未找到baseline模型文件")
+            
             if torch.cuda.is_available():
                 device = torch.device("cuda")
                 checkpoint = torch.load(model_path)
@@ -83,8 +98,9 @@ class PureManeuverTask(MultipleCombatTask):
             self.my_lowlevel_policy.eval()
             self.enemy_baseline_policy.load_state_dict(checkpoint)
             self.enemy_baseline_policy.eval()
+            logging.info(f"✅ Baseline模型加载成功")
         except Exception as e:
-            logging.error(f"加载baseline模型失败: {e}")
+            logging.error(f"❌ 加载baseline模型失败: {e}")
             self.my_lowlevel_policy = None
             self.enemy_baseline_policy = None
 
@@ -569,15 +585,16 @@ class PureManeuverTask(MultipleCombatTask):
             return (None, None, None, None, None)
 
     def _process_observer_behavior(self, env, agent_id):
-        """处理观察飞机的行为 - 修复索引以保持平稳飞行"""
+        """处理观察飞机的行为 - 使用SU27 baseline保持平飞"""
         try:
             # 使用新数组的中间索引来保持平稳飞行
             # 高度：15个值的中间是索引7 (对应0米变化)
             # 航向：17个值的中间是索引8 (对应0度变化)
-            # 速度：7个值的中间是索引3 (对应0m/s变化)
+            # 速度：7个值的中间是索引3 (对应0m/s速度变化)
             altitude_cmd_id = 7  # 对应0米高度变化
             heading_cmd_id = 8   # 对应0度航向变化
             velocity_cmd_id = 3  # 对应0m/s速度变化
+            # 使用SU27 baseline策略
             return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
         except Exception as e:
             logging.error(f"{agent_id} 观察行为错误: {e}")

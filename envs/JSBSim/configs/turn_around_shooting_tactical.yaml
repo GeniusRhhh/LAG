@@ -43,7 +43,7 @@ aircraft_configs: {
   },
   B0100: {
     color: Blue,
-    model: f16,
+    model: su27sk,
     init_state: {
       ic_long_gc_deg: 120.0,      # 敌方长机
       ic_lat_geod_deg: 60.8,      # 90km距离 (0.8度纬度差约90km)
@@ -55,7 +55,7 @@ aircraft_configs: {
   },
   B0200: {
     color: Blue,
-    model: f16,
+    model: su27sk,
     init_state: {
       ic_long_gc_deg: 120.06,     # 敌方僚机，右侧1km偏移
       ic_lat_geod_deg: 60.8,      # 90km距离

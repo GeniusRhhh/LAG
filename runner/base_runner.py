@@ -87,7 +87,7 @@ class Runner(object):
 
     @torch.no_grad()
     def compute(self):
-        logging.info("Calling Runner.compute - this should not happen!")
+        logging.debug("Computing advantages and returns...")
         self.policy.prep_rollout()
         next_values = self.policy.get_values(np.concatenate(self.buffer.obs[-1]),
                                              np.concatenate(self.buffer.rnn_states_critic[-1]),

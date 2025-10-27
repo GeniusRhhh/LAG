@@ -14,6 +14,7 @@ class HeadingTask(BaseTask):
     '''
     def __init__(self, config):
         super().__init__(config)
+        self.step_count = 0  # 添加step_count属性
 
         self.reward_functions = [
             HeadingReward(self.config),
@@ -30,6 +31,16 @@ class HeadingTask(BaseTask):
     @property
     def num_agents(self):
         return 1
+
+    def reset(self, env):
+        """重置任务状态"""
+        super().reset(env)
+        self.step_count = 0
+
+    def step(self, env):
+        """更新任务状态"""
+        super().step(env)
+        self.step_count += 1
 
     def load_variables(self):
         self.state_var = [
