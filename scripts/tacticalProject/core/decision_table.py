@@ -1,0 +1,156 @@
+"""
+决策表模块
+根据我方意图、敌我态势、敌机意图查询可用战术和机动
+"""
+import logging
+
+
+class DecisionTable:
+    """决策表 - 完整实现文档中的决策表"""
+    
+    def __init__(self):
+        self._build_decision_tables()
+    
+    def _build_decision_tables(self):
+        """构建决策表"""
+        
+        # NLT节点决策表
+        self.nlt_table = {
+            # (我方意图, 敌我态势, 敌机意图类型) -> (可用战术列表, 可用机动列表)
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            
+            ('DEFENSIVE', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+        }
+        
+        # MELD节点决策表（可调整战术）
+        self.meld_table = self.nlt_table.copy()  # MELD与NLT类似，但可以包含战术爬升/下降
+        
+        # MTR节点决策表（维持战术或脱离）
+        self.mtr_table = {}  # 简化：维持当前战术
+        
+        # DOR节点决策表（规避机动）
+        self.dor_table = {}  # 规避机动
+        
+        # DR节点决策表（重新进攻或返航）
+        self.dr_table = {}  # 重新进攻决策
+    
+    def query_nlt(self, my_intent, threat_level, enemy_intent_type):
+        """查询NLT节点决策表"""
+        key = (my_intent, threat_level, enemy_intent_type)
+        result = self.nlt_table.get(key)
+        if result:
+            return result
+        else:
+            # 默认返回
+            logging.warning(f"NLT决策表未找到匹配项: {key}, 使用默认值")
+            return (['SIDE_BY_SIDE'], ['LEVEL_FLIGHT'])
+    
+    def query_meld(self, my_intent, threat_level, enemy_intent_type):
+        """查询MELD节点决策表"""
+        key = (my_intent, threat_level, enemy_intent_type)
+        result = self.meld_table.get(key)
+        if result:
+            return result
+        else:
+            logging.warning(f"MELD决策表未找到匹配项: {key}, 使用默认值")
+            return (['SIDE_BY_SIDE'], ['LEVEL_FLIGHT'])
+    
+    def should_retreat_at_mtr(self, my_intent, threat_level, enemy_intent_type):
+        """MTR节点：判断是否应该撤退"""
+        # 防御意图且敌方脱离时撤退
+        if my_intent == 'DEFENSIVE' and enemy_intent_type == 'ESCAPE_TYPE':
+            return True
+        return False
+    
+    def should_retreat_at_tr(self, my_intent, threat_level, enemy_intent_type):
+        """TR节点：判断是否应该撤退"""
+        # 防御意图时撤退
+        if my_intent == 'DEFENSIVE':
+            if threat_level == 'DISADVANTAGE' or enemy_intent_type == 'ESCAPE_TYPE':
+                return True
+        return False
+    
+    def should_re_engage_at_dr(self, my_intent, threat_level, enemy_intent_type):
+        """DR节点：判断是否应该重新进攻"""
+        # 激进肃清：总是重新进攻
+        if my_intent == 'AGGRESSIVE_CLEAR':
+            return True
+        
+        # 保守肃清：我方占优时重新进攻
+        if my_intent == 'CONSERVATIVE_CLEAR':
+            if threat_level == 'ADVANTAGE' and enemy_intent_type != 'ESCAPE_TYPE':
+                return True
+        
+        # 防御意图：不重新进攻
+        return False

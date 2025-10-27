@@ -1,0 +1,2 @@
+time,agent_id,phase,decision_type,selected_tactic,selected_maneuver,reason
+39.2,A0100,MELD_MTR,TACTIC,PINCER_ATTACK,None,Adjusted from SIDE_BY_SIDE

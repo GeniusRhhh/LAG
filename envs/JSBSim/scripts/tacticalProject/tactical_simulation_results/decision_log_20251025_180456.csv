@@ -1,0 +1,3 @@
+time,agent_id,phase,decision_type,selected_tactic,selected_maneuver,reason
+44.800000000000004,A0100,MELD_MTR,TACTIC,HIGH_LOW_ATTACK,None,Adjusted from SIDE_BY_SIDE
+163.8,A0100,NLT_MELD,TACTIC,SEQUENTIAL_ATTACK,None,"Threat:DISADVANTAGE, Intent:ESCAPE_TYPE"
