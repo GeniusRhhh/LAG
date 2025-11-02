@@ -100,10 +100,148 @@ class DecisionTable:
         self.mtr_table = {}  # 简化：维持当前战术
         
         # DOR节点决策表（规避机动）
-        self.dor_table = {}  # 规避机动
+        # (我方意图, 敌我态势, 敌机意图类型) -> (可用战术列表, 可用机动列表)
+        self.dor_table = {
+            # 激进肃清 - 我方占优
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_EVASION'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_EVASION'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_EVASION'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            # 激进肃清 - 敌方占优
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            
+            # 保守肃清 - 我方占优
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            # 保守肃清 - 敌方占优
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            
+            # 防御意图
+            ('DEFENSIVE', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+        }
         
         # DR节点决策表（重新进攻或返航）
-        self.dr_table = {}  # 重新进攻决策
+        # (我方意图, 敌我态势, 敌机意图类型) -> (可用战术列表, 可用机动列表)
+        self.dr_table = {
+            # 激进肃清 - 我方占优
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            # 激进肃清 - 敌方占优
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            
+            # 保守肃清 - 我方占优
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            # 保守肃清 - 敌方占优（终止任务）
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'ATTACK_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            
+            # 防御意图：不进入此阶段（在TR节点已脱离）
+        }
     
     def query_nlt(self, my_intent, threat_level, enemy_intent_type):
         """查询NLT节点决策表"""
@@ -140,6 +278,26 @@ class DecisionTable:
             if threat_level == 'DISADVANTAGE' or enemy_intent_type == 'ESCAPE_TYPE':
                 return True
         return False
+    
+    def query_dor(self, my_intent, threat_level, enemy_intent_type):
+        """查询DOR节点决策表"""
+        key = (my_intent, threat_level, enemy_intent_type)
+        result = self.dor_table.get(key)
+        if result:
+            return result
+        else:
+            logging.warning(f"DOR决策表未找到匹配项: {key}, 使用默认值")
+            return (['TACTICAL_EVASION'], ['NOTCH_BACK', 'SHORT_SKATE'])
+    
+    def query_dr(self, my_intent, threat_level, enemy_intent_type):
+        """查询DR节点决策表"""
+        key = (my_intent, threat_level, enemy_intent_type)
+        result = self.dr_table.get(key)
+        if result:
+            return result
+        else:
+            logging.warning(f"DR决策表未找到匹配项: {key}, 使用默认值")
+            return (['TACTICAL_TURN'], ['NOTCH_BACK', 'SHORT_SKATE'])
     
     def should_re_engage_at_dr(self, my_intent, threat_level, enemy_intent_type):
         """DR节点：判断是否应该重新进攻"""

@@ -4,11 +4,12 @@
 from typing import Dict, Optional, Tuple
 from .control_range_manager import ControlRangeManager
 from .threat_calculator import ThreatCalculator
-from .tactic_selector import TacticSelector
+from .threat_evaluator import ThreatEvaluator
+from .tactic_selector_v2 import TacticSelectorV2
 from aircraft.aircraft_decision import AircraftDecisionNode
 from intent.our_intent import OurIntentSystem
 from intent.enemy_intent import EnemyIntentRecognizer
-from situation.situation_evaluator import SituationEvaluator
+from core.situation_evaluator import SituationEvaluator
 from utils.constants import OUR_INTENT
 
 
@@ -25,10 +26,11 @@ class TacticalDecisionManager:
         # 核心组件
         self.control_range_manager = ControlRangeManager()
         self.threat_calculator = ThreatCalculator()
-        self.tactic_selector = TacticSelector()
+        self.threat_evaluator = ThreatEvaluator()  # 统一威胁评估器
+        self.tactic_selector = TacticSelectorV2(self.threat_evaluator)  # 使用V2版本
         self.our_intent = OurIntentSystem(our_intent_type)
         self.enemy_intent_recognizer = EnemyIntentRecognizer()
-        self.situation_evaluator = SituationEvaluator()
+        self.situation_evaluator = SituationEvaluator()  # 统一5维评估器
         
         # 单机决策节点
         self.lead_decision = AircraftDecisionNode('A0100', 'lead')

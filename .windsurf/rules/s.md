@@ -1,6 +1,4 @@
 ---
 trigger: manual
-glob:
-description:
 ---
 

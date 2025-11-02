@@ -12,7 +12,7 @@ class TacticSelectorV2:
     
     def select_tactic_from_candidates(self, candidates, my_aircraft, enemy_aircraft, env):
         """
-        从候选战术中选择最佳战术
+        从候选战术中选择最佳战术并分配角色
         
         基于文档中的决策根据：
         - 拖曳射击：总威胁度差异大 (一机>0.8, 另一机<0.5)
@@ -28,7 +28,9 @@ class TacticSelectorV2:
             env: 环境
         
         Returns:
-            str: 选定的战术名称
+            tuple: (tactic_name, roles)
+            - tactic_name: str, 选定的战术名称
+            - roles: dict, 角色分配 {'lead': role, 'wingman': role}
         """
         try:
             # 计算威胁值
@@ -117,13 +119,112 @@ class TacticSelectorV2:
             # 选择得分最高的战术
             if scores:
                 selected_tactic = max(scores, key=scores.get)
+                
+                # 根据战术分配角色
+                roles = self._assign_roles(selected_tactic, avg_lead_threat, avg_wingman_threat, 
+                                          max_angle_threat, max_altitude_threat)
+                
                 logging.info(f"战术选择: {selected_tactic} (得分: {scores[selected_tactic]:.2f})")
                 logging.info(f"威胁值 - 长机: {avg_lead_threat:.2f}, 僚机: {avg_wingman_threat:.2f}, "
                            f"角度: {max_angle_threat:.2f}, 高度: {max_altitude_threat:.2f}")
-                return selected_tactic
+                logging.info(f"角色分配: 长机={roles['lead']}, 僚机={roles['wingman']}")
+                
+                return selected_tactic, roles
             else:
-                return 'SIDE_BY_SIDE'
+                return 'SIDE_BY_SIDE', {'lead': 'left', 'wingman': 'right'}
                 
         except Exception as e:
             logging.error(f"战术选择错误: {e}")
-            return 'SIDE_BY_SIDE'
+            return 'SIDE_BY_SIDE', {'lead': 'left', 'wingman': 'right'}
+    
+    def _assign_roles(self, tactic, lead_threat, wingman_threat, angle_threat, altitude_threat):
+        """
+        根据战术和威胁值分配角色
+        
+        Args:
+            tactic: 战术名称
+            lead_threat: 长机威胁值
+            wingman_threat: 僚机威胁值
+            angle_threat: 角度威胁值
+            altitude_threat: 高度威胁值
+        
+        Returns:
+            dict: {'lead': role, 'wingman': role}
+        """
+        roles = {'lead': 'lead', 'wingman': 'wingman'}  # 默认角色
+        
+        if tactic == 'DRAG_SHOOT':
+            # 拖曳射击：威胁小者为拖曳机（前出吸引火力），威胁大者为射击机（后方掩护）
+            if lead_threat < wingman_threat:
+                roles = {'lead': 'drag', 'wingman': 'shooter'}
+            else:
+                roles = {'lead': 'shooter', 'wingman': 'drag'}
+        
+        elif tactic == 'PINCER_ATTACK':
+            # 钳形攻势：左右包夹
+            roles = {'lead': 'left', 'wingman': 'right'}
+        
+        elif tactic == 'HIGH_LOW_ATTACK':
+            # 上下夹击：威胁大者在高位（承担主要打击），威胁小者在低位
+            if lead_threat > wingman_threat:
+                roles = {'lead': 'high', 'wingman': 'low'}
+            else:
+                roles = {'lead': 'low', 'wingman': 'high'}
+        
+        elif tactic in ['SEQUENTIAL_ATTACK', 'FRONT_BACK']:
+            # 前后攻击：威胁小者在前，威胁大者在后
+            if lead_threat < wingman_threat:
+                roles = {'lead': 'front', 'wingman': 'rear'}
+            else:
+                roles = {'lead': 'rear', 'wingman': 'front'}
+        
+        elif tactic == 'SIDE_BY_SIDE':
+            # 并排射击：左右并排
+            roles = {'lead': 'left', 'wingman': 'right'}
+        
+        else:
+            # 其他战术：默认角色
+            roles = {'lead': 'lead', 'wingman': 'wingman'}
+        
+        return roles
+
+    # === 向后兼容：供decision_manager使用的简化接口 ===
+    def select_tactic(self, blue_threats: dict, red_threats: dict):
+        """
+        向后兼容接口：仅基于聚合威胁选择战术并分配角色
+        参数结构与旧版保持一致：
+          blue_threats = {'lead': float, 'wingman': float}
+          red_threats  = 任意（未使用）
+        返回 (tactic_name, roles)
+        """
+        try:
+            lead = float(blue_threats.get('lead', 0.5))
+            wing = float(blue_threats.get('wingman', 0.5))
+            total = lead + wing
+            diff = abs(lead - wing)
+            
+            # 候选集合
+            candidates = ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE']
+            scores = {}
+            
+            # DRAG_SHOOT：一高一低
+            if (lead > 0.8 and wing < 0.5) or (wing > 0.8 and lead < 0.5):
+                scores['DRAG_SHOOT'] = 1.0
+            else:
+                scores['DRAG_SHOOT'] = diff
+            
+            # SEQUENTIAL：威胁接近且总和较高
+            scores['SEQUENTIAL_ATTACK'] = 1.0 if (diff < 0.2 and total > 1.2) else (0.5 if diff < 0.2 else 0.3)
+            
+            # SIDE_BY_SIDE：威胁接近且总和较低
+            scores['SIDE_BY_SIDE'] = 1.0 if (diff < 0.2 and total < 0.8) else (0.5 if diff < 0.2 else 0.3)
+            
+            # 无角度/高度信息时，给出中性分
+            scores['PINCER_ATTACK'] = 0.5
+            scores['HIGH_LOW_ATTACK'] = 0.5
+            
+            tactic = max(scores, key=scores.get)
+            roles = self._assign_roles(tactic, lead, wing, 0.5, 0.5)
+            return tactic, roles
+        except Exception:
+            return 'SIDE_BY_SIDE', {'lead': 'left', 'wingman': 'right'}
