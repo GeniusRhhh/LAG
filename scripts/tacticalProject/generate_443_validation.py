@@ -415,7 +415,7 @@ def plot_time_series(out_dir, kind, name, t, hdg, tgt_hd, alt, tgt_alt, vel, t_e
                 target_turn = params.get("crank_angle", params.get("turn_angle", 0.0))
             else:
                 target_turn = params.get("turn_angle", params.get("heading_change", 0.0))
-            logging.info(f"{name}: base={base_hdg:.1f}, final={hdg[-1]:.1f}, delta={hdg_delta[-1]:.1f}, target={target_turn:.1f}")
+            # logging.info(f"{name}: base={base_hdg:.1f}, final={hdg[-1]:.1f}, delta={hdg_delta[-1]:.1f}, target={target_turn:.1f}")
     else:
         hdg_delta = np.asarray(hdg)
         tgt_hd_delta = np.asarray(tgt_hd)
@@ -432,29 +432,29 @@ def plot_time_series(out_dir, kind, name, t, hdg, tgt_hd, alt, tgt_alt, vel, t_e
     else:
         suffix = ""
     
-    # 调试信息：打印速度变化数据
-    if name in ("accelerate", "decelerate"):
-        logging.info(f"[VEL DEBUG] {name}: len(vel_delta)={len(vel_delta)}")
-        if len(vel_delta) > 0:
-            logging.info(f"[VEL DEBUG] {name}: vel_delta[0]={vel_delta[0]:.1f}, vel_delta[-1]={vel_delta[-1]:.1f}")
-            logging.info(f"[VEL DEBUG] {name}: min={np.min(vel_delta):.1f}, max={np.max(vel_delta):.1f}")
-            logging.info(f"[VEL DEBUG] {name}: 前5个值: {vel_delta[:5]}")
-            logging.info(f"[VEL DEBUG] {name}: 后5个值: {vel_delta[-5:]}")
-            logging.info(f"[VEL DEBUG] {name}: 目标速度变化: {params.get('velocity_change', 'N/A')}")
-            logging.info(f"[VEL DEBUG] {name}: 持续时间: {params.get('duration', 'N/A')}")
-            
-            # 检查速度变化趋势
-            if len(vel_delta) > 10:
-                mid_point = len(vel_delta) // 2
-                early_avg = np.mean(vel_delta[:mid_point])
-                late_avg = np.mean(vel_delta[mid_point:])
-                logging.info(f"[VEL DEBUG] {name}: 前半段平均={early_avg:.1f}, 后半段平均={late_avg:.1f}")
-                
-                # 检查是否在完成阶段还在变化
-                if name == "accelerate" and late_avg > early_avg + 10:
-                    logging.warning(f"[VEL WARNING] {name}: 后半段速度还在大幅增加，可能未正确停止加速")
-                elif name == "decelerate" and late_avg < early_avg - 10:
-                    logging.warning(f"[VEL WARNING] {name}: 后半段速度还在大幅减少，可能未正确停止减速")
+    # 注释掉调试信息
+    # if name in ("accelerate", "decelerate"):
+    #     logging.info(f"[VEL DEBUG] {name}: len(vel_delta)={len(vel_delta)}")
+    #     if len(vel_delta) > 0:
+    #         logging.info(f"[VEL DEBUG] {name}: vel_delta[0]={vel_delta[0]:.1f}, vel_delta[-1]={vel_delta[-1]:.1f}")
+    #         logging.info(f"[VEL DEBUG] {name}: min={np.min(vel_delta):.1f}, max={np.max(vel_delta):.1f}")
+    #         logging.info(f"[VEL DEBUG] {name}: 前5个值: {vel_delta[:5]}")
+    #         logging.info(f"[VEL DEBUG] {name}: 后5个值: {vel_delta[-5:]}")
+    #         logging.info(f"[VEL DEBUG] {name}: 目标速度变化: {params.get('velocity_change', 'N/A')}")
+    #         logging.info(f"[VEL DEBUG] {name}: 持续时间: {params.get('duration', 'N/A')}")
+    #         
+    #         # 检查速度变化趋势
+    #         if len(vel_delta) > 10:
+    #             mid_point = len(vel_delta) // 2
+    #             early_avg = np.mean(vel_delta[:mid_point])
+    #             late_avg = np.mean(vel_delta[mid_point:])
+    #             logging.info(f"[VEL DEBUG] {name}: 前半段平均={early_avg:.1f}, 后半段平均={late_avg:.1f}")
+    #             
+    #             # 检查是否在完成阶段还在变化
+    #             if name == "accelerate" and late_avg > early_avg + 10:
+    #                 logging.warning(f"[VEL WARNING] {name}: 后半段速度还在大幅增加，可能未正确停止加速")
+    #             elif name == "decelerate" and late_avg < early_avg - 10:
+    #                 logging.warning(f"[VEL WARNING] {name}: 后半段速度还在大幅减少，可能未正确停止减速")
     
     # 数据平滑处理
     def smooth_data(data, window_length=None):
@@ -524,10 +524,10 @@ def plot_time_series(out_dir, kind, name, t, hdg, tgt_hd, alt, tgt_alt, vel, t_e
                 tgt_vel_delta[:duration_steps] = np.linspace(0, target_vel_change, duration_steps)
                 tgt_vel_delta[duration_steps:] = target_vel_change  # 完成后保持目标值
             
-            logging.info(f"[PLOT DEBUG] accelerate: target_vel_change={target_vel_change}, duration={duration}s")
-            logging.info(f"[PLOT DEBUG] accelerate: total_steps={total_steps}, duration_steps={duration_steps}")
-            logging.info(f"[PLOT DEBUG] accelerate: actual final vel_delta={vel_delta_smooth[-1]:.1f}")
-            logging.info(f"[PLOT DEBUG] accelerate: target final vel_delta={tgt_vel_delta[-1]:.1f}")
+            # logging.info(f"[PLOT DEBUG] accelerate: target_vel_change={target_vel_change}, duration={duration}s")
+            # logging.info(f"[PLOT DEBUG] accelerate: total_steps={total_steps}, duration_steps={duration_steps}")
+            # logging.info(f"[PLOT DEBUG] accelerate: actual final vel_delta={vel_delta_smooth[-1]:.1f}")
+            # logging.info(f"[PLOT DEBUG] accelerate: target final vel_delta={tgt_vel_delta[-1]:.1f}")
             
         elif name == "decelerate" and len(vel_delta) > 0:
             target_vel_change = params.get("velocity_change", params.get("velocity_decrease", 40.0))
@@ -543,10 +543,10 @@ def plot_time_series(out_dir, kind, name, t, hdg, tgt_hd, alt, tgt_alt, vel, t_e
                 tgt_vel_delta[:duration_steps] = np.linspace(0, -target_vel_change, duration_steps)
                 tgt_vel_delta[duration_steps:] = -target_vel_change  # 完成后保持目标值
             
-            logging.info(f"[PLOT DEBUG] decelerate: target_vel_change=-{target_vel_change}, duration={duration}s")
-            logging.info(f"[PLOT DEBUG] decelerate: total_steps={total_steps}, duration_steps={duration_steps}")
-            logging.info(f"[PLOT DEBUG] decelerate: actual final vel_delta={vel_delta_smooth[-1]:.1f}")
-            logging.info(f"[PLOT DEBUG] decelerate: target final vel_delta={tgt_vel_delta[-1]:.1f}")
+            # logging.info(f"[PLOT DEBUG] decelerate: target_vel_change=-{target_vel_change}, duration={duration}s")
+            # logging.info(f"[PLOT DEBUG] decelerate: total_steps={total_steps}, duration_steps={duration_steps}")
+            # logging.info(f"[PLOT DEBUG] decelerate: actual final vel_delta={vel_delta_smooth[-1]:.1f}")
+            # logging.info(f"[PLOT DEBUG] decelerate: target final vel_delta={tgt_vel_delta[-1]:.1f}")
         if np.isfinite(tgt_vel_delta).any():
             ax[2].plot(t, tgt_vel_delta, "--", label="Target speed change (m/s)", alpha=0.8)
     ax[2].set_ylabel("Speed change (m/s)")
@@ -662,10 +662,12 @@ def run_one(env, out_dir, test):
     kind = test["kind"]
     name = test["name"]
     params = test.get("params", {})
-    logging.info(f"\n{'='*60}")
-    logging.info(f"Starting {kind}/{name}")
-    logging.info(f"Parameters: {params}")
-    logging.info(f"{'='*60}")
+    
+    # 注释掉过多的调试信息
+    # logging.info(f"\n{'='*60}")
+    # logging.info(f"Starting {kind}/{name}")
+    # logging.info(f"Parameters: {params}")
+    # logging.info(f"{'='*60}")
 
     task = env.task
     if kind == "basic":
@@ -681,7 +683,7 @@ def run_one(env, out_dir, test):
     # 特殊处理：为减速机动设置更高的初始速度
     if kind == "basic" and name == "decelerate":
         target_initial_velocity = params.get("initial_velocity", 320.0)
-        logging.info(f"设置减速机动初始速度: {target_initial_velocity}m/s")
+        # logging.info(f"设置减速机动初始速度: {target_initial_velocity}m/s")
         # 设置初始速度
         agent.set_property_value(c.velocities_u_mps, target_initial_velocity)
         agent.set_property_value(c.velocities_v_mps, 0.0)
@@ -691,7 +693,7 @@ def run_one(env, out_dir, test):
     init_alt_m = float(agent.get_property_value(c.position_h_sl_m))
     init_vel_mps = float(agent.get_property_value(c.velocities_u_mps))
 
-    logging.info(f"Initial state: hdg={init_heading_deg:.1f}°, alt={init_alt_m:.1f}m, vel={init_vel_mps:.1f}m/s")
+    # logging.info(f"Initial state: hdg={init_heading_deg:.1f}°, alt={init_alt_m:.1f}m, vel={init_vel_mps:.1f}m/s")
 
     # 仅记录A0100到ACMI，聚焦我方飞机
     acmi = ACMIGenerator(focus_agents=["A0100"])
@@ -724,7 +726,7 @@ def run_one(env, out_dir, test):
     t_end = base_dur + extra_hold
     max_t_end = min(base_dur * 2.2 + extra_hold, base_dur + 30.0)
     t_end_orig = t_end
-    logging.info(f"start {kind}/{name} base_dur={base_dur:.1f}s t_end={t_end:.1f}s init_hdg={init_heading_deg:.1f} init_alt={init_alt_m:.1f}")
+    # logging.info(f"start {kind}/{name} base_dur={base_dur:.1f}s t_end={t_end:.1f}s init_hdg={init_heading_deg:.1f} init_alt={init_alt_m:.1f}")
     final_hd_target = None
     final_alt_target = None
     if kind == "basic":
@@ -803,21 +805,22 @@ def run_one(env, out_dir, test):
                 if maneuver_complete_time is None:
                     # 首次检测到完成状态，记录时间
                     maneuver_complete_time = tsec
-                    logging.info(f"机动完成: {ph} at t={tsec:.1f}s, 继续平稳飞行{stable_duration:.1f}秒")
+                    print(f"  机动完成: {ph} at t={tsec:.1f}s, 继续平稳飞行{stable_duration:.1f}秒")
                 elif tsec >= maneuver_complete_time + stable_duration:
                     # 已经平稳飞行足够时间，结束记录
-                    logging.info(f"平稳飞行完成 at t={tsec:.1f}s, 结束记录")
+                    print(f"  平稳飞行完成 at t={tsec:.1f}s, 结束记录")
                     break
 
-        if step % 25 == 0 and len(rows) > 0:
-            r = rows[-1]
-            hdg_change = r['heading_deg'] - init_heading_deg
-            while hdg_change > 180: hdg_change -= 360
-            while hdg_change < -180: hdg_change += 360
-            alt_change = r['altitude_m'] - init_alt_m
-            vel_change = r['u_mps'] - (rows[0]['u_mps'] if len(rows) > 0 else r['u_mps'])
-            ph = phases[-1] if len(phases) > 0 else "N/A"
-            logging.info(f"[t={tsec:5.1f}s] Δhdg={hdg_change:+6.1f}° Δalt={alt_change:+7.1f}m Δvel={vel_change:+6.1f}m/s phase={ph}")
+        # 注释掉过多的调试信息
+        # if step % 25 == 0 and len(rows) > 0:
+        #     r = rows[-1]
+        #     hdg_change = r['heading_deg'] - init_heading_deg
+        #     while hdg_change > 180: hdg_change -= 360
+        #     while hdg_change < -180: hdg_change += 360
+        #     alt_change = r['altitude_m'] - init_alt_m
+        #     vel_change = r['u_mps'] - (rows[0]['u_mps'] if len(rows) > 0 else r['u_mps'])
+        #     ph = phases[-1] if len(phases) > 0 else "N/A"
+        #     logging.info(f"[t={tsec:5.1f}s] Δhdg={hdg_change:+6.1f}° Δalt={alt_change:+7.1f}m Δvel={vel_change:+6.1f}m/s phase={ph}")
 
         if step % 2 == 0:
             acmi.write_frame_to_file(acmi_path, env)
@@ -935,9 +938,9 @@ def run_one(env, out_dir, test):
     lons_3d = lons_trim[:len(t)]
     lats_3d = lats_trim[:len(t)]
     alts_3d = alts_trim[:len(t)]
-    logging.info(f"[3D DEBUG] t length={len(t)}, t_end={actual_t_end:.1f}s")
-    logging.info(f"[3D DEBUG] lons_trim length={len(lons_trim)}, lons_3d length={len(lons_3d)}")
-    logging.info(f"[3D DEBUG] t[0]={t[0]:.1f}s, t[-1]={t[-1]:.1f}s")
+    # logging.info(f"[3D DEBUG] t length={len(t)}, t_end={actual_t_end:.1f}s")
+    # logging.info(f"[3D DEBUG] lons_trim length={len(lons_trim)}, lons_3d length={len(lons_3d)}")
+    # logging.info(f"[3D DEBUG] t[0]={t[0]:.1f}s, t[-1]={t[-1]:.1f}s")
     plot_3d_trajectory(out_dir, kind, name, lons_3d, lats_3d, alts_3d, t=t, t_end=actual_t_end)
 
     # 指标
@@ -1015,6 +1018,15 @@ def run_one(env, out_dir, test):
             logging.info(f"Anomaly cut at t={metrics['anomaly_cut_time_s']:.1f}s")
         if "t_end_base_s" in metrics:
             logging.info(f"Duration extended {metrics['t_end_base_s']:.1f}s → {metrics['t_end_final_s']:.1f}s")
+        
+        # 注释掉详细的调试信息
+        # logging.info(f"=== {kind}/{name} SUMMARY ===")
+        # logging.info(f"Duration: {t[-1]:.1f}s | Heading: {init_hdg_log:.1f}° → {fin_hdg_log:.1f}° (Δ{hdg_change:+.1f}°)")
+        # logging.info(f"Altitude: {init_alt_log:.1f}m → {fin_alt_log:.1f}m (Δ{alt_change:+.1f}m) | Speed: {init_vel_log:.1f}m/s → {fin_vel_log:.1f}m/s (Δ{vel_change:+.1f}m/s)")
+        # if "anomaly_cut_time_s" in metrics:
+        #     logging.info(f"Anomaly cut at t={metrics['anomaly_cut_time_s']:.1f}s")
+        # if "t_end_base_s" in metrics:
+        #     logging.info(f"Duration extended {metrics['t_end_base_s']:.1f}s → {metrics['t_end_final_s']:.1f}s")
     return {"csv": csv_path, "acmi": acmi_path, "metrics": metrics}
 
 
@@ -1027,21 +1039,19 @@ def main():
 
     env = MultipleCombatEnv("simple_maneuver_config")
 
+    # 按照用户要求的10个动作进行测试
     tests = []
     tests.extend([
         {"kind": "basic", "name": "level_flight", "params": {"duration": 40.0}},
-        {"kind": "basic", "name": "turn_level", "params": {"turn_angle": 80.0, "turn_rate": 3.0}},
+        {"kind": "basic", "name": "turn_level", "params": {"turn_angle": 80.0, "turn_rate": 3.0, "duration": 40.0}},
         {"kind": "basic", "name": "pull_up", "params": {"altitude_gain": 1500.0, "duration": 30.0}},
         {"kind": "basic", "name": "dive", "params": {"altitude_loss": 1500.0, "duration": 25.0, "min_altitude": 2000.0}},
         {"kind": "basic", "name": "accelerate", "params": {"velocity_change": 50.0, "duration": 15.0}},  # 缩短持续时间，确保能完成
         {"kind": "basic", "name": "decelerate", "params": {"velocity_change": 40.0, "duration": 25.0, "initial_velocity": 350.0}},  # 与机动函数默认值一致，更高初始速度
-        {"kind": "basic", "name": "crank", "params": {"crank_angle": 68.0, "turn_rate": 3.0}},  # 战术偏置转向，精确角度控制，测试超大角度精度
-        {"kind": "basic", "name": "diagonal_flight", "params": {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 20.0}},
-    ])
-    tests.extend([
-        {"kind": "composite", "name": "turn_pull_up", "params": {"turn_pull_up": {"turn_angle": 70.0, "turn_duration": 30.0, "turn_rate": 3.5, "altitude_gain": 2000.0, "pull_up_duration": 30.0}}},
-        {"kind": "composite", "name": "turn_dive", "params": {"turn_dive": {"turn_angle": 65.0, "turn_duration": 30.0, "turn_rate": 3.5, "altitude_loss": 1500.0, "dive_duration": 20.0, "min_altitude": 2000.0}}},
-        {"kind": "composite", "name": "short_skate_tactical", "params": {}},
+        {"kind": "basic", "name": "crank", "params": {"crank_angle": 68.0, "turn_rate": 3.0, "duration": 35.0}},  # 战术偏置转向
+        {"kind": "basic", "name": "diagonal_flight", "params": {"turn_angle": 45.0, "altitude_change": 1000.0, "duration": 30.0}},  # 斜向飞行
+        {"kind": "composite", "name": "turn_pull_up", "params": {"turn_pull_up": {"turn_angle": 68.0, "turn_duration": 30.0, "turn_rate": 3.0, "altitude_gain": 1500.0, "pull_up_duration": 30.0}}},
+        {"kind": "composite", "name": "short_skate_tactical", "params": {"duration": 60.0}},
     ])
 
     summary = []
