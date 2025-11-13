@@ -1,0 +1,3 @@
+time,agent_id,phase,decision_type,selected_tactic,selected_maneuver,reason
+0.2,A0100,NLT_MELD,TACTIC,SIDE_BY_SIDE,None,Complete tactical system selection
+185.8,A0100,NLT_MELD,TACTIC,PINCER_ATTACK,None,Complete tactical system selection

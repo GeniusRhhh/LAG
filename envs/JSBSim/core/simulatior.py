@@ -738,6 +738,14 @@ class MissileSimulator(BaseSimulator):
     def run(self):
         self._t += self.dt
 
+        # ===== 导弹高度保护机制 =====
+        # 检查导弹高度，如果低于0（地下），立即销毁
+        current_altitude = self.get_position()[2]
+        if current_altitude < 0:
+            self.__status = MissileSimulator.MISS
+            print(f"⚠️ {self.model} {self.uid} 撞地销毁: 高度={current_altitude:.1f}m")
+            return
+
         # 阶段转换逻辑
         self._update_phase()
 
@@ -1020,6 +1028,16 @@ class MissileSimulator(BaseSimulator):
         """状态转换函数"""
         # 更新位置
         self._position[:] += self.dt * self.get_velocity()
+
+        # ===== 导弹高度保护：防止撞地 =====
+        # 限制最小高度为50m，避免导弹俯冲过度撞地
+        MIN_ALTITUDE = 50.0  # 最小安全高度50m
+        if self._position[2] < MIN_ALTITUDE:
+            self._position[2] = MIN_ALTITUDE
+            # 同时限制垂直速度为0，防止继续下降
+            if self._velocity[2] < 0:
+                self._velocity[2] = 0
+
         self._geodetic[:] = NEU2LLA(*self.get_position(), self.lon0, self.lat0, self.alt0)
 
         # 当前速度和姿态

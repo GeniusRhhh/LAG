@@ -28,14 +28,23 @@ def setup_logging(output_dir: str, tactic_name: str = "tactical") -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(output_dir, f"{tactic_name}_simulation_{timestamp}.log")
     
-    # 文件和控制台都记录INFO级别
+    # 修复问题3：添加时间帧显示，包含毫秒和仿真时间
+    # 文件和控制台都记录INFO级别，格式：[仿真时间][实际时间] 级别 - 消息
+    file_formatter = logging.Formatter(
+        '[%(asctime)s.%(msecs)03d] %(levelname)-7s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    file_handler.setFormatter(file_formatter)
     
+    console_formatter = logging.Formatter(
+        '[%(asctime)s.%(msecs)03d] %(levelname)-7s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    console_handler.setFormatter(console_formatter)
     
     logging.basicConfig(
         level=logging.INFO,
@@ -79,17 +88,22 @@ def run_simulation(
     tactic_type: str = "front_back",  # 修改默认战术为前后攻击
     our_intent: str = "conservative_clear",
     max_steps: int = 1650,
-    output_dir: str = "./tactical_simulation_results"
+    output_dir: str = None
 ):
     """
     运行战术仿真
-    
+
     Args:
         tactic_type: 战术类型 (auto/drag_shoot/pincer/high_low/front_back/side_by_side)
         our_intent: 我方意图 (conservative_clear/aggressive_clear/defensive)
         max_steps: 最大步数
-        output_dir: 输出目录
+        output_dir: 输出目录（默认为脚本所在目录下的tactical_simulation_results）
     """
+    # 如果未指定输出目录，使用脚本所在目录下的tactical_simulation_results
+    if output_dir is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(script_dir, "tactical_simulation_results")
+
     # 设置日志
     log_file = setup_logging(output_dir, tactic_type)
     
@@ -106,7 +120,7 @@ def run_simulation(
     
     try:
         # 创建环境 - 使用本地BVR配置
-        print("初始化JSBSim环境...")
+        # print("初始化JSBSim环境...")  # 注释掉无用信息
         
         # 统一使用tactical_bvr配置
         config_name = "tactical_bvr"
@@ -127,14 +141,14 @@ def run_simulation(
         shutil.copy2(local_config_file, jsbsim_config_file)
         
         logging.info(f"使用配置文件: {local_config_file}")
-        print(f"使用配置: {config_name}")
+        # print(f"使用配置: {config_name}")
         
         env = MultipleCombatEnv(config_name)
         env.max_steps = max_steps
-        print("JSBSim环境创建成功")
+        # print("JSBSim环境创建成功")  # 注释掉无用信息
         
         # 创建决策管理器
-        print(f"初始化战术决策系统 (意图: {our_intent})...")
+        # print(f"初始化战术决策系统 (意图: {our_intent})...")  # 注释掉无用信息
         
         # 根据战术类型创建不同的决策管理器
         if tactic_type == "drag_shoot":
@@ -162,9 +176,9 @@ def run_simulation(
         env.task = tactical_task
         
         # 重置环境
-        print("重置环境...")
+        # print("重置环境...")  # 注释掉无用信息
         obs = env.reset()
-        print("战术系统初始化完成")
+        # print("战术系统初始化完成")  # 注释掉无用信息
         
         # 准备数据记录和ACMI文件
         from datetime import datetime
@@ -175,12 +189,23 @@ def run_simulation(
         # 设置ACMI文件路径
         acmi_filepath = os.path.join(output_dir, f'tactical_2v2_{timestamp}.txt.acmi')
         
-        # 开始仿真
+        # 修复问题5：明确仿真开始标记
         print("\n" + "=" * 80)
-        print("仿真开始")
+        print("🎬 2v2超视距空战仿真开始")
         print("=" * 80)
+        print(f"开始时间: {timestamp}")
+        print(f"最大步数: {max_steps} 步 ({max_steps * env.time_interval:.1f}秒)")
+        print(f"时间步长: {env.time_interval}秒")
+        print("-" * 80)
         print(f"{'时间(s)':<10} {'步数':<8} {'距离(km)':<12} {'我方':<8} {'敌方':<8} {'战术':<15}")
         print("-" * 80)
+        
+        logging.info("="*80)
+        logging.info(f"🎬 仿真开始 - 2v2超视距空战")
+        logging.info(f"   我方: F-16C x2 (A0100, A0200)")
+        logging.info(f"   敌方: Su-27 x2 (B0100, B0200)")
+        logging.info(f"   最大步数: {max_steps}, 时间步长: {env.time_interval}s")
+        logging.info("="*80)
         
         step = 0
         dt = env.time_interval
@@ -210,8 +235,8 @@ def run_simulation(
                         'vx': vel[0], 'vy': vel[1], 'vz': vel[2],
                     })
             
-            # 每10秒打印一次详细状态
-            if step % 120 == 0:  # 120步 ≈ 10秒
+            # 每60秒打印一次详细状态
+            if step % 300 == 0:  # 300步 ≈ 60秒
                 # 打印飞机位置和速度
                 for agent_id in env.agents.keys():
                     if env.agents[agent_id].is_alive:
@@ -268,9 +293,10 @@ def run_simulation(
                 if all(dones.values()):
                     break
         
-        # 仿真结束
+        # 修复问题5：明确仿真结束标记
+        end_time = datetime.now()
         print("\n" + "=" * 80)
-        print("仿真结束")
+        print("🏁 2v2超视距空战仿真结束")
         print("=" * 80)
         
         # 统计结果
@@ -280,16 +306,32 @@ def run_simulation(
                         if aid in env.agents and env.agents[aid].is_alive)
         
         print(f"总步数: {step}")
-        print(f"总时间: {step * dt:.1f}秒")
+        print(f"总时间: {step * dt:.1f}秒 ({step * dt / 60:.1f}分钟)")
         print(f"我方存活: {friendly_alive}/2")
         print(f"敌方存活: {enemy_alive}/2")
         
+        # 战果判定
         if friendly_alive > enemy_alive:
-            print("\n我方获胜!")
+            result = "🎖️ 我方获胜!"
+            winner = "我方"
         elif enemy_alive > friendly_alive:
-            print("\n敌方获胜!")
+            result = "❌ 敌方获胜!"
+            winner = "敌方"
         else:
-            print("\n平局")
+            result = "⚖️ 平局"
+            winner = "平局"
+        
+        print(f"\n战果: {result}")
+        print(f"结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # 日志记录
+        logging.info("="*80)
+        logging.info(f"🏁 仿真结束")
+        logging.info(f"   总时间: {step * dt:.1f}秒 ({step}步)")
+        logging.info(f"   我方存活: {friendly_alive}/2")
+        logging.info(f"   敌方存活: {enemy_alive}/2")
+        logging.info(f"   战果: {winner}")
+        logging.info("="*80)
         
         print(f"\n详细日志: {log_file}")
         
@@ -329,9 +371,9 @@ def main():
                        help='我方意图')
     parser.add_argument('--steps', type=int, default=1650,
                        help='最大步数')
-    parser.add_argument('--output', type=str, default='./tactical_simulation_results',
-                       help='输出目录')
-    
+    parser.add_argument('--output', type=str, default=None,
+                       help='输出目录（默认为脚本所在目录下的tactical_simulation_results）')
+
     args = parser.parse_args()
     
     run_simulation(

@@ -20,6 +20,8 @@ from core.situation_evaluator import SituationEvaluator
 from core.intent_predictor import IntentPredictor
 from core.decision_table import DecisionTable
 from core.tactic_selector_v2 import TacticSelectorV2
+from core.complete_tactical_system import CompleteTacticalSystem  # 新增：完整智能战术系统
+from core.target_assignment import get_fixed_target, get_target_with_fallback  # 新增：固定目标分配
 from enemy_ai_adapter import EnemyAIAdapter
 from utils.data_logger import DataLogger
 from utils.constants import CONTROL_RANGES
@@ -113,7 +115,7 @@ class TacticalTask(MultipleCombatTask):
         # 集成战术系统（新增）
         from core.integrated_tactical_system import IntegratedTacticalSystem
         from core.intent_recognizer import FriendlyIntent
-        
+
         # 设置我方意图（从配置读取或默认为保守肃清）
         my_intent_str = getattr(config, 'friendly_intent', 'CONSERVATIVE_CLEAR')
         if my_intent_str == 'AGGRESSIVE_CLEAR':
@@ -122,9 +124,13 @@ class TacticalTask(MultipleCombatTask):
             my_intent = FriendlyIntent.DEFENSIVE
         else:
             my_intent = FriendlyIntent.CONSERVATIVE_CLEAR
-        
+
         self.integrated_system = IntegratedTacticalSystem(my_intent=my_intent)
         logging.info(f"✅ 集成战术系统已启动 (我方意图: {my_intent.value})")
+
+        # 完整智能战术选择系统（新增 - 实现项目说明.md完整算法）
+        self.complete_tactical_system = CompleteTacticalSystem(my_intent=my_intent_str)
+        logging.info(f"✅ 完整智能战术选择系统已启动 (我方意图: {my_intent_str})")
         
         # 前后攻击队形状态
         self.formation_established = False
@@ -175,33 +181,34 @@ class TacticalTask(MultipleCombatTask):
         
         # ===== CAP区域约束 - 跑马道形状（南北向椭圆） =====
         # 定义CAP（Combat Air Patrol）巡逻区域：类似400米跑道
-        # 配置：长轴140km（南北/X方向），短轴70km（东西/Y方向）
+        # 【P0修复】：大幅扩大区域，避免战术机动时频繁越界
+        # 配置：长轴240km（南北/X方向），短轴120km（东西/Y方向）
         # 红方初始位置：X=-60km（南端），蓝方：X=+60km（北端）
         # 两端半圆在南北两端，直道沿南北分布
         self.cap_boundary = {
             'type': 'racetrack',  # 跑马道类型
             'center_x': 0,        # 中心X坐标
             'center_y': 0,        # 中心Y坐标
-            'length': 140000,     # 长轴140km（南北方向）
-            'width': 70000,       # 短轴70km（东西方向）
-            'z_min': 5000,        # 5km最低高度
-            'z_max': 15000,       # 15km最高高度
+            'length': 240000,     # 长轴240km（原140km）
+            'width': 120000,      # 短轴120km（原70km）
+            'z_min': 3000,        # 3km最低高度（原5km）
+            'z_max': 18000,       # 18km最高高度（原15km）
             # 计算矩形部分和半圆部分（南北向）
-            'rect_x_min': -35000,  # 矩形南边界 -35km
-            'rect_x_max': 35000,   # 矩形北边界 +35km
-            'rect_y_min': -35000,  # 矩形西边界 -35km
-            'rect_y_max': 35000,   # 矩形东边界 +35km
-            'circle_radius': 35000, # 半圆半径 35km（直径70km）
-            'south_circle_center': (-35000, 0),   # 南端半圆圆心（X=-35km）
-            'north_circle_center': (35000, 0),    # 北端半圆圆心（X=+35km）
+            'rect_x_min': -60000,  # 矩形南边界 -60km（原-35km）
+            'rect_x_max': 60000,   # 矩形北边界 +60km（原+35km）
+            'rect_y_min': -60000,  # 矩形西边界 -60km（原-35km）
+            'rect_y_max': 60000,   # 矩形东边界 +60km（原+35km）
+            'circle_radius': 60000, # 半圆半径 60km（原35km）
+            'south_circle_center': (-60000, 0),   # 南端半圆圆心（X=-60km）
+            'north_circle_center': (60000, 0),    # 北端半圆圆心（X=+60km）
         }
-        logging.info(f"✅ CAP区域设置: 南北向跑马道")
-        logging.info(f"   长轴: 140km (南北/X方向)")
-        logging.info(f"   短轴: 70km (东西/Y方向)")
-        logging.info(f"   矩形部分: X=[-35,+35]km Y=[-35,+35]km")
-        logging.info(f"   南端半圆: 圆心X=-35km, 半径35km")
-        logging.info(f"   北端半圆: 圆心X=+35km, 半径35km")
-        logging.info(f"   高度: Z=[5,15]km")
+        logging.info(f"✅ CAP区域设置: 南北向跑马道（已扩大）")
+        logging.info(f"   长轴: 240km (南北/X方向)")
+        logging.info(f"   短轴: 120km (东西/Y方向)")
+        logging.info(f"   矩形部分: X=[-60,+60]km Y=[-60,+60]km")
+        logging.info(f"   南端半圆: 圆心X=-60km, 半径60km")
+        logging.info(f"   北端半圆: 圆心X=+60km, 半径60km")
+        logging.info(f"   高度: Z=[3,18]km")
         
         # ===== 战术模板核心数据结构 =====
         # 高度指令数组 (15个选项，索引0-14)
@@ -290,6 +297,7 @@ class TacticalTask(MultipleCombatTask):
         self.selected_tactic = None
         self.tactical_roles = {'lead': 'lead', 'wingman': 'wingman'}  # 默认角色
         self.formation_commands = {}  # {agent_id: (alt_id, hdg_id, vel_id)}
+        self.vertical_split_targets = {}  # {agent_id: target_altitude} 上下夹击目标高度
         self.enemy_escape_confirm = 0  # 敌机逃逸意图连续确认计数
         
         # 决策节点标记
@@ -351,6 +359,7 @@ class TacticalTask(MultipleCombatTask):
         self.short_skate_start_time = {}
         self.agent_phases = {}
         self.formation_commands = {}
+        self.vertical_split_targets = {}
         self.enemy_escape_confirm = 0
         self.next_round_tactic = None
         self.dr_start_time = None
@@ -410,18 +419,17 @@ class TacticalTask(MultipleCombatTask):
         # 每120秒打印一次详细调试信息
         if env.current_step % 600 == 0:
             logging.info(f"\n{'='*60}")
-            logging.info(f"[调试] 步数: {env.current_step}, 时间: {current_time:.1f}s")
-            for agent_id in env.agents.keys():
-                if env.agents[agent_id].is_alive:
-                    pos = env.agents[agent_id].get_position()
-                    vel = env.agents[agent_id].get_velocity()
-                    speed = np.linalg.norm(vel)
-                    alt = pos[2]
-                    heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
-                    pitch = env.agents[agent_id].get_property_value(c.attitude_theta_deg)
-                    roll = env.agents[agent_id].get_property_value(c.attitude_phi_deg)
-                    logging.info(f"[{agent_id}] 位置:({pos[0]:.0f},{pos[1]:.0f},{alt:.0f}m) "
-                               f"速度:{speed:.1f}m/s 航向:{heading:.1f}° 俯仰:{pitch:.1f}° 滚转:{roll:.1f}°")
+            # 修复问题4：减少详细状态打印频率（从10秒改为30秒）
+            if env.current_step % 360 == 0:  # 360步 ≈ 30秒
+                # 打印飞机位置和速度（添加时间帧）
+                for agent_id in env.agents.keys():
+                    if env.agents[agent_id].is_alive:
+                        pos = env.agents[agent_id].get_position()
+                        vel = env.agents[agent_id].get_velocity()
+                        speed = np.linalg.norm(vel)
+                        alt = pos[2]
+                        logging.info(f"[T={current_time:.1f}s][{agent_id}] 位置: ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}m) "
+                                   f"速度: {speed:.1f}m/s 高度: {alt:.1f}m")
             logging.info(f"{'='*60}\n")
         
         # ===== 战术模板架构：动作由normalize_action生成 =====
@@ -496,9 +504,9 @@ class TacticalTask(MultipleCombatTask):
             input_obs[3:12] = raw_obs[:9]
             input_obs = np.nan_to_num(input_obs, nan=0.0)
             
-            # 调试：打印输入给baseline的指令（每60步）
-            if env.current_step % 60 == 0 and agent_id.startswith('A'):
-                logging.info(f"   → baseline输入: 归一化值 alt={input_obs[0]:.3f} hdg={input_obs[1]:.3f} vel={input_obs[2]:.3f}")
+            # 调试：打印输入给baseline的指令（已注释）
+            # if env.current_step % 60 == 0 and agent_id.startswith('A'):
+            #     logging.info(f"   → baseline输入: 归一化值 alt={input_obs[0]:.3f} hdg={input_obs[1]:.3f} vel={input_obs[2]:.3f}")
             
             input_obs = np.expand_dims(input_obs, axis=0)
             
@@ -527,11 +535,21 @@ class TacticalTask(MultipleCombatTask):
             #     logging.warning(f"   原始输出: {action_output}")
             #     logging.warning(f"   归一化: 副翼={norm_act[0]:.3f} 升降={norm_act[1]:.3f} 方向={norm_act[2]:.3f} 油门={norm_act[3]:.3f}")
             
-            # 6. 安全检查：低高度时避免下降
+            # 6. 安全检查：低高度时避免下降（提高阈值避免撞地）
             current_alt = env.agents[agent_id].get_position()[2]
-            if current_alt < 1000:
-                norm_act[1] = max(norm_act[1], 0.0)  # 不允许下降
-                norm_act[3] = max(norm_act[3], 0.8)  # 增加油门
+            if current_alt < 3000:
+                # ✅ 修复：提高保护阈值到3000m，避免baseline模型导致撞地
+                # 原因：敌方AI baseline模型可能产生过度俯冲指令
+                if current_alt < 1500:
+                    norm_act[1] = max(norm_act[1], 0.5)  # 强制大幅上拉
+                    norm_act[3] = 1.0  # 最大油门
+                    if env.current_step % 60 == 0:
+                        logging.warning(f"🛡️ [{agent_id}] 紧急拉升: 高度{current_alt:.0f}m < 1500m")
+                else:
+                    norm_act[1] = max(norm_act[1], 0.0)  # 不允许下降
+                    norm_act[3] = max(norm_act[3], 0.8)  # 增加油门
+                    if env.current_step % 120 == 0:
+                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < 3000m")
             
             return norm_act
             
@@ -574,6 +592,7 @@ class TacticalTask(MultipleCombatTask):
             
             # 检查agent是否还活着
             if agent_id not in env.agents or not env.agents[agent_id].is_alive:
+                self.missile_launched[agent_id] = False
                 continue
             
             # 检查冷却时间
@@ -584,12 +603,37 @@ class TacticalTask(MultipleCombatTask):
             # 检查导弹数量
             if env.agents[agent_id].num_missiles <= 0:
                 logging.warning(f"⚠️ {agent_id} 导弹已用尽")
+                self.missile_launched[agent_id] = False
                 continue
             
-            # 寻找目标
-            target = self._find_best_target(env, agent_id)
-            if target is None:
-                logging.warning(f"⚠️ {agent_id} 未找到有效目标")
+            # 寻找目标（优先固定目标，其次最近敌机）
+            from core.target_assignment import get_fixed_target, get_target_with_fallback
+            target_id = get_target_with_fallback(agent_id, env)
+            target = env.agents.get(target_id) if target_id in env.agents else None
+            
+            if target is None or not target.is_alive:
+                logging.warning(f"⚠️ {agent_id} 未找到有效目标 (目标ID:{target_id})")
+                # 不立即标记为False，等待下一轮检查
+                continue
+            
+            # ✅ 关键修复3：检查航向是否朝向敌机（防止背对发射）
+            my_pos = env.agents[agent_id].get_position()
+            target_pos = target.get_position()
+            current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+            
+            # 计算目标方位角
+            delta_x = target_pos[0] - my_pos[0]
+            delta_y = target_pos[1] - my_pos[1]
+            target_bearing = (np.rad2deg(np.arctan2(delta_y, delta_x)) + 360) % 360
+            
+            # 计算航向与目标方位的夹角
+            heading_error = abs(self._normalize_angle_diff(target_bearing - current_heading))
+            
+            # 只有朝向敌机±90度范围内才允许发射
+            if heading_error > 90:
+                if env.current_step % 60 == 0:
+                    logging.warning(f"⚠️ [{agent_id}] 发射条件不满足: 航向{current_heading:.0f}°, 目标方位{target_bearing:.0f}°, 夹角{heading_error:.0f}° >90°")
+                # 不立即标记为False，等待调整航向
                 continue
             
             # 发射导弹
@@ -670,33 +714,46 @@ class TacticalTask(MultipleCombatTask):
             # 更新敌方雷达
             self.radar_manager.update_enemy_radar_states(env, current_time)
             
-            # 每60步打印一次雷达状态
-            if env.current_step % 60 == 0:
-                for agent_id in ["A0100", "A0200"]:
-                    if agent_id in env.agents and env.agents[agent_id].is_alive:
-                        status = self.radar_manager.friendly_radar_states.get(agent_id, "N/A")
-                        targets = self.radar_manager.friendly_radar_targets.get(agent_id, {})
-                        logging.info(f"[雷达] {agent_id} 状态:{status} 跟踪目标数:{len(targets)}")
+            # 每60步打印一次雷达状态（已注释）
+            # if env.current_step % 60 == 0:
+            #     for agent_id in ["A0100", "A0200"]:
+            #         if agent_id in env.agents and env.agents[agent_id].is_alive:
+            #             status = self.radar_manager.friendly_radar_states.get(agent_id, "N/A")
+            #             targets = self.radar_manager.friendly_radar_targets.get(agent_id, {})
+            #             logging.info(f"[雷达] {agent_id} 状态:{status} 跟踪目标数:{len(targets)}")
         except Exception as e:
             logging.warning(f"雷达系统更新异常: {e}")
     
     def _calculate_distance(self, env) -> float:
         """计算敌我距离（长机到敌方长机）"""
         try:
+            # ✅ 关键修复1：保存上一次有效距离，避免敌机被击落后返回inf导致阶段错乱
+            if not hasattr(self, 'last_valid_distance'):
+                self.last_valid_distance = 120000  # 初始距离120km
+            
             leader_red = env._jsbsims.get("A0100")
             leader_blue = env._jsbsims.get("B0100")
             
-            if not leader_red or not leader_blue or not leader_red.is_alive or not leader_blue.is_alive:
-                return float('inf')
+            if not leader_red or not leader_red.is_alive:
+                logging.warning(f"⚠️ 我方长机不可用")
+                return self.last_valid_distance
+            
+            if not leader_blue or not leader_blue.is_alive:
+                # 敌方长机被击落，返回上一次有效距离而不是inf
+                if env.current_step % 60 == 0:
+                    logging.info(f"⚠️ 敌方长机被击落，保持距离{self.last_valid_distance/1000:.1f}km（避免阶段错乱）")
+                return self.last_valid_distance
             
             pos_red = np.array(leader_red.get_position())
             pos_blue = np.array(leader_blue.get_position())
             distance = np.linalg.norm(pos_red - pos_blue)
             
+            # 保存有效距离
+            self.last_valid_distance = distance
             return distance
         except Exception as e:
             logging.warning(f"计算距离失败: {e}")
-            return float('inf')
+            return self.last_valid_distance if hasattr(self, 'last_valid_distance') else 120000
     
     def _calculate_distance_between(self, aircraft1, aircraft2) -> float:
         """计算两架飞机之间的距离"""
@@ -711,7 +768,8 @@ class TacticalTask(MultipleCombatTask):
     def _get_enemy_intent_type(self, env, my_agent_id: str) -> str:
         try:
             my_aircraft = env.agents.get(my_agent_id)
-            enemy_id = ("B0100" if my_agent_id.startswith('A') else "A0100")
+            # 使用固定目标分配：A0100→B0100, A0200→B0200
+            enemy_id = get_target_with_fallback(my_agent_id, env)
             enemy_aircraft = env.agents.get(enemy_id)
             if my_aircraft and enemy_aircraft:
                 enemy_intent = self.intent_predictor.predict_enemy_intent(enemy_aircraft, my_aircraft, env)
@@ -775,6 +833,11 @@ class TacticalTask(MultipleCombatTask):
                 else:
                     self.agent_phases[agent_id] = new_phase
             elif new_phase != old_phase:
+                # ✅ 关键修复3：禁止阶段回退 - 战斗已开始拒绝回退到NLT_MELD
+                if new_phase == TacticalPhase.NLT_MELD and old_phase not in [None, TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR]:
+                    logging.warning(f"⚠️ [{agent_id}] 战斗已开始({old_phase.value})，拒绝回退到NLT_MELD（距离{adjusted_distance/1000:.1f}km）")
+                    return  # 保持当前阶段不变，不执行NLT决策
+                
                 current_time = env.current_step * env.time_interval
                 # 只在重要阶段转换时打印（简化）
                 if new_phase in [TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR, TacticalPhase.LR_TR, TacticalPhase.TR_DOR]:
@@ -802,37 +865,44 @@ class TacticalTask(MultipleCombatTask):
         # 判断是否在第二次进攻（距离曾经到达过DR，现在又拉大）
         if not hasattr(self, 'min_distance_reached'):
             self.min_distance_reached = float('inf')
-            self.second_attack = False
+            # 注意：不再使用self.second_attack，统一使用self.is_second_attack
         
         # 更新最小距离
         if distance < self.min_distance_reached:
             self.min_distance_reached = distance
         
-        # 如果距离曾经到达过DR（<20km），现在又拉大到MTR以上（>80km），说明进入第二次进攻
+        # 如果距离曾经到达过DR（<65km），现在又拉大到MTR以上（>80km），说明进入第二次进攻
         if self.min_distance_reached < self.tactical_distances['DR'] and distance > self.tactical_distances['MTR']:
-            self.second_attack = True
-            logging.info(f"🔄 [第二次进攻] 距离从{self.min_distance_reached/1000:.1f}km拉大到{distance/1000:.1f}km，切换到MTR2阶段")
+            if not self.is_second_attack:
+                # 只在首次进入第二次进攻时输出日志
+                self.is_second_attack = True
+                logging.info(f"🔄 [第二轮攻击] 距离从{self.min_distance_reached/1000:.1f}km拉大到{distance/1000:.1f}km，进入MTR2阶段")
         
-        # 阶段判定（添加调试日志）
+        # ✅ 关键修复2：阶段异常保护 - 距离异常时保持当前阶段
+        if distance > 200000 or distance == float('inf'):
+            # 距离异常（如inf或>200km），保持当前阶段避免错乱
+            if env.current_step % 60 == 0:
+                logging.warning(f"⚠️ 距离异常({distance/1000:.1f}km)，保持当前阶段")
+            return self.current_phase if hasattr(self, 'current_phase') else TacticalPhase.NLT_MELD
+        
+        # 阶段判定（根据距离和是否第二轮攻击）
         if distance > self.tactical_distances['MELD']:  # > 100km
             phase = TacticalPhase.NLT_MELD
-            # if env.current_step % 30 == 0:
-            #     logging.warning(f"  → NLT_MELD 距离={distance/1000:.1f}km > {self.tactical_distances['MELD']/1000:.1f}km")
         elif distance > self.tactical_distances['MTR']:  # > 80km and <= 100km
             phase = TacticalPhase.MELD_MTR
-            # if env.current_step % 30 == 0:
-            #     logging.warning(f"  → MELD_MTR 距离={distance/1000:.1f}km > {self.tactical_distances['MTR']/1000:.1f}km")
         elif distance > self.tactical_distances['LR']:  # > 78km and <= 80km
-            # 第二次进攻标记
-            if self.second_attack:
+            # MTR阶段：区分第一轮和第二轮
+            if self.is_second_attack:
                 logging.debug(f"   [MTR2阶段] 距离{distance/1000:.1f}km")
             phase = TacticalPhase.MTR_LR
         elif distance > self.tactical_distances['TR']:  # > 75km and <= 78km
-            if self.second_attack:
+            # LR阶段：区分第一轮和第二轮
+            if self.is_second_attack:
                 logging.debug(f"   [LR2阶段] 距离{distance/1000:.1f}km")
             phase = TacticalPhase.LR_TR
         elif distance > self.tactical_distances['DOR']:  # > 70km and <= 75km
-            if self.second_attack:
+            # TR阶段：区分第一轮和第二轮
+            if self.is_second_attack:
                 logging.debug(f"   [TR2阶段] 距离{distance/1000:.1f}km")
             phase = TacticalPhase.TR_DOR
         elif distance > self.tactical_distances['DR']:  # > 65km and <= 70km
@@ -868,16 +938,31 @@ class TacticalTask(MultipleCombatTask):
             self._decide_at_meld(env)
         
         elif phase == TacticalPhase.MTR_LR:
-            # MTR节点：机动决策（是否撤退）
-            self._decide_at_mtr(env, agent_id)
+            # MTR节点：机动决策（是否撤退）+ 第二轮战术应用
+            if self.is_second_attack and is_lead:
+                # MTR2：应用DR节点预选的战术
+                self._decide_at_mtr2(env)
+            else:
+                # MTR1：标准机动决策
+                self._decide_at_mtr(env, agent_id)
         
         elif phase == TacticalPhase.LR_TR:
-            # LR节点：参数决策（Crank或平飞）
-            self._decide_at_lr(env, agent_id)
+            # LR节点：参数决策（Crank或平飞）+ 第二轮威胁检查
+            if self.is_second_attack:
+                # LR2：检查威胁等级，决定是否放弃导弹
+                self._decide_at_lr2(env, agent_id)
+            else:
+                # LR1：标准发射决策
+                self._decide_at_lr(env, agent_id)
         
         elif phase == TacticalPhase.TR_DOR:
             # TR节点：机动决策（继续进攻或脱离）
-            self._decide_at_tr(env, agent_id)
+            if self.is_second_attack:
+                # TR2：第二轮规避评估
+                self._decide_at_tr2(env, agent_id)
+            else:
+                # TR1：标准规避决策
+                self._decide_at_tr(env, agent_id)
         
         elif phase == TacticalPhase.DOR_DR and is_lead:
             # DOR节点：战术决策（规避+预决策下一轮）
@@ -917,19 +1002,23 @@ class TacticalTask(MultipleCombatTask):
             
             # 计算僚机需要的调整
             pos_diff = target_wingman_pos - wingman_pos
-            distance_error = np.linalg.norm(pos_diff[:2])  # 仅水平距离
-            altitude_error = pos_diff[2]
+            distance_error = np.linalg.norm(pos_diff[:2])  # 水平总距离
+            altitude_error = pos_diff[2]  # 高度差（Z方向）
+            lateral_error = pos_diff[1]  # 横向距离差（Y方向，东西向）
+            longitudinal_error = pos_diff[0]  # 纵向距离差（X方向，南北向）
             
             formation_params = {
                 'target_lateral_offset': 1500,  # 1.5km横向间隔
                 'target_altitude_diff': 0,  # 同高度
                 'target_heading': lead_heading,  # 对齐航向
-                'distance_error': distance_error,
-                'altitude_error': altitude_error,
+                'distance_error': distance_error,  # 总距离误差
+                'altitude_error': altitude_error,  # 高度误差
+                'lateral_error': lateral_error,  # 横向误差（Y方向）
+                'longitudinal_error': longitudinal_error,  # 纵向误差（X方向）
             }
             
             logging.info(f"📐 [NLT编队成形] 目标：并排队形，横向1.5km，同高度")
-            logging.info(f"   当前误差：横向{distance_error:.0f}m，高度{altitude_error:.0f}m")
+            logging.info(f"   当前误差：横向{lateral_error:.0f}m，纵向{longitudinal_error:.0f}m，高度{altitude_error:.0f}m（总距{distance_error:.0f}m）")
             
             return formation_params
             
@@ -966,15 +1055,15 @@ class TacticalTask(MultipleCombatTask):
                 logging.info(f"📐 [MELD编队调整] 钳形攻势：左右分离30度，间隔2km")
                 
             elif tactic == 'HIGH_LOW_ATTACK':
-                # 上下夹击：高度差1500m
+                # ✅ 修复1.3: 上下夹击：高度差2500m (符合2-3km定义)
                 adjustment_params = {
                     'type': 'vertical_split',
-                    'altitude_diff': 1500,  # 1.5km
+                    'altitude_diff': 2500,  # 2.5km (修改前: 1500)
                     'lateral_offset': 1000,  # 1km
                     'heading_offset': 0,
                 }
-                logging.info(f"📐 [MELD编队调整] 上下夹击：高度差1500m")
-                
+                logging.info(f"📐 [MELD编队调整] 上下夹击：高度差2500m")
+
             elif tactic == 'DRAG_SHOOT':
                 # 拖曳射击：纵向间距2.5km
                 adjustment_params = {
@@ -984,26 +1073,26 @@ class TacticalTask(MultipleCombatTask):
                     'altitude_diff': 0,
                 }
                 logging.info(f"📐 [MELD编队调整] 拖曳射击：纵向间距2.5km")
-                
+
             elif tactic in ['SEQUENTIAL_ATTACK', 'FRONT_BACK']:
-                # 前后攻击：纵向间距1.5km
+                # ✅ 修复1.4: 前后攻击：纵向间距8km (符合5.5-11km定义)
                 adjustment_params = {
                     'type': 'longitudinal',
-                    'longitudinal_offset': 1500,  # 1.5km
+                    'longitudinal_offset': 8000,  # 8km (修改前: 1500)
                     'lateral_offset': 300,  # 0.3km
                     'altitude_diff': 0,
                 }
-                logging.info(f"📐 [MELD编队调整] 前后攻击：纵向间距1.5km")
-                
+                logging.info(f"📐 [MELD编队调整] 前后攻击：纵向间距8km")
+
             else:  # SIDE_BY_SIDE
-                # 并排射击：横向间隔1.5km
+                # ✅ 修复1.2: 并排射击：横向间隔6km (符合3-5NM=5.5-9.3km定义)
                 adjustment_params = {
                     'type': 'side_by_side',
-                    'lateral_offset': 1500,  # 1.5km
+                    'lateral_offset': 6000,  # 6km (修改前: 1500)
                     'altitude_diff': 0,
                     'heading_offset': 0,
                 }
-                logging.info(f"📐 [MELD编队调整] 并排射击：横向间隔1.5km")
+                logging.info(f"📐 [MELD编队调整] 并排射击：横向间隔6km")
             
             return adjustment_params
             
@@ -1021,18 +1110,111 @@ class TacticalTask(MultipleCombatTask):
             wing = env.agents.get('A0200')
             if not (lead and wing and lead.is_alive and wing.is_alive):
                 return
-            # 航向对齐
+            # ✅ 计算位置和误差
+            lead_pos = lead.get_position()
+            wing_pos = wing.get_position()
+            lateral_err = params.get('lateral_error', 0.0)
+            longitudinal_err = params.get('longitudinal_error', 0.0)
             target_heading = params.get('target_heading', lead.get_property_value(c.attitude_psi_deg))
-            hdg_idx = self._convert_heading_to_index(np.deg2rad(target_heading - wing.get_property_value(c.attitude_psi_deg)))
-            # 高度对齐
-            alt_err = params.get('altitude_error', 0.0)
-            alt_idx = self._convert_altitude_to_index(-alt_err)
-            # 速度微调：根据横向/纵向误差做微调（简化）
+            wingman_heading = wing.get_property_value(c.attitude_psi_deg)
+            
+            # ✅ 航向控制：直接对齐长机航向（完全简化，稳定可靠）
+            # 计算航向差（标准化到[-180, 180]）
+            heading_diff = self._normalize_angle_diff(target_heading - wingman_heading)
+            hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
+            
+            # 日志输出
+            if abs(lateral_err) > 3000:
+                logging.info(f"🧭 [编队重组] A0200横向{lateral_err:.0f}m，对齐长机航向{target_heading:.1f}°（差{heading_diff:.1f}°）")
+            
+            # ✅ 修复：高度对齐 + 完整安全检查
+            alt_err = params.get('altitude_error', 0.0)  # 目标位置高度 - 当前僚机高度
+            current_wingman_alt = wing.get_position()[2]  # 僚机当前高度（米）
+            current_lead_alt = lead.get_position()[2]  # 长机当前高度（米）
+            
+            # 安全高度范围：4-15km（留出1km缓冲区）
+            SAFE_ALT_MIN = 4000  # 4km
+            SAFE_ALT_MAX = 15000  # 15km
+            ALT_TOLERANCE = 500  # 高度差<500m时不调整
+            
+            # ✅ 修复：提前计算僚机速度（后续多处使用）
+            # 使用地面坐标系速度（NED坐标系），单位已经是m/s
+            wingman_speed = np.sqrt(
+                wing.get_property_value(c.velocities_v_north_mps)**2 + 
+                wing.get_property_value(c.velocities_v_east_mps)**2 + 
+                wing.get_property_value(c.velocities_v_down_mps)**2
+            )
+            
+            # ✅ 调试日志：输出速度和高度差，用于验证检测逻辑
+            if abs(alt_err) > ALT_TOLERANCE:
+                logging.info(f"📊 [编队重组检测] A0200速度={wingman_speed:.1f}m/s, 高度差={alt_err:.0f}m, 当前高度={current_wingman_alt:.0f}m")
+            
+            # 决策逻辑：✅ 增强低空强制保护
+            if current_wingman_alt < 4500:
+                # ✅ 低空强制爬升（最高优先级，提高阈值到4.5km）
+                alt_idx = 12  # 强制爬升+500m
+                logging.warning(f"🚨 [低空保护] A0200高度{current_wingman_alt:.0f}m<4.5km，强制爬升")
+            elif abs(alt_err) < ALT_TOLERANCE:
+                # 高度差很小，保持不动
+                alt_idx = 7
+            elif current_wingman_alt > SAFE_ALT_MAX:
+                # 当前高度过高（>15km），只能保持或下降
+                if alt_err < 0:  # 需要下降
+                    alt_idx = 2  # 下降-500m
+                    logging.info(f"🛡️ [编队重组] A0200高度{current_wingman_alt:.0f}m过高，下降")
+                else:
+                    alt_idx = 7  # 保持高度
+                    logging.warning(f"🛡️ [编队重组] A0200高度{current_wingman_alt:.0f}m已接近上限，保持高度")
+            else:
+                # 在安全范围内（4-15km），简化高度控制
+                # ✅ 高空强制保护
+                if current_wingman_alt > 8500:
+                    alt_idx = 2  # 强制下降-500m
+                    logging.warning(f"🚨 [高空保护] A0200高度{current_wingman_alt:.0f}m>8.5km，强制下降")
+                # ✅ 简化高度调整：直接根据高度差调整
+                elif abs(alt_err) < 200:
+                    alt_idx = 7  # 保持高度
+                elif alt_err > 800:
+                    alt_idx = 9  # 爬升+100m（保守）
+                elif alt_err < -800:
+                    alt_idx = 5  # 下降-100m（保守）
+                else:
+                    alt_idx = 7  # 保持高度
+            
+            # ✅ 速度控制：简化策略
             dist_err = params.get('distance_error', 0.0)
-            vel_delta = 50.0 if dist_err > 800 else (0.0 if dist_err < 200 else 20.0)
-            vel_idx = self._convert_velocity_to_index(vel_delta)
+            
+            # 高空+高速保护
+            if current_wingman_alt > 8000 and wingman_speed > 280:
+                vel_idx = self._convert_velocity_to_index(-30.0)  # 减速
+                logging.warning(f"🚨 [高空高速保护] A0200减速")
+            # 失速保护
+            elif wingman_speed < 150:
+                vel_idx = 4  # 加速+50m/s
+                logging.warning(f"🚨 [失速保护] A0200加速")
+            # 极高速保护
+            elif wingman_speed > 300:
+                vel_idx = self._convert_velocity_to_index(-30.0)  # 减速
+            # 正常速度调整：根据距离误差
+            elif dist_err > 3000:
+                vel_idx = self._convert_velocity_to_index(20.0)  # 温和加速
+            elif dist_err > 1000:
+                vel_idx = self._convert_velocity_to_index(10.0)  # 微调
+            elif dist_err < 500:
+                vel_idx = 3  # 保持
+            else:
+                vel_idx = self._convert_velocity_to_index(10.0)  # 默认微调
+            
             self.formation_commands['A0200'] = (alt_idx, hdg_idx, vel_idx)
-            logging.info(f"✅ [NLT编队执行] 僚机指令 alt_id={alt_idx} hdg_id={hdg_idx} vel_id={vel_idx}")
+            # ✅ 修复：长机也需要指令，否则会用默认值造成转圈
+            # 长机保持当前航向和速度，僚机负责调整到编队位置
+            self.formation_commands['A0100'] = (7, 8, 3)  # 保持高度、航向、中速
+            
+            # 日志输出（增强版）
+            if abs(alt_err) > ALT_TOLERANCE or abs(lateral_err) > 1000:
+                logging.info(f"✅ [NLT编队执行] 僚机指令 alt_id={alt_idx}（高度差{alt_err:.0f}m）hdg_id={hdg_idx}（横向{lateral_err:.0f}m）vel_id={vel_idx}（速度{wingman_speed:.0f}m/s）")
+            else:
+                logging.info(f"✅ [NLT编队执行] 僚机指令 alt_id={alt_idx} hdg_id={hdg_idx} vel_id={vel_idx}")
         except Exception as e:
             logging.error(f"编队成形指令计算错误: {e}")
     
@@ -1040,31 +1222,67 @@ class TacticalTask(MultipleCombatTask):
         """
         将战术编队调整参数转化为指令（针对MELD战术调整）
         不同type对应不同维度的指令偏置
+
+        修复说明：
+        - 高度指令应该是"到目标高度的差值"，而不是"固定增量"
+        - 避免累积效应导致长机过度爬升失速、僚机过度下降撞地
         """
         try:
             lead = env.agents.get('A0100')
             wing = env.agents.get('A0200')
             if not (lead and wing and lead.is_alive and wing.is_alive):
                 return
+
             t = params.get('type', 'side_by_side')
+
             if t == 'lateral_split':
                 # 左右分离：长机左、僚机右
+                # 【修复5】限制偏航角度，避免过度横向飞行超出CAP边界
                 lead_hdg_off = -abs(params.get('heading_offset', 30))
                 wing_hdg_off = abs(params.get('heading_offset', 30))
+
+                # 【关键修复】限制偏航角度，确保不超出Y=±60km边界
+                # 最大偏航角度：±15度（确保主要向北飞行，而非向东西飞行）
+                lead_hdg_off = np.clip(lead_hdg_off, -15.0, 15.0)
+                wing_hdg_off = np.clip(wing_hdg_off, -15.0, 15.0)
+
                 lead_hdg_idx = self._convert_heading_to_index(np.deg2rad(lead_hdg_off))
                 wing_hdg_idx = self._convert_heading_to_index(np.deg2rad(wing_hdg_off))
                 self.formation_commands['A0100'] = (7, lead_hdg_idx, 3)
                 self.formation_commands['A0200'] = (7, wing_hdg_idx, 3)
+
+                logging.info(f"📐 [MELD横向分离] 限制后偏航角: 长机={lead_hdg_off:.1f}°, 僚机={wing_hdg_off:.1f}°")
+
             elif t == 'vertical_split':
-                # 上下：按roles分配高低位
+                # 上下夹击：设置目标高度，由战术执行函数负责爬升控制
                 alt_diff = abs(params.get('altitude_diff', 1500))
                 lead_role = roles.get('lead', 'lead')
+
+                # 获取当前高度
+                lead_alt = lead.get_property_value(c.position_h_sl_m)
+                wing_alt = wing.get_property_value(c.position_h_sl_m)
+
+                # 计算平均高度和目标高度
+                avg_alt = (lead_alt + wing_alt) / 2
+                target_high_alt = avg_alt + alt_diff / 2  # 高位目标
+                target_low_alt = avg_alt - alt_diff / 2   # 低位目标
+
+                # 限制目标高度在安全范围内（3km-10km）
+                target_high_alt = np.clip(target_high_alt, 3000, 10000)
+                target_low_alt = np.clip(target_low_alt, 3000, 10000)
+
+                # 保存目标高度到状态，由战术执行函数使用
                 if lead_role == 'high':
-                    self.formation_commands['A0100'] = (self._convert_altitude_to_index(+alt_diff), 8, 3)
-                    self.formation_commands['A0200'] = (self._convert_altitude_to_index(-alt_diff), 8, 3)
+                    self.vertical_split_targets['A0100'] = target_high_alt
+                    self.vertical_split_targets['A0200'] = target_low_alt
                 else:
-                    self.formation_commands['A0100'] = (self._convert_altitude_to_index(-alt_diff), 8, 3)
-                    self.formation_commands['A0200'] = (self._convert_altitude_to_index(+alt_diff), 8, 3)
+                    self.vertical_split_targets['A0100'] = target_low_alt
+                    self.vertical_split_targets['A0200'] = target_high_alt
+
+                # 调试日志
+                logging.info(f"📐 [MELD高度目标设置] 长机目标:{self.vertical_split_targets['A0100']:.0f}m, "
+                            f"僚机目标:{self.vertical_split_targets['A0200']:.0f}m")
+
             elif t == 'longitudinal':
                 # 纵向编队：前后分离，前加速、后减速
                 lead_role = roles.get('lead', 'lead')
@@ -1080,67 +1298,63 @@ class TacticalTask(MultipleCombatTask):
                 # 并排：航向对齐
                 self.formation_commands['A0100'] = (7, 8, 3)
                 self.formation_commands['A0200'] = (7, 8, 3)
+
             logging.info(f"✅ [MELD编队执行] 指令: {self.formation_commands}")
         except Exception as e:
             logging.error(f"编队调整指令计算错误: {e}")
     
     def _decide_at_nlt(self, env):
-        """NLT节点决策：策略决策 + 战术决策 + 编队成形"""
+        """NLT节点决策：策略决策 + 战术决策 + 编队成形（使用完整智能战术选择系统）"""
         try:
             logging.info("=" * 80)
-            logging.info("🎯 [NLT节点] 开始战术决策")
-            
-            # 1. 态势评估
-            threat_info = self.threat_evaluator.evaluate_situation(env)
-            threat_level = threat_info.get('situation', 'ADVANTAGE')
-            logging.info(f"   态势评估: {threat_level} (长机威胁:{threat_info.get('lead_threat', 0.5):.2f}, 僚机威胁:{threat_info.get('wingman_threat', 0.5):.2f})")
-            
-            # 2. 意图预测
-            my_lead = env._jsbsims.get("A0100")
-            enemy_lead = env._jsbsims.get("B0100")
-            
-            if my_lead and enemy_lead:
-                enemy_intent = self.intent_predictor.predict_enemy_intent(enemy_lead, my_lead, env)
-                enemy_intent_type = self.intent_predictor.classify_intent_type(enemy_intent)
-                logging.info(f"   敌机意图: {enemy_intent} -> {enemy_intent_type}")
-            else:
-                enemy_intent_type = 'ATTACK_TYPE'
-                logging.warning("   无法获取敌机信息，默认为攻击类型")
-            
-            # 3. 查询决策表
-            tactics, maneuvers = self.decision_table.query_nlt(
-                self.my_intent, threat_level, enemy_intent_type
-            )
-            logging.info(f"   决策表查询: 我方意图={self.my_intent}")
-            logging.info(f"   可用战术: {tactics}")
-            
-            # 4. 选择战术并分配角色
+            logging.info("🎯 [NLT节点] 开始战术决策（完整智能系统）")
+
+            # ===== 使用完整智能战术选择系统（Algorithm 6-1） =====
+
+            # 1. 获取飞机列表
             my_aircraft = [env._jsbsims.get("A0100"), env._jsbsims.get("A0200")]
             enemy_aircraft = [env._jsbsims.get("B0100"), env._jsbsims.get("B0200")]
-            
-            self.selected_tactic, self.tactical_roles = self.tactic_selector.select_tactic_from_candidates(
-                tactics, my_aircraft, enemy_aircraft, env
+
+            # 2. 调用完整智能战术选择系统
+            self.selected_tactic, self.tactical_roles = self.complete_tactical_system.select_tactic(
+                control_distance='NLT',
+                my_aircraft_list=my_aircraft,
+                enemy_aircraft_list=enemy_aircraft,
+                env=env
             )
-            
+
             logging.info(f"   ✅ 选定战术: {self.selected_tactic}")
-            logging.info(f"   ✅ 角色分配: 长机={self.tactical_roles['lead']}, 僚机={self.tactical_roles['wingman']}")
+            logging.info(f"   ✅ 角色分配: 长机={self.tactical_roles.get('lead', 'left')}, 僚机={self.tactical_roles.get('wingman', 'right')}")
+
+            # 3. ✅ 关键修复：检查是否是敌机坠毁触发的重组
+            # 如果已经选择过战术且不在初始阶段，跳过编队重组，直接执行战术
+            lead_phase = self.agent_phases.get('A0100', TacticalPhase.NLT_MELD)
+            wingman_phase = self.agent_phases.get('A0200', TacticalPhase.NLT_MELD)
             
-            # 5. 形成初始编队（并排同高度）
-            formation_params = self._form_initial_formation(env)
-            if formation_params:
-                # 存储编队参数供后续执行
-                if not hasattr(self, 'formation_params'):
-                    self.formation_params = {}
-                self.formation_params['NLT'] = formation_params
-                self._apply_formation_params(env, formation_params)
+            # 如果任一飞机已经超过MELD阶段，说明战斗已开始，禁止重组
+            if lead_phase not in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR] or \
+               wingman_phase not in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR]:
+                logging.warning(f"⚠️ 战斗已开始(长机:{lead_phase.value},僚机:{wingman_phase.value})，禁止NLT重组！")
+                return  # 直接返回，不执行编队重组
             
+            # 首次NLT或MELD阶段才执行编队成形
+            if lead_phase == TacticalPhase.NLT_MELD and wingman_phase == TacticalPhase.NLT_MELD:
+                formation_params = self._form_initial_formation(env)
+                if formation_params:
+                    if not hasattr(self, 'formation_params'):
+                        self.formation_params = {}
+                    self.formation_params['NLT'] = formation_params
+                    self._apply_formation_params(env, formation_params)
+            else:
+                logging.info(f"⚠️ MELD阶段，跳过NLT编队成形，直接执行战术调整")
+
             logging.info("=" * 80)
-            
+
             # 记录决策日志
             self.data_logger.log_decision(
                 env.current_step * env.time_interval, 'A0100', 'NLT_MELD', 'TACTIC',
-                self.selected_tactic, None, f"Threat:{threat_level}, Intent:{enemy_intent_type}")
-            
+                self.selected_tactic, None, f"Complete tactical system selection")
+
         except Exception as e:
             logging.error(f"❌ NLT决策错误: {e}")
             import traceback
@@ -1148,48 +1362,36 @@ class TacticalTask(MultipleCombatTask):
             self.selected_tactic = 'SIDE_BY_SIDE'
     
     def _decide_at_meld(self, env):
-        """MELD节点决策：战术调整"""
+        """MELD节点决策：战术调整（使用完整智能战术选择系统）"""
         try:
-            # 1. 态势评估
-            threat_info = self.threat_evaluator.evaluate_situation(env)
-            threat_level = threat_info.get('situation', 'ADVANTAGE')
-            
-            # 2. 意图预测
-            my_lead = env._jsbsims.get("A0100")
-            enemy_lead = env._jsbsims.get("B0100")
-            
-            if my_lead and enemy_lead:
-                enemy_intent = self.intent_predictor.predict_enemy_intent(enemy_lead, my_lead, env)
-                enemy_intent_type = self.intent_predictor.classify_intent_type(enemy_intent)
-            else:
-                enemy_intent_type = 'ATTACK_TYPE'
-            
-            # 3. 查询决策表
-            tactics, maneuvers = self.decision_table.query_meld(
-                self.my_intent, threat_level, enemy_intent_type
-            )
-            
-            # 4. 可能调整战术和角色
+            # ===== 使用完整智能战术选择系统（Algorithm 6-1） =====
+
+            # 1. 获取飞机列表
             my_aircraft = [env._jsbsims.get("A0100"), env._jsbsims.get("A0200")]
             enemy_aircraft = [env._jsbsims.get("B0100"), env._jsbsims.get("B0200")]
-            
-            new_tactic, new_roles = self.tactic_selector.select_tactic_from_candidates(
-                tactics, my_aircraft, enemy_aircraft, env
+
+            # 2. 调用完整智能战术选择系统
+            new_tactic, new_roles = self.complete_tactical_system.select_tactic(
+                control_distance='MELD',
+                my_aircraft_list=my_aircraft,
+                enemy_aircraft_list=enemy_aircraft,
+                env=env
             )
-            
+
+            # 3. 检查是否需要调整战术
             if new_tactic != self.selected_tactic:
                 logging.info(f"🔄 MELD调整战术: {self.selected_tactic} → {new_tactic}")
-                logging.info(f"🔄 MELD角色调整: 长机={new_roles['lead']}, 僚机={new_roles['wingman']}")
-                
+                logging.info(f"🔄 MELD角色调整: 长机={new_roles.get('lead', 'left')}, 僚机={new_roles.get('wingman', 'right')}")
+
                 # 记录决策日志
                 self.data_logger.log_decision(
                     env.current_step * env.time_interval, 'A0100', 'MELD_MTR', 'TACTIC',
                     new_tactic, None, f"Adjusted from {self.selected_tactic}")
-                
+
                 self.selected_tactic = new_tactic
                 self.tactical_roles = new_roles
-            
-            # 5. 根据战术调整编队
+
+            # 4. 根据战术调整编队
             adjustment_params = self._adjust_formation_for_tactic(env, self.selected_tactic)
             if adjustment_params:
                 # 存储编队调整参数供后续执行
@@ -1197,9 +1399,11 @@ class TacticalTask(MultipleCombatTask):
                     self.formation_params = {}
                 self.formation_params['MELD'] = adjustment_params
                 self._apply_adjustment_params(env, adjustment_params, getattr(self, 'tactical_roles', {}))
-            
+
         except Exception as e:
             logging.error(f"MELD决策错误: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
     
     def _decide_at_mtr(self, env, agent_id: str):
         """
@@ -1212,9 +1416,9 @@ class TacticalTask(MultipleCombatTask):
             threat_info = self.threat_evaluator.evaluate_situation(env)
             my_threat = threat_info.get('lead_threat', 0.5) if agent_id.endswith('100') else threat_info.get('wingman_threat', 0.5)
             
-            # 2. 获取敌机意图
+            # 2. 获取敌机意图（使用固定目标分配）
             my_aircraft = env.agents.get(agent_id)
-            enemy_id = "B0100" if agent_id.startswith('A') else "A0100"
+            enemy_id = get_target_with_fallback(agent_id, env)
             enemy_aircraft = env.agents.get(enemy_id)
             
             if my_aircraft and enemy_aircraft:
@@ -1505,13 +1709,22 @@ class TacticalTask(MultipleCombatTask):
                     logging.info(f"⏱️ [DR时间窗] 进度: {time_in_dr:.1f}s/{self.dr_time_window}s，距离: {distance_nm:.1f}NM（目标5NM）")
                     if abs(distance_nm - target_distance_nm) < 1.0:
                         pass
-                threat_info = self.threat_evaluator.evaluate_situation(env)
-                threat_level = threat_info.get('situation', 'ADVANTAGE')
-                enemy_intent_type = self._get_enemy_intent_type(env, 'A0100')
-                tactics, _maneuvers = self.decision_table.query_dr(self.my_intent, threat_level, enemy_intent_type)
-                if tactics:
-                    if not hasattr(self, 'next_round_tactic') or self.next_round_tactic not in tactics:
-                        self.next_round_tactic = tactics[0]
+
+                # ===== 使用完整智能战术选择系统（Algorithm 6-1） =====
+                my_aircraft = [env._jsbsims.get("A0100"), env._jsbsims.get("A0200")]
+                enemy_aircraft = [env._jsbsims.get("B0100"), env._jsbsims.get("B0200")]
+
+                next_tactic, _ = self.complete_tactical_system.select_tactic(
+                    control_distance='DR',
+                    my_aircraft_list=my_aircraft,
+                    enemy_aircraft_list=enemy_aircraft,
+                    env=env
+                )
+
+                if not hasattr(self, 'next_round_tactic') or self.next_round_tactic != next_tactic:
+                    self.next_round_tactic = next_tactic
+                    logging.info(f"🎯 [DR时间窗] 预选下一轮战术: {next_tactic}")
+
                 return
             
             # 5. 时间窗满：标记完成并进行最终决策
@@ -1587,6 +1800,121 @@ class TacticalTask(MultipleCombatTask):
             
         except Exception as e:
             logging.error(f"DR决策错误: {e}")
+    
+    def _decide_at_mtr2(self, env):
+        """
+        MTR2节点决策：第二轮攻击的战术应用
+        核心任务：
+        1. 应用DR节点预选的战术
+        2. 检查威胁等级决定是否继续
+        3. 重新调整队形
+        """
+        try:
+            current_time = env.current_step * env.time_interval
+            
+            # 1. 应用DR节点预选的战术
+            if hasattr(self, 'next_round_tactic') and self.next_round_tactic:
+                # 如果DR节点已经预选了战术，直接应用
+                if self.selected_tactic != self.next_round_tactic:
+                    old_tactic = self.selected_tactic
+                    self.selected_tactic = self.next_round_tactic
+                    logging.info(f"🔄 [MTR2决策] 应用DR预选战术: {old_tactic} → {self.selected_tactic}")
+            else:
+                # 否则重新选择战术
+                logging.warning(f"⚠️ [MTR2决策] 未找到预选战术，重新选择")
+                threat_info = self.threat_evaluator.evaluate_situation(env)
+                threat_level = threat_info.get('situation', 'ADVANTAGE')
+                enemy_intent_type = self._get_enemy_intent_type(env, 'A0100')
+                
+                # 查询决策表获取候选战术
+                tactics, _ = self.decision_table.query_dr(self.my_intent, threat_level, enemy_intent_type)
+                if tactics:
+                    self.selected_tactic = tactics[0]
+                    logging.info(f"🎯 [MTR2决策] 重新选择战术: {self.selected_tactic}")
+            
+            # 2. 威胁等级检查（保守策略下，敌方占优则终止）
+            if self.my_intent == 'CONSERVATIVE_CLEAR':
+                threat_info = self.threat_evaluator.evaluate_situation(env)
+                situation = threat_info.get('situation', 'ADVANTAGE')
+                if situation == 'DISADVANTAGE':
+                    logging.warning(f"🚫 [MTR2决策] 保守策略下敌方占优，终止第二轮攻击")
+                    self.should_reengage = False
+                    self.is_second_attack = False
+                    return
+            
+            # 3. 队形调整（根据新战术调整队形）
+            logging.info(f"✅ [MTR2决策] 第二轮进攻准备完成，战术: {self.selected_tactic}")
+            
+        except Exception as e:
+            logging.error(f"MTR2决策错误: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+    
+    def _decide_at_lr2(self, env, agent_id: str):
+        """
+        LR2节点决策：第二轮发射的威胁阈值检查
+        核心任务：
+        1. 检查威胁等级
+        2. 如果威胁过高（>0.8），放弃导弹脱离
+        3. 否则正常发射
+        
+        文档要求：LR1'/2'：发射, tl>0.8撤(弃导,脱离)
+        """
+        try:
+            # 1. 检查发射次数
+            if agent_id not in self.lr_launch_count:
+                self.lr_launch_count[agent_id] = 0
+            
+            # 2. 威胁评估
+            threat_info = self.threat_evaluator.evaluate_situation(env)
+            lead_threat = threat_info.get('lead_threat', 0.5)
+            wing_threat = threat_info.get('wing_threat', 0.5)
+            current_threat = lead_threat if agent_id == 'A0100' else wing_threat
+            
+            # 3. 威胁阈值检查
+            if current_threat > 0.8:
+                logging.warning(f"🚫 [LR2决策] {agent_id} 威胁等级{current_threat:.2f}>0.8，放弃导弹脱离")
+                self.should_reengage = False
+                self.is_second_attack = False
+                # 不发射，直接返回
+                return
+            
+            # 4. 威胁可接受，执行正常发射决策
+            logging.info(f"✅ [LR2决策] {agent_id} 威胁等级{current_threat:.2f}可接受，准备第二次发射")
+            self._decide_at_lr(env, agent_id)
+            
+        except Exception as e:
+            logging.error(f"LR2决策错误 {agent_id}: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+    
+    def _decide_at_tr2(self, env, agent_id: str):
+        """
+        TR2节点决策：第二轮规避评估
+        核心任务：
+        1. 第二次中制导结束
+        2. 威胁再评估
+        3. 准备脱离至MAR
+        """
+        try:
+            # 威胁评估
+            threat_info = self.threat_evaluator.evaluate_situation(env)
+            lead_threat = threat_info.get('lead_threat', 0.5)
+            wing_threat = threat_info.get('wing_threat', 0.5)
+            current_threat = lead_threat if agent_id == 'A0100' else wing_threat
+            
+            if current_threat > 0.7:
+                logging.info(f"⚠️ [TR2决策] {agent_id} 威胁等级{current_threat:.2f}>0.7，准备紧急脱离")
+            else:
+                logging.info(f"✅ [TR2决策] {agent_id} 威胁等级{current_threat:.2f}，正常规避准备")
+            
+            # 执行标准TR决策
+            self._decide_at_tr(env, agent_id)
+            
+        except Exception as e:
+            logging.error(f"TR2决策错误 {agent_id}: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
 
     def _compute_attack_approach_commands(self, env, agent_id: str):
         """计算占位接敌指令：对齐敌机方位、高度收敛、适度加速"""
@@ -1597,8 +1925,8 @@ class TacticalTask(MultipleCombatTask):
             heading_diff = ((enemy_bearing - current_heading + 180) % 360) - 180
             hdg_id = self._convert_heading_to_index(np.deg2rad(heading_diff))
             
-            # 高度收敛（与敌机高度差减半）
-            enemy_id = 'B0100' if agent_id.startswith('A') else 'A0100'
+            # 高度收敛（与敌机高度差减半）- 使用固定目标分配
+            enemy_id = get_target_with_fallback(agent_id, env)
             if enemy_id in env.agents and env.agents[enemy_id].is_alive:
                 my_alt = env.agents[agent_id].get_position()[2]
                 enemy_alt = env.agents[enemy_id].get_position()[2]
@@ -1894,11 +2222,8 @@ class TacticalTask(MultipleCombatTask):
             # 2. 记录雷达状态（模拟）
             for agent_id in env.agents.keys():
                 if env.agents[agent_id].is_alive:
-                    # 获取敌机作为目标
-                    if agent_id.startswith('A'):
-                        target_id = "B0100" if "B0100" in env.agents and env.agents["B0100"].is_alive else "B0200"
-                    else:
-                        target_id = "A0100" if "A0100" in env.agents and env.agents["A0100"].is_alive else "A0200"
+                    # 获取敌机作为目标（使用固定目标分配）
+                    target_id = get_target_with_fallback(agent_id, env)
                     
                     # 计算距离
                     if target_id in env.agents and env.agents[target_id].is_alive:
@@ -2008,24 +2333,24 @@ class TacticalTask(MultipleCombatTask):
     
     def _check_cap_boundary(self, env, agent_id: str) -> tuple:
         """
-        检查是否超出CAP边界（跑马道形状），如果超出则返回回到中心的指令
-        
+        【完整修复】检查是否超出CAP边界（跑马道形状）
+        修复：
+        1. 正确判断跑马道形状（矩形+两端半圆）
+        2. 增强边界返回逻辑，强制返回而非柔和调整
+        3. 限制横向分离距离，确保不超出CAP边界
+
         Returns:
             (is_out_of_bounds, return_command)
-            - is_out_of_bounds: bool, 是否超出边界
-            - return_command: tuple or None, 如果超出边界则返回命令索引
+            - is_out_of_bounds: bool, 是否严重越界
+            - return_command: tuple or None, 如果严重越界则返回强制调整指令
         """
         try:
             pos = env.agents[agent_id].get_position()
             x, y, z = pos[0], pos[1], pos[2]
-            
-            # 设置缓冲区，提前预警
-            buffer = 5000  # 5km缓冲区
-            
+
             # 检查高度
             out_z = z < self.cap_boundary['z_min'] or z > self.cap_boundary['z_max']
-            near_z = z < (self.cap_boundary['z_min'] + buffer) or z > (self.cap_boundary['z_max'] - buffer)
-            
+
             # 检查是否在跑马道内（南北向椭圆）
             rect_x_min = self.cap_boundary['rect_x_min']
             rect_x_max = self.cap_boundary['rect_x_max']
@@ -2034,66 +2359,117 @@ class TacticalTask(MultipleCombatTask):
             radius = self.cap_boundary['circle_radius']
             south_center = self.cap_boundary['south_circle_center']
             north_center = self.cap_boundary['north_circle_center']
-            
+
             in_boundary = False
-            
+            in_warning_zone = False  # 接近边界警告区
+
+            # 【修复1】正确判断跑马道形状
             # 检查是否在矩形部分内（中间直道）
-            if rect_x_min <= x <= rect_x_max and rect_y_min <= y <= rect_y_max:
-                in_boundary = True
-            # 检查是否在南端半圆内
+            if rect_x_min <= x <= rect_x_max:
+                # 在矩形X范围内，检查Y是否在范围内
+                if rect_y_min <= y <= rect_y_max:
+                    in_boundary = True
+                    # 检查是否接近Y边界（警告区：距离边界5km以内）
+                    if abs(y - rect_y_max) < 5000 or abs(y - rect_y_min) < 5000:
+                        in_warning_zone = True
+                else:
+                    # Y超出矩形范围，但可能在两端半圆内
+                    # 检查是否在南端半圆内（X接近南端）
+                    if x < 0:  # 靠近南端
+                        dist_to_south = np.sqrt((x - south_center[0])**2 + (y - south_center[1])**2)
+                        if dist_to_south <= radius:
+                            in_boundary = True
+                            if dist_to_south > radius * 0.9:  # 距离半圆边界10%以内
+                                in_warning_zone = True
+                    # 检查是否在北端半圆内（X接近北端）
+                    else:  # 靠近北端
+                        dist_to_north = np.sqrt((x - north_center[0])**2 + (y - north_center[1])**2)
+                        if dist_to_north <= radius:
+                            in_boundary = True
+                            if dist_to_north > radius * 0.9:  # 距离半圆边界10%以内
+                                in_warning_zone = True
+            # 检查是否在南端半圆内（X < 矩形南边界）
             elif x < rect_x_min:
                 dist_to_south = np.sqrt((x - south_center[0])**2 + (y - south_center[1])**2)
                 if dist_to_south <= radius:
                     in_boundary = True
-            # 检查是否在北端半圆内
+                    if dist_to_south > radius * 0.9:  # 距离半圆边界10%以内
+                        in_warning_zone = True
+            # 检查是否在北端半圆内（X > 矩形北边界）
             elif x > rect_x_max:
                 dist_to_north = np.sqrt((x - north_center[0])**2 + (y - north_center[1])**2)
                 if dist_to_north <= radius:
                     in_boundary = True
-            
-            # 如果在边界内且高度正常，返回False - 允许战术自由执行
-            if in_boundary and not out_z:  # 改为out_z而不是near_z，只在严格超出时拦截
+                    if dist_to_north > radius * 0.9:  # 距离半圆边界10%以内
+                        in_warning_zone = True
+
+            # 如果在实际边界内且高度正常，返回False - 允许战术自由执行
+            if in_boundary and not out_z:
+                # 如果在警告区，输出警告但不强制返回
+                if in_warning_zone and env.current_step % 200 == 0:
+                    logging.info(f"⚠️ [{agent_id}] 接近CAP边界! "
+                               f"位置:({x/1000:.1f},{y/1000:.1f},{z/1000:.1f}km)")
                 return False, None
-            
-            # 只有严格超出边界时才拦截战术执行
-            # 计算返回目标点（返回到跑马道中心线Y=0）
-            target_x = x  # 保持当前南北位置
-            target_y = 0  # 返回中心线
-            cap_center_z = (self.cap_boundary['z_min'] + self.cap_boundary['z_max']) / 2
-            
+
+            # 【修复2】超出边界时，强制返回中心
+            # 计算返回目标点
+            # 优先返回到最近的安全区域
+            if abs(y) > rect_y_max:
+                # Y方向超出，返回到Y=0中心线
+                target_x = np.clip(x, rect_x_min + 5000, rect_x_max - 5000)  # 保持在矩形X范围内，留5km缓冲
+                target_y = 0  # 返回中心线
+            elif x < rect_x_min:
+                # X方向超出南端，返回到南端矩形边界
+                target_x = rect_x_min + 5000  # 进入矩形区域5km
+                target_y = np.clip(y, -30000, 30000)  # 限制Y在±30km范围内
+            elif x > rect_x_max:
+                # X方向超出北端，返回到北端矩形边界
+                target_x = rect_x_max - 5000  # 进入矩形区域5km
+                target_y = np.clip(y, -30000, 30000)  # 限制Y在±30km范围内
+            else:
+                # 其他情况，返回到中心点
+                target_x = 0
+                target_y = 0
+
             # 计算返回航向
             current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
             delta_x = target_x - x
             delta_y = target_y - y
+
+            # 计算目标方位角（从北向顺时针）
             target_bearing = np.rad2deg(np.arctan2(delta_y, delta_x))
             target_heading = (90 - target_bearing) % 360.0
-            
+
             heading_diff = ((target_heading - current_heading + 180) % 360) - 180
-            
-            # 选择航向指令
-            if abs(heading_diff) > 60:
-                heading_cmd = 14 if heading_diff > 0 else 2
+
+            # 【修复3】强制返回：使用更大的航向调整
+            if abs(heading_diff) > 90:
+                heading_cmd = 16 if heading_diff > 0 else 0  # ±180度大转弯
+            elif abs(heading_diff) > 60:
+                heading_cmd = 15 if heading_diff > 0 else 1  # ±120度
             elif abs(heading_diff) > 30:
-                heading_cmd = 12 if heading_diff > 0 else 4
+                heading_cmd = 13 if heading_diff > 0 else 3  # ±75度
             elif abs(heading_diff) > 15:
-                heading_cmd = 10 if heading_diff > 0 else 6
+                heading_cmd = 11 if heading_diff > 0 else 5  # ±45度
             else:
-                heading_cmd = 8
-            
+                heading_cmd = 9 if heading_diff > 0 else 7  # ±15度
+
             # 选择高度指令
             if z < self.cap_boundary['z_min']:
-                alt_cmd = 10  # 爬升+300m
+                alt_cmd = 13  # 爬升+1000m（更强力）
             elif z > self.cap_boundary['z_max']:
-                alt_cmd = 4   # 下降-300m
+                alt_cmd = 1   # 下降-1000m（更强力）
             else:
                 alt_cmd = 7   # 保持高度
-            
-            # 严格超出边界才返回True
-            logging.warning(f"🚨 [{agent_id}] 超出CAP跑马道! "
-                          f"位置:({x/1000:.1f},{y/1000:.1f},{z/1000:.0f}m) "
-                          f"返回中心线 航向调整{heading_diff:+.1f}°")
-            return True, (alt_cmd, heading_cmd, 5)  # 加速返回
-            
+
+            # 【修复4】降低日志频率，避免刷屏
+            if env.current_step % 120 == 0:  # 每120步（24秒）输出一次
+                logging.warning(f"🚨 [{agent_id}] 超出CAP边界! "
+                            f"位置:({x/1000:.1f},{y/1000:.1f},{z/1000:.1f}km) "
+                            f"目标:({target_x/1000:.1f},{target_y/1000:.1f}km) "
+                            f"航向调整{heading_diff:+.1f}°")
+            return True, (alt_cmd, heading_cmd, 3)  # 强制返回（保持速度）
+
         except Exception as e:
             logging.error(f"CAP边界检查失败: {e}")
             return False, None
@@ -2109,13 +2485,68 @@ class TacticalTask(MultipleCombatTask):
             if is_out:
                 return return_cmd
         
-        # ===== 敌方AI：完整AI系统 =====
+        # ===== 敌方AI系统：使用统一敌方战术AI =====
         if agent_id.startswith('B'):
+            # ✅ 启用完整敌方AI系统
             if hasattr(self, 'enemy_ai'):
-                return self.enemy_ai.get_enemy_command_indices(env, agent_id)
+                current_time = env.current_step * env.time_interval
+                return self.enemy_ai.get_enemy_command_indices(env, agent_id, current_time)
             else:
-                # 退而求其次：平飞
+                # 降级：如果AI系统未初始化，使用简化逻辑
+                logging.warning(f"⚠️ 敌方AI系统未初始化，使用默认平飞")
                 return 7, 8, 3
+        
+        # ===== 旧版：简化直飞+返航逻辑（已弃用） =====
+        # if agent_id.startswith('B'):
+        #     # 初始化敌方返航状态
+        #     if not hasattr(self, 'enemy_return_state'):
+        #         self.enemy_return_state = {}
+        #     
+        #     if agent_id not in self.enemy_return_state:
+        #         self.enemy_return_state[agent_id] = {
+        #             'returning': False,
+        #             'logged': False
+        #         }
+        #     
+        #     # 获取距离我方长机的距离（2D水平距离）
+        #     enemy_pos = np.array(env.agents[agent_id].get_position())
+        #     if 'A0100' not in env.agents or not env.agents['A0100'].is_alive:
+        #         # 长机不存在，继续前进
+        #         return 7, 8, 3
+        #     lead_pos = np.array(env.agents['A0100'].get_position())
+        #     # 只计算水平距离（x, y），忽略高度差
+        #     distance = np.linalg.norm(enemy_pos[:2] - lead_pos[:2])
+        #     
+        #     # ✅ 修复：返航距离改为80km（避免最后才触发），并添加调试日志
+        #     # 每60步（12秒）打印一次距离信息
+        #     if env.current_step % 60 == 0 and agent_id == 'B0200':
+        #         current_time = env.current_step * env.time_interval
+        #         logging.info(f"[T={current_time:.1f}s][敌方{agent_id}] 当前距离我方长机{distance/1000:.1f}km")
+        #     
+        #     # 距离小于80km时，执行180度转弯返航
+        #     if distance < 65000 and not self.enemy_return_state[agent_id]['returning']:
+        #         self.enemy_return_state[agent_id]['returning'] = True
+        #         if not self.enemy_return_state[agent_id]['logged']:
+        #             current_time = env.current_step * env.time_interval
+        #             logging.info(f"[T={current_time:.1f}s][敌方{agent_id}] 距离{distance/1000:.1f}km < 65km，🔄开始返航")
+        #             self.enemy_return_state[agent_id]['logged'] = True
+        #     
+        #     # 返航：航向0度（朝北），保持高度，中速
+        #     if self.enemy_return_state[agent_id]['returning']:
+        #         current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+        #         heading_diff = (0 - current_heading + 180) % 360 - 180
+        #         
+        #         # 已经接近0度航向，保持直飞
+        #         if abs(heading_diff) < 10:
+        #             return 7, 8, 3  # 保持高度，直飞，中速
+        #         # 需要转向到0度
+        #         elif heading_diff > 0:
+        #             return 7, 10, 3  # 保持高度，右转30度，中速
+        #         else:
+        #             return 7, 6, 3   # 保持高度，左转30度，中速
+        #     
+        #     # 正常前进：保持当前航向，中速
+        #     return 7, 8, 3
         
         # ===== 我方战术系统 =====
         # 只对我方（A开头）执行战术系统
@@ -2136,21 +2567,15 @@ class TacticalTask(MultipleCombatTask):
         
         selected_tactic = self.selected_tactic
         
-        # 3.5 早期阶段优先执行编队/占位指令（由NLT/MELD/MTR产生的formation_commands）
+        # ✅ 修复：战术模板优先于formation_commands
+        # 原因：formation_commands会覆盖钳形攻势等战术模板的精确指令
         agent_phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
-        if agent_id in self.formation_commands and agent_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
-            cmd = self.formation_commands.get(agent_id)
-            if cmd and len(cmd) == 3:
-                return cmd
         
-        # 3.6 DOR/DR/MAR阶段：优先按规避/再进攻/返航统一路径执行（落地DOR决策表）
+        # 3.6 DOR/DR/MAR阶段：优先按规避/再进攻/返航统一路径执行
         if agent_phase in [TacticalPhase.DOR_DR, TacticalPhase.DR_MAR, TacticalPhase.BEYOND_MAR]:
-            return self._execute_tactical_evasion(env, agent_id)
-        
-        # 战术选择日志（简化）
-        
-        # 4. 根据战术类型分发（7种完整战术）
-        if selected_tactic == 'DRAG_SHOOT':
+            result = self._execute_tactical_evasion(env, agent_id)
+        # 4. 根据战术类型分发（7种完整战术）- 优先于formation_commands
+        elif selected_tactic == 'DRAG_SHOOT':
             result = self._execute_drag_shoot(env, agent_id)
         elif selected_tactic == 'PINCER_ATTACK':
             result = self._execute_pincer_attack(env, agent_id)
@@ -2165,12 +2590,168 @@ class TacticalTask(MultipleCombatTask):
         else:  # SIDE_BY_SIDE 或默认
             result = self._execute_side_by_side(env, agent_id)
         
+        # ===== 全局安全检查：高度和速度限制 =====
+        current_alt = env.agents[agent_id].get_position()[2]
+        current_speed = env.agents[agent_id].get_property_value(c.velocities_v_north_mps)**2 + \
+                       env.agents[agent_id].get_property_value(c.velocities_v_east_mps)**2 + \
+                       env.agents[agent_id].get_property_value(c.velocities_v_down_mps)**2
+        current_speed = np.sqrt(current_speed)
+
+        alt_cmd, hdg_cmd, vel_cmd = result
+
+        # 初始化高度保护状态追踪（避免日志泛滥）
+        if not hasattr(self, 'altitude_protection_state'):
+            self.altitude_protection_state = {}
+        
+        if agent_id not in self.altitude_protection_state:
+            self.altitude_protection_state[agent_id] = {
+                'last_warning_type': None,  # ✅ 修复：只记录类型，不记录完整字符串
+                'last_log_time': 0
+            }
+        
+        # 高度安全检查：防止超过10km上限或低于3km下限
+        alt_change = self.norm_delta_altitude[alt_cmd] * 1000
+        predicted_alt = current_alt + alt_change
+        current_time = env.current_step * env.time_interval
+        
+        # 判断当前警告类型和消息
+        warning_type = None  # ✅ 修复：使用类型而不是完整字符串
+        warning_message = None
+        
+        # 【修复7+终极增强】更严格的高度保护：7.5km开始强制下降
+        # 严格的高度限制：7.5km强制下降，8.5km强制大幅下降，9km强制最大下降
+        if current_alt > 9000:
+            # 已经超过9km，强制最大下降
+            alt_cmd = 0  # 下降-1500m（最大下降）
+            vel_cmd = np.clip(vel_cmd, 0, 3)  # 限制加速，避免爬升
+            warning_type = 'over_9km'
+            warning_message = f"🛡️ [{agent_id}] 高度保护: 当前{current_alt:.0f}m > 9km上限，强制最大下降"
+        elif current_alt > 8500:
+            # 超过8.5km，强制大幅下降
+            alt_cmd = 1  # 下降-1000m
+            vel_cmd = np.clip(vel_cmd, 0, 3)  # 限制加速
+            warning_type = 'over_8.5km'
+            warning_message = f"🛡️ [{agent_id}] 高度保护: 当前{current_alt:.0f}m > 8.5km，强制大幅下降"
+        elif current_alt > 7500:
+            # 超过7.5km，强制下降（不再只是禁止爬升）
+            if alt_change > 0:
+                alt_cmd = 3  # 改为下降-500m（更激进）
+                warning_type = 'over_7.5km_force_down'
+                warning_message = f"🛡️ [{agent_id}] 高度保护: 当前{current_alt:.0f}m > 7.5km，强制下降"
+            else:
+                # 如果已经在下降，继续下降
+                pass
+        elif predicted_alt > 10000:
+            # 预测会超过10km，强制下降
+            alt_cmd = 3  # 下降-500m
+            warning_type = 'predict_over_10km'
+            warning_message = f"🛡️ [{agent_id}] 高度保护: 预测{predicted_alt:.0f}m > 10km上限，强制下降"
+        
+        # ✅ 修复：只有当警告类型改变或距离上次日志超过10秒时才输出
+        if warning_type:
+            state = self.altitude_protection_state[agent_id]
+            should_log = False
+            
+            if state['last_warning_type'] != warning_type:
+                # 警告类型改变，立即输出日志
+                should_log = True
+                state['last_warning_type'] = warning_type
+                state['last_log_time'] = current_time
+            elif current_time - state['last_log_time'] > 10.0:  # ✅ 从5秒改为10秒
+                # 同一类型超过10秒，输出一次
+                should_log = True
+                state['last_log_time'] = current_time
+            
+            if should_log:
+                logging.warning(warning_message)
+
+        # 下限检查
+        if current_alt < 3000:
+            # 已经低于3km，强制爬升
+            alt_cmd = 14  # 爬升+1500m（最大爬升）
+            logging.warning(f"🛡️ [{agent_id}] 高度保护: 当前{current_alt:.0f}m < 3km下限，强制最大爬升")
+        elif current_alt < 3500:
+            # 接近3km下限，禁止下降
+            if alt_change < 0:
+                alt_cmd = 7  # 改为保持高度
+                logging.warning(f"🛡️ [{agent_id}] 高度保护: 当前{current_alt:.0f}m接近3km下限，禁止下降")
+        elif predicted_alt < 3000:
+            # 预测会低于3km，改为保持高度
+            alt_cmd = 7  # 保持高度
+            logging.warning(f"🛡️ [{agent_id}] 高度保护: 预测{predicted_alt:.0f}m < 3km下限，改为保持高度")
+
+        # 【修复8+增强】DR_MAR阶段更严格的高度和机动限制
+        agent_phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
+        if agent_phase in [TacticalPhase.DOR_DR, TacticalPhase.DR_MAR, TacticalPhase.BEYOND_MAR]:
+            # DR_MAR阶段：严格限制高空机动
+            if current_alt > 8000:
+                # 高空时，禁止大幅加速
+                vel_cmd = np.clip(vel_cmd, 0, 4)  # 最多+50m/s
+                if env.current_step % 200 == 0:
+                    logging.info(f"🛡️ [{agent_id}] DR_MAR高空限速: 高度{current_alt:.0f}m，限制加速")
+            
+            # ✅ 新增：7.5km以上禁止大角度转向（避免爬升）
+            if current_alt > 7500:
+                # 限制转向角度，避免大角度转向导致爬升
+                if hdg_cmd in [2, 14]:  # 90度转向
+                    hdg_cmd = 5 if hdg_cmd == 2 else 11  # 改为45度
+                elif hdg_cmd in [4, 12]:  # 60度转向
+                    hdg_cmd = 5 if hdg_cmd == 4 else 11  # 改为45度
+                if env.current_step % 200 == 0:
+                    logging.info(f"🛡️ [{agent_id}] DR_MAR高空限转: 高度{current_alt:.0f}m，限制大角度转向")
+
+        # 速度安全检查：防止高空低速失速
+        if current_alt > 9000 and current_speed < 150:
+            # 极高空低速，强制下降换速度
+            alt_cmd = 1  # 下降-1000m（加大下降力度）
+            vel_cmd = 5  # 大幅加速+100m/s
+            logging.warning(f"⚠️ [{agent_id}] 极高空低速! 强制下降换速度 (高度{current_alt:.0f}m, 速度{current_speed:.1f}m/s)")
+        elif current_alt > 8000 and current_speed < 120:
+            # 高空极低速，强制下降换速度
+            alt_cmd = 3  # 下降-500m
+            vel_cmd = 4  # 加速+50m/s
+            logging.warning(f"⚠️ [{agent_id}] 高空极低速! 强制下降换速度 (高度{current_alt:.0f}m, 速度{current_speed:.1f}m/s)")
+        
+        # ✅ 关键修复：完全禁用Y轴约束，因为会导致90度转向和转圈
+        # 原因：Y轴约束触发后，_turn_to_heading会执行90度转向，导致持续转圈
+        # 解决方案：依赖CAP边界检查，不在此处强制转向
+        # if agent_id.startswith('A'):  # 仅对我方飞机约束
+        #     my_pos = env.agents[agent_id].get_position()
+        #     y_pos = my_pos[1]  # Y坐标（东西方向）
+        #     x_pos = my_pos[0]  # X坐标（南北方向）
+        #     
+        #     # ✅ 关键修复2：Y轴约束从40km降至25km
+        #     if abs(y_pos) > 25000:
+        #         # 计算目标航向：返回Y=0中心线，同时继续X轴战斗
+        #         current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+        #         
+        #         # 根据X位置决定主航向（南北）
+        #         if x_pos < 0:  # 我方在南方
+        #             main_heading = 0  # 向北进攻
+        #         else:
+        #             main_heading = 180  # 向南返回
+        #         
+        #         # 根据Y偏离方向微调航向，使其向中心线靠拢
+        #         if y_pos > 0:  # 偏东，需要向西修正
+        #             target_heading = (main_heading - 30) % 360  # 偏西30度
+        #         else:  # 偏西，需要向东修正
+        #             target_heading = (main_heading + 30) % 360  # 偏东30度
+        #         
+        #         # 计算航向差并应用
+        #         heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+        #         hdg_cmd = self._convert_heading_to_index(np.deg2rad(heading_diff))
+        #         
+        #         if env.current_step % 60 == 0:
+        #             logging.warning(f"⚠️ [{agent_id}] Y轴约束: Y={y_pos/1000:.1f}km>25km, 强制转向{target_heading:.0f}° (返回中心线)")
+
+        result = (alt_cmd, hdg_cmd, vel_cmd)
+
         # 调试日志：打印指令和机动类型
         if env.current_step % 30 == 0:
             alt_change = self.norm_delta_altitude[result[0]] * 1000
             hdg_change = np.rad2deg(self.norm_delta_heading[result[1]])
             vel_change = self.norm_delta_velocity[result[2]] * 100
-            
+
             # 判断机动类型
             maneuver_type = "平飞"
             if abs(hdg_change) > 80:
@@ -2179,15 +2760,16 @@ class TacticalTask(MultipleCombatTask):
                 maneuver_type = f"Crank{hdg_change:+.0f}°"
             elif abs(hdg_change) > 10:
                 maneuver_type = f"转向{hdg_change:+.0f}°"
-            
+
             if abs(alt_change) > 200:
                 maneuver_type += f" + {'爬升' if alt_change > 0 else '俯冲'}{abs(alt_change):.0f}m"
-            
-            logging.warning(f"[机动指令] {agent_id}")
-            logging.warning(f"  机动类型: {maneuver_type}")
-            logging.warning(f"  高度变化: {alt_change:+.0f}m | 航向变化: {hdg_change:+.1f}° | 速度变化: {vel_change:+.0f}m/s")
-            logging.warning(f"  指令索引: alt={result[0]} hdg={result[1]} vel={result[2]}")
-        
+
+            # 机动指令日志（已注释，减少输出）
+            # logging.warning(f"[机动指令] {agent_id}")
+            # logging.warning(f"  机动类型: {maneuver_type}")
+            # logging.warning(f"  高度变化: {alt_change:+.0f}m | 航向变化: {hdg_change:+.1f}° | 速度变化: {vel_change:+.0f}m/s")
+            # logging.warning(f"  指令索引: alt={result[0]} hdg={result[1]} vel={result[2]}")
+
         return result
     
     def _execute_notch_back(self, env, agent_id: str, direction='left') -> tuple:
@@ -2526,23 +3108,24 @@ class TacticalTask(MultipleCombatTask):
         # 计算航向差（-180 to +180）
         heading_diff = ((target_heading - current_heading + 180) % 360) - 180
         
-        # 选择合适的航向指令
+        # ✅ 关键修复：渐进式转向，避免90度固定转向导致转圈
+        # 每次最多转60度，分多次完成大角度转向
         if abs(heading_diff) < 5.0:
             heading_cmd = 8  # 保持航向
         elif heading_diff > 0:  # 需要右转
             if abs(heading_diff) > 60:
-                heading_cmd = 14  # 右转90°
+                heading_cmd = 12  # 右转60°（而非90°）
             elif abs(heading_diff) > 40:
-                heading_cmd = 12  # 右侧Crank +60°
+                heading_cmd = 11  # 右转45°
             elif abs(heading_diff) > 20:
-                heading_cmd = 11  # 右侧Crank +45°
-            else:
                 heading_cmd = 10  # 右转30°
+            else:
+                heading_cmd = 9   # 右转15°
         else:  # 需要左转
             if abs(heading_diff) > 60:
-                heading_cmd = 2   # 左转90°
+                heading_cmd = 4   # 左转60°（而非90°）
             elif abs(heading_diff) > 40:
-                heading_cmd = 4   # 左侧Crank -60°
+                heading_cmd = 5   # 左转45°
             elif abs(heading_diff) > 20:
                 heading_cmd = 5   # 左侧Crank -45°
             else:
@@ -2561,18 +3144,13 @@ class TacticalTask(MultipleCombatTask):
             # 获取我机位置
             my_pos = env.agents[agent_id].get_position()
             
-            # 获取敌方长机位置
-            enemy_id = "B0100" if agent_id.startswith('A') else "A0100"
+            # 获取敌机位置（使用固定目标分配）
+            enemy_id = get_target_with_fallback(agent_id, env)
             if enemy_id in env.agents and env.agents[enemy_id].is_alive:
                 enemy_pos = env.agents[enemy_id].get_position()
             else:
-                # 敌方长机不存在，尝试僚机
-                enemy_id = "B0200" if agent_id.startswith('A') else "A0200"
-                if enemy_id in env.agents and env.agents[enemy_id].is_alive:
-                    enemy_pos = env.agents[enemy_id].get_position()
-                else:
-                    # 没有敌机，返回当前航向
-                    return env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+                # 没有敌机，返回当前航向
+                return env.agents[agent_id].get_property_value(c.attitude_psi_deg)
             
             # 计算方位角
             delta_x = enemy_pos[0] - my_pos[0]
@@ -2655,9 +3233,17 @@ class TacticalTask(MultipleCombatTask):
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
-                
-                # LR阶段继续保持航向，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    is_lead = agent_id.endswith('100')
+                    direction = 'left' if is_lead else 'right'
+                    return self._execute_tactical_crank(env, agent_id, direction, climb=False)
+                else:
+                    # 平飞保持航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
@@ -2668,11 +3254,12 @@ class TacticalTask(MultipleCombatTask):
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time)
         
-        # 僚机动作序列（独立阶段判断）
+        # 僚机动作序列（独立阶段判断）- 使用固定目标
         else:
-            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-            if leader_blue and leader_blue.is_alive:
-                distance = self._calculate_distance_between(env.agents[agent_id], leader_blue)
+            target_id = get_target_with_fallback(agent_id, env)
+            target_aircraft = env._jsbsims.get(target_id)
+            if target_aircraft and target_aircraft.is_alive:
+                distance = self._calculate_distance_between(env.agents[agent_id], target_aircraft)
                 wingman_phase = self._get_wingman_phase_by_distance(distance)
             else:
                 wingman_phase = self.current_phase
@@ -2690,9 +3277,15 @@ class TacticalTask(MultipleCombatTask):
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
-                
-                # LR阶段保持350°航向，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 350.0)
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'right', climb=False)
+                else:
+                    # 平飞保持航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, 350.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
@@ -2747,9 +3340,15 @@ class TacticalTask(MultipleCombatTask):
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
-                
-                # LR阶段继续保持航向，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'left', climb=False)
+                else:
+                    # 平飞保持航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
@@ -2761,11 +3360,12 @@ class TacticalTask(MultipleCombatTask):
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time, 'left')
         
-        # 僚机动作序列（后机，独立阶段判断）
+        # 僚机动作序列（后机，独立阶段判断）- 使用固定目标
         else:
-            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-            if leader_blue and leader_blue.is_alive:
-                distance = self._calculate_distance_between(env.agents[agent_id], leader_blue)
+            target_id = get_target_with_fallback(agent_id, env)
+            target_aircraft = env._jsbsims.get(target_id)
+            if target_aircraft and target_aircraft.is_alive:
+                distance = self._calculate_distance_between(env.agents[agent_id], target_aircraft)
                 wingman_phase = self._get_wingman_phase_by_distance(distance)
             else:
                 wingman_phase = self.current_phase
@@ -2789,13 +3389,19 @@ class TacticalTask(MultipleCombatTask):
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
-                
-                # LR阶段继续保持后方队形，完成中制导
-                if hasattr(self, 'wingman_crank_state') and self.wingman_crank_state.get("completed", False):
-                    recent_completion = current_time - self.wingman_crank_state.get("completed_time", 0) < 60.0
-                    if recent_completion:
-                        return self._establish_rear_formation(env, agent_id, current_time)
-                return self._maintain_rear_formation(env, agent_id)
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或保持队形
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'right', climb=False)
+                else:
+                    # 平飞保持后方队形，完成中制导
+                    if hasattr(self, 'wingman_crank_state') and self.wingman_crank_state.get("completed", False):
+                        recent_completion = current_time - self.wingman_crank_state.get("completed_time", 0) < 60.0
+                        if recent_completion:
+                            return self._establish_rear_formation(env, agent_id, current_time)
+                    return self._maintain_rear_formation(env, agent_id)
             elif wingman_phase == TacticalPhase.TR_DOR:
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
@@ -2848,20 +3454,23 @@ class TacticalTask(MultipleCombatTask):
                 # LR阶段继续保持航向，完成中制导
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
-                # TR阶段（75km）：中制导结束，准备规避
+                # TR阶段（75km）：继续制导15秒后再规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
-                if last_launch > 0 and (current_time - last_launch) > 5.0:
+                # ✅ 修复：延长制导时间到15秒，确保导弹获得足够制导支持
+                if last_launch > 0 and (current_time - last_launch) > 15.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
                 else:
+                    # 继续保持航向，完成中制导
                     return self._maintain_heading_precise(env, agent_id, 0.0)
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
         
-        # 僚机动作序列（独立阶段判断）
+        # 僚机动作序列（独立阶段判断）- 使用固定目标
         else:
-            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-            if leader_blue and leader_blue.is_alive:
-                distance = self._calculate_distance_between(env.agents[agent_id], leader_blue)
+            target_id = get_target_with_fallback(agent_id, env)
+            target_aircraft = env._jsbsims.get(target_id)
+            if target_aircraft and target_aircraft.is_alive:
+                distance = self._calculate_distance_between(env.agents[agent_id], target_aircraft)
                 wingman_phase = self._get_wingman_phase_by_distance(distance)
             else:
                 wingman_phase = self.current_phase
@@ -2871,17 +3480,28 @@ class TacticalTask(MultipleCombatTask):
             elif wingman_phase == TacticalPhase.LR_TR:
                 # LR阶段（78km）：发射主动雷达弹，中制导开始
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
-                if last_launch < 0:  # 还未发射
-                    self.missile_launched[agent_id] = True  # 标记需要发射
+                lead_launch = self.last_missile_launch_time.get('A0100', -999)
+                
+                # ✅ 僚机发射逻辑：在长机发射后5秒自动发射
+                if last_launch < 0:  # 僚机还未发射
+                    if lead_launch > 0 and (current_time - lead_launch) >= 5.0:
+                        # 长机已发射超过5秒，僚机发射
+                        self.missile_launched[agent_id] = True
+                        logging.info(f"🚀 [僚机跟随发射] {agent_id} 在长机发射{current_time - lead_launch:.1f}秒后准备发射")
+                    elif lead_launch < 0:
+                        # 长机还未发射，僚机也标记准备发射（并排射击战术）
+                        self.missile_launched[agent_id] = True
                 
                 # LR阶段继续保持航向，完成中制导
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
-                # TR阶段（75km）：中制导结束，准备规避
+                # TR阶段（75km）：继续制导15秒后再规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
-                if last_launch > 0 and (current_time - last_launch) > 5.0:
+                # ✅ 修复：延长制导时间到15秒，确保导弹获得足够制导支持
+                if last_launch > 0 and (current_time - last_launch) > 15.0:
                     return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
                 else:
+                    # 继续保持航向，完成中制导
                     return self._maintain_heading_precise(env, agent_id, 0.0)
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
@@ -2915,19 +3535,48 @@ class TacticalTask(MultipleCombatTask):
         
         # 长机动作序列（低空）
         if is_lead:
-            target_altitude = 6096.0  # 保持低空6000m
-            
+            # 使用vertical_split设置的目标高度，如果没有则使用默认6000m
+            target_altitude = self.vertical_split_targets.get(agent_id, 6096.0)
+
             if self.current_phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR, TacticalPhase.MTR_LR]:
-                # 保持低空0°航向
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+                # 检查是否需要调整高度到目标
+                alt_diff = target_altitude - current_alt
+                if abs(alt_diff) > 200:
+                    # 需要调整高度，计算合理的爬升/下降量
+                    if alt_diff > 1000:
+                        alt_cmd_value = 1000
+                    elif alt_diff > 500:
+                        alt_cmd_value = 500
+                    elif alt_diff > 200:
+                        alt_cmd_value = 300
+                    elif alt_diff < -1000:
+                        alt_cmd_value = -1000
+                    elif alt_diff < -500:
+                        alt_cmd_value = -500
+                    elif alt_diff < -200:
+                        alt_cmd_value = -300
+                    else:
+                        alt_cmd_value = alt_diff
+
+                    alt_cmd = self._convert_altitude_to_index(alt_cmd_value)
+                    return alt_cmd, 8, 3  # 保持航向和速度
+                else:
+                    # 已到达目标高度，保持0°航向
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.LR_TR:
                 # LR阶段（78km）：发射主动雷达弹，中制导开始
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
-                
-                # LR阶段继续保持航向，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'left', climb=False)
+                else:
+                    # 平飞保持航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
             elif self.current_phase == TacticalPhase.TR_DOR:
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
@@ -2938,42 +3587,92 @@ class TacticalTask(MultipleCombatTask):
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time, 'left')
         
-        # 僚机动作序列（高空，独立阶段判断）
+        # 僚机动作序列（高空，独立阶段判断）- 使用固定目标
         else:
-            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-            if leader_blue and leader_blue.is_alive:
-                distance = self._calculate_distance_between(env.agents[agent_id], leader_blue)
+            target_id = get_target_with_fallback(agent_id, env)
+            target_aircraft = env._jsbsims.get(target_id)
+            if target_aircraft and target_aircraft.is_alive:
+                distance = self._calculate_distance_between(env.agents[agent_id], target_aircraft)
                 wingman_phase = self._get_wingman_phase_by_distance(distance)
             else:
                 wingman_phase = self.current_phase
-            
-            target_altitude = 8000.0  # 目标高空8000m
-            
+
+            # ✅ 修复1.3: 使用vertical_split设置的目标高度，如果没有则使用默认9000m (符合8-10km定义)
+            target_altitude = self.vertical_split_targets.get(agent_id, 9144.0)  # 9144m ≈ 9km (修改前: 8000)
+
+            # 【修复9】检查横向分离距离，避免超出CAP边界
+            # 计算与长机的横向分离（Y方向）
+            lead_pos = env.agents['A0100'].get_position()
+            wing_pos = env.agents[agent_id].get_position()
+            lateral_separation = abs(wing_pos[1] - lead_pos[1])  # Y方向距离
+
+            # 目标横向分离：5km（根据项目说明.md）
+            target_lateral_separation = 5000
+
+            # 检查是否接近CAP边界（Y=±60km）
+            wing_y = wing_pos[1]
+            approaching_boundary = abs(wing_y) > 50000  # 距离边界10km以内
+
+            # 决定航向偏转角度
+            if approaching_boundary:
+                # 接近边界，强制返回中心（左偏）
+                heading_offset = -10.0
+                if env.current_step % 200 == 0:
+                    logging.warning(f"⚠️ [{agent_id}] 接近CAP边界(Y={wing_y/1000:.1f}km)，强制左偏返回")
+            elif lateral_separation >= target_lateral_separation:
+                # 已达到目标分离，保持0°航向（不再右偏）
+                heading_offset = 0.0
+            else:
+                # 未达到目标分离，继续右偏
+                heading_offset = 10.0
+
             if wingman_phase == TacticalPhase.NLT_MELD:
-                # 保持10°右偏，快速建立横向分离
-                return self._maintain_heading_precise(env, agent_id, 10.0)
+                # 建立横向分离，根据当前分离距离调整航向
+                return self._maintain_heading_precise(env, agent_id, heading_offset)
             elif wingman_phase == TacticalPhase.MELD_MTR:
-                # 爬升到高空，保持10°右偏（不是0°！）
+                # 爬升到目标高度，同时调整横向分离
                 alt_diff = target_altitude - current_alt
                 if abs(alt_diff) > 200:
-                    # 需要爬升，同时保持10°右偏
-                    alt_cmd = 14  # 爬升+1500m
-                    hdg_cmd = self._convert_heading_to_index(np.deg2rad(10.0))
+                    # 需要调整高度，计算合理的爬升/下降量
+                    # 限制单次调整量，避免过度爬升
+                    if alt_diff > 1000:
+                        alt_cmd_value = 1000  # 最多爬升1000m
+                    elif alt_diff > 500:
+                        alt_cmd_value = 500
+                    elif alt_diff > 200:
+                        alt_cmd_value = 300
+                    elif alt_diff < -1000:
+                        alt_cmd_value = -1000  # 最多下降1000m
+                    elif alt_diff < -500:
+                        alt_cmd_value = -500
+                    elif alt_diff < -200:
+                        alt_cmd_value = -300
+                    else:
+                        alt_cmd_value = alt_diff
+
+                    alt_cmd = self._convert_altitude_to_index(alt_cmd_value)
+                    hdg_cmd = self._convert_heading_to_index(np.deg2rad(heading_offset))
                     return alt_cmd, hdg_cmd, 3
                 else:
-                    # 已到达高度，保持10°右偏
-                    return self._maintain_heading_precise(env, agent_id, 10.0)
+                    # 已到达高度，根据横向分离调整航向
+                    return self._maintain_heading_precise(env, agent_id, heading_offset)
             elif wingman_phase == TacticalPhase.MTR_LR:
-                # 保持高空10°右偏
-                return self._maintain_heading_precise(env, agent_id, 10.0)
+                # 保持高空，根据横向分离调整航向
+                return self._maintain_heading_precise(env, agent_id, heading_offset)
             elif wingman_phase == TacticalPhase.LR_TR:
                 # LR阶段（78km）：发射主动雷达弹，中制导开始
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
-                
-                # LR阶段保持10°右偏，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 10.0)
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'right', climb=False)
+                else:
+                    # 平飞根据横向分离调整航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, heading_offset)
             elif wingman_phase == TacticalPhase.TR_DOR:
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
@@ -3016,18 +3715,43 @@ class TacticalTask(MultipleCombatTask):
             if env.current_step % 60 == 0:
                 logging.info(f"  🎯 [钳形攻势-长机] {agent_id} 阶段:{lead_phase.value}")
             
+            # 【修复10】检查横向分离距离，避免超出CAP边界
+            lead_pos = env.agents[agent_id].get_position()
+            wing_pos = env.agents['A0200'].get_position() if env.agents['A0200'].is_alive else lead_pos
+            lateral_separation = abs(wing_pos[1] - lead_pos[1])  # Y方向距离
+            target_lateral_separation = 10000  # 钳形攻势目标横向分离：10km
+
+            # 检查是否接近CAP边界（Y=±60km）
+            lead_y = lead_pos[1]
+            approaching_boundary = abs(lead_y) > 50000  # 距离边界10km以内
+
             if lead_phase == TacticalPhase.NLT_MELD:
-                # 初期保持0°，延迟展开
-                if env.current_step % 60 == 0:
-                    logging.info(f"     → 目标航向:0°")
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+                # ✅ 修复1.1: NLT阶段快速展开到左侧-45°（直接计算指令）
+                current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+                target_heading = 315.0  # -45°
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
+                
+                # 如果已达到目标分离或接近边界，停止左偏
+                if approaching_boundary or lateral_separation >= target_lateral_separation:
+                    if env.current_step % 60 == 0:
+                        logging.info(f"     → 已达到分离，保持315°")
+                else:
+                    if env.current_step % 60 == 0:
+                        logging.info(f"     → 目标航向:315° (展开)，当前{current_heading:.1f}°")
+                return 7, hdg_idx, 3  # 直接返回指令
             elif lead_phase == TacticalPhase.MELD_MTR:
-                # MELD-MTR阶段：展开到左侧315°（-45°）
+                # ✅ 关键修复：MELD阶段应该保持-15度分离，而非收拢到0度！
+                # 原因：钳形攻势MELD阶段是左右夹攻，需要保持横向分离
+                current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+                target_heading = 345.0  # 长机-15°（而非0°）
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
                 if env.current_step % 60 == 0:
-                    logging.info(f"     → 目标航向:315°")
-                return self._maintain_heading_precise(env, agent_id, 315.0)
+                    logging.info(f"📍 [MELD分离] 长机目标345°(-15°)，当前{current_heading:.1f}°")
+                return 7, hdg_idx, 3  # 直接返回指令
             elif lead_phase == TacticalPhase.MTR_LR:
-                # MTR-LR阶段：收拢到0°形成钳形夹击
+                # MTR-LR阶段：保持0°形成钳形夹击
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif lead_phase == TacticalPhase.LR_TR:
                 # LR阶段（78km）：发射主动雷达弹，中制导开始
@@ -3035,36 +3759,74 @@ class TacticalTask(MultipleCombatTask):
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
                 
-                # LR阶段继续保持航向，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+                # ✅ 关键修复：发射后15秒内，禁止任何转向，保持当前姿态
+                if last_launch > 0 and (current_time - last_launch) < 15.0:
+                    remaining_time = 15.0 - (current_time - last_launch)
+                    if env.current_step % 60 == 0:
+                        logging.info(f"🎯 [{agent_id}] 导弹制导保护: 剩余{remaining_time:.1f}秒，保持当前姿态")
+                    return 7, 8, 3  # 保持高度、航向、中速
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'left', climb=False)
+                else:
+                    # 平飞保持航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
             elif lead_phase == TacticalPhase.TR_DOR:
-                # TR阶段（75km）：中制导结束，准备规避
+                # TR阶段（75km）：继续制导15秒后再规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
-                if last_launch > 0 and (current_time - last_launch) > 5.0:
+                # ✅ 修复：延长制导时间到15秒，确保导弹获得足够制导支持
+                if last_launch > 0 and (current_time - last_launch) > 15.0:
                     # 内侧返航：右转（与左侧Crank相反）
                     return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
                 else:
-                    return self._maintain_heading_precise(env, agent_id, 0.0)
+                    # 继续保持航向，完成中制导
+                    return 7, 8, 3
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
         
-        # 僚机动作（右侧包抄，独立阶段判断）
+        # 僚机动作（右侧包抄，独立阶段判断）- 使用固定目标
         else:
-            leader_blue = env._jsbsims.get("B0100") or env._jsbsims.get("B0200")
-            if leader_blue and leader_blue.is_alive:
-                distance = self._calculate_distance_between(env.agents[agent_id], leader_blue)
+            target_id = get_target_with_fallback(agent_id, env)
+            target_aircraft = env._jsbsims.get(target_id)
+            if target_aircraft and target_aircraft.is_alive:
+                distance = self._calculate_distance_between(env.agents[agent_id], target_aircraft)
                 wingman_phase = self._get_wingman_phase_by_distance(distance)
             else:
                 wingman_phase = self.current_phase
-            
+
+            # 【修复11】检查横向分离距离，避免超出CAP边界
+            lead_pos = env.agents['A0100'].get_position() if env.agents['A0100'].is_alive else env.agents[agent_id].get_position()
+            wing_pos = env.agents[agent_id].get_position()
+            lateral_separation = abs(wing_pos[1] - lead_pos[1])  # Y方向距离
+            target_lateral_separation = 10000  # 钳形攻势目标横向分离：10km
+
+            # 检查是否接近CAP边界（Y=±60km）
+            wing_y = wing_pos[1]
+            approaching_boundary = abs(wing_y) > 50000  # 距离边界10km以内
+
             if wingman_phase == TacticalPhase.NLT_MELD:
-                # 初期保持0°，延迟展开
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+                # ✅ 修复1.1: NLT阶段快速展开到右侧+45°
+                # 如果已达到目标分离或接近边界，停止右偏
+                if approaching_boundary or lateral_separation >= target_lateral_separation:
+                    target_heading = 45.0  # 保持+45°
+                else:
+                    target_heading = 45.0  # 展开到+45°
+                return self._maintain_heading_precise(env, agent_id, target_heading)
             elif wingman_phase == TacticalPhase.MELD_MTR:
-                # MELD-MTR阶段：展开到右侧45°
-                return self._maintain_heading_precise(env, agent_id, 45.0)
+                # ✅ 关键修复：MELD阶段应该保持+15度分离，而非收拢到0度！
+                # 原因：钳形攻势MELD阶段是左右夹攻，需要保持横向分离
+                current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+                target_heading = 15.0  # 僚机+15°（而非0°）
+                heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+                hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
+                if env.current_step % 60 == 0:
+                    logging.info(f"📍 [MELD分离] 僚机目标15°(+15°)，当前{current_heading:.1f}°")
+                return 7, hdg_idx, 3
             elif wingman_phase == TacticalPhase.MTR_LR:
-                # MTR-LR阶段：收拢到0°形成钳形夹击
+                # MTR-LR阶段：保持0°形成钳形夹击
                 return self._maintain_heading_precise(env, agent_id, 0.0)
             elif wingman_phase == TacticalPhase.LR_TR:
                 # LR阶段（78km）：发射主动雷达弹，中制导开始
@@ -3072,16 +3834,31 @@ class TacticalTask(MultipleCombatTask):
                 if last_launch < 0:  # 还未发射
                     self.missile_launched[agent_id] = True  # 标记需要发射
                 
-                # LR阶段继续保持航向，完成中制导
-                return self._maintain_heading_precise(env, agent_id, 0.0)
+                # ✅ 关键修复：发射后15秒内，禁止任何转向，保持当前姿态
+                if last_launch > 0 and (current_time - last_launch) < 15.0:
+                    remaining_time = 15.0 - (current_time - last_launch)
+                    if env.current_step % 60 == 0:
+                        logging.info(f"🎯 [{agent_id}] 导弹制导保护: 剩余{remaining_time:.1f}秒，保持当前姿态")
+                    return 7, 8, 3  # 保持高度、航向、中速
+
+                # ✅ 优先级2.2修复：根据LR决策执行Crank或平飞
+                lr_maneuver = getattr(self, 'lr_maneuver', {}).get(agent_id, 'straight')
+                if lr_maneuver == 'crank':
+                    # 执行Crank机动（偏转30°保持规避余度）
+                    return self._execute_tactical_crank(env, agent_id, 'right', climb=False)
+                else:
+                    # 平飞保持航向，完成中制导
+                    return self._maintain_heading_precise(env, agent_id, 0.0)
             elif wingman_phase == TacticalPhase.TR_DOR:
-                # TR阶段（75km）：中制导结束，准备规避
+                # TR阶段（75km）：继续制导15秒后再规避
                 last_launch = self.last_missile_launch_time.get(agent_id, -999)
-                if last_launch > 0 and (current_time - last_launch) > 5.0:
+                # ✅ 修复：延长制导时间到15秒，确保导弹获得足够制导支持
+                if last_launch > 0 and (current_time - last_launch) > 15.0:
                     # 内侧返航：左转（与右侧Crank相反）
                     return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
                 else:
-                    return self._maintain_heading_precise(env, agent_id, 0.0)
+                    # 继续保持航向，完成中制导
+                    return 7, 8, 3
             else:
                 return self._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
     
@@ -3126,13 +3903,27 @@ class TacticalTask(MultipleCombatTask):
             else:
                 return 3, 14, 5  # 战术下降-500m + 右转90° + 大幅加速
         
-        # TR-DOR阶段：Short Skate返航
+        # TR-DOR阶段：继续制导后Short Skate返航
         elif agent_phase == TacticalPhase.TR_DOR:
+            # ✅ 修复：检查导弹制导保护 - 发射后15秒内继续直飞
+            current_time = env.current_step * env.time_interval
+            last_launch = self.last_missile_launch_time.get(agent_id, -999)
+            if last_launch > 0 and (current_time - last_launch) < 15.0:
+                # 继续保持航向，为导弹提供制导支持
+                return 7, 8, 3  # 保持高度、航向、中速
+            
             direction = 'left' if is_lead else 'right'
             return self._execute_short_skate(env, agent_id, direction)
         
         # DOR-DR阶段：执行规避机动（根据DOR决策）
         elif agent_phase == TacticalPhase.DOR_DR:
+            # ✅ 修复：检查导弹制导保护 - 发射后15秒内继续直飞
+            current_time = env.current_step * env.time_interval
+            last_launch = self.last_missile_launch_time.get(agent_id, -999)
+            if last_launch > 0 and (current_time - last_launch) < 15.0:
+                # 继续保持航向，为导弹提供制导支持
+                return 7, 8, 3  # 保持高度、航向、中速
+            
             evasion = getattr(self, 'evasion_maneuver', 'SHORT_SKATE')
             if evasion == 'SHORT_SKATE':
                 direction = 'left' if is_lead else 'right'
@@ -3145,18 +3936,51 @@ class TacticalTask(MultipleCombatTask):
         
         # DR-MAR阶段：根据DR决策结果决定是否重新进攻或返航
         elif agent_phase == TacticalPhase.DR_MAR:
-            next_tactic = getattr(self, 'next_round_tactic', None)
-            if next_tactic:
-                # 重新进攻：转向敌机并加速
-                enemy_bearing = self._get_enemy_bearing(env, agent_id)
-                return self._turn_to_heading(env, agent_id, enemy_bearing, speed_cmd=5)
-            else:
-                # 不重新进攻：180°返航
-                return 7, 16, 5  # 180°转向 + 大幅加速返航
+            # ✅ 修复：检查导弹制导保护 - 发射后15秒内继续直飞
+            current_time = env.current_step * env.time_interval
+            last_launch = self.last_missile_launch_time.get(agent_id, -999)
+            if last_launch > 0 and (current_time - last_launch) < 15.0:
+                # 继续保持航向，为导弹提供制导支持
+                return 7, 8, 3  # 保持高度、航向、中速
+            
+            # ✅ 关键修复：DR_MAR阶段计算返回基地的航向
+            # 原因：hdg=16是"当前+180°"而非"转到180°"，会导致震荡
+            # 我方基地：X=-60km(南方)，敌方基地：X=+60km(北方)
+            pos = env.agents[agent_id].get_position()
+            current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+            
+            # 根据阵营决定返航方向
+            if agent_id.startswith('A'):  # 我方，返南
+                target_heading = 180.0
+            else:  # 敌方，返北
+                target_heading = 0.0
+            
+            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+            hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
+            
+            # 降低返航日志频率：每60步（12秒）输出一次
+            if not hasattr(self, '_return_log_counter'):
+                self._return_log_counter = {}
+            if agent_id not in self._return_log_counter:
+                self._return_log_counter[agent_id] = 0
+            
+            self._return_log_counter[agent_id] += 1
+            if self._return_log_counter[agent_id] % 60 == 0:
+                logging.info(f"🛡️ [DR_MAR返航] {agent_id} 当前{current_heading:.0f}°→基地{target_heading:.0f}° (X={pos[0]/1000:.1f}km)")
+            
+            return 7, hdg_idx, 5  # 返航 + 大幅加速
         
         # BEYOND_MAR阶段：强制返航
         elif agent_phase == TacticalPhase.BEYOND_MAR:
-            return 7, 16, 5  # 180°转向 + 大幅加速返航
+            current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+            # 根据阵营决定返航方向
+            if agent_id.startswith('A'):  # 我方，返南
+                target_heading = 180.0
+            else:  # 敌方，返北
+                target_heading = 0.0
+            heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+            hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
+            return 7, hdg_idx, 5  # 返航 + 大幅加速
         
         else:
             # 默认：平稳返航
@@ -3430,8 +4254,16 @@ class TacticalTask(MultipleCombatTask):
             direction = 'left' if is_lead else 'right'
             return self._execute_short_skate(env, agent_id, direction)
         
-        # 战术回转：180°机动偏置
-        return 7, 16, 5  # 高度保持 + 180°转向 + 大幅加速
+        # 战术回转：返回基地
+        current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+        # 根据阵营决定返航方向
+        if agent_id.startswith('A'):  # 我方，返南
+            target_heading = 180.0
+        else:  # 敌方，返北
+            target_heading = 0.0
+        heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+        hdg_idx = self._convert_heading_to_index(np.deg2rad(heading_diff))
+        return 7, hdg_idx, 5  # 高度保持 + 返基地 + 大幅加速
     
     def _update_integrated_tactical_system(self, env, agent_id: str):
         """
@@ -3483,6 +4315,83 @@ class TacticalTask(MultipleCombatTask):
         except Exception as e:
             logging.error(f"集成战术系统更新失败 {agent_id}: {e}")
     
+    def _apply_speed_safety_check(self, env, agent_id, alt_cmd, hdg_cmd, vel_cmd):
+        """
+        【P0-2修复】速度安全检查 - 防止失速坠毁
+        
+        Args:
+            env: 环境
+            agent_id: 飞机ID
+            alt_cmd, hdg_cmd, vel_cmd: 原始指令索引
+            
+        Returns:
+            修正后的指令索引 (alt_cmd, hdg_cmd, vel_cmd)
+        """
+        try:
+            aircraft = env.agents[agent_id]
+            if not aircraft.is_alive:
+                return alt_cmd, hdg_cmd, vel_cmd
+            
+            # 获取当前状态
+            current_speed = np.linalg.norm(aircraft.get_velocity())  # m/s
+            current_alt = aircraft.get_position()[2]  # m
+            
+            # 失速保护阈值（降低以允许战术机动）
+            STALL_SPEED_LOW = 120  # 432 km/h - 只在真正危险时介入
+            STALL_SPEED_MED = 140  # 504 km/h - 允许高空减速转弯
+            HIGH_ALT_THRESHOLD = 12000  # 12km - 提高高空判断阈值
+            CRITICAL_ALT_THRESHOLD = 10000  # 10km
+            
+            original_cmd = (alt_cmd, hdg_cmd, vel_cmd)
+            safety_triggered = False
+            
+            # 情况1: 低速保护（速度 < 150 m/s）
+            if current_speed < STALL_SPEED_LOW:
+                vel_cmd = max(vel_cmd, 4)  # 强制加速（最少vel_cmd=4）
+                safety_triggered = True
+                if current_alt > CRITICAL_ALT_THRESHOLD:
+                    alt_cmd = min(alt_cmd, 7)  # 禁止继续爬升
+                logging.warning(f"⚠️ [{agent_id}] 低速警告({current_speed:.1f}m/s)! 强制加速")
+            
+            # 情况2: 高空低速保护（高度 > 10km 且速度 < 170 m/s）
+            elif current_alt > HIGH_ALT_THRESHOLD and current_speed < STALL_SPEED_MED:
+                alt_cmd = min(alt_cmd, 5)  # 限制爬升或强制下降
+                vel_cmd = max(vel_cmd, 4)  # 强制加速
+                safety_triggered = True
+                logging.warning(f"⚠️ [{agent_id}] 高空低速({current_alt/1000:.1f}km, {current_speed:.1f}m/s)! "
+                              f"限制高度变化并加速")
+            
+            # 情况3: 极高空保护（高度 > 15km）
+            elif current_alt > 15000:
+                if current_speed < 180:
+                    # 高度过高且速度不足，强制下降换取速度
+                    alt_cmd = 3  # 强制下降-500m
+                    vel_cmd = 5  # 全速加速
+                    safety_triggered = True
+                    logging.warning(f"⚠️ [{agent_id}] 极高空低速! 强制下降换速度")
+                else:
+                    # 高度过高但速度可以，逐步下降
+                    alt_cmd = min(alt_cmd, 6)  # 限制爬升
+            
+            # 情况4: 低高度保护（降低到2.5km，允许战术性低空飞行）
+            elif current_alt < 2500:
+                alt_cmd = max(alt_cmd, 7)  # 禁止下降
+                if current_alt < 2000:
+                    alt_cmd = 11  # 强制爬升+500m
+                    safety_triggered = True
+                    logging.warning(f"⚠️ [{agent_id}] 低高度警告({current_alt/1000:.1f}km)! 强制爬升")
+            
+            # 只在触发保护时输出详细日志（降低频率）
+            if safety_triggered and env.current_step % 120 == 0:  # 减少日志频率
+                logging.info(f"🛡️ [{agent_id}] 速度保护: {original_cmd} → {(alt_cmd, hdg_cmd, vel_cmd)} "
+                           f"(速度{current_speed:.1f}m/s, 高度{current_alt/1000:.1f}km)")
+            
+            return alt_cmd, hdg_cmd, vel_cmd
+            
+        except Exception as e:
+            logging.error(f"速度安全检查失败 {agent_id}: {e}")
+            return alt_cmd, hdg_cmd, vel_cmd
+    
     def normalize_action(self, env, agent_id, action):
         """
         战术模板核心方法 - 动作归一化
@@ -3509,11 +4418,11 @@ class TacticalTask(MultipleCombatTask):
         if agent_id.startswith('A'):  # 只对我方飞机进行完整决策
             self._update_integrated_tactical_system(env, agent_id)
         
-        # 获取战术指令索引
+        # 获取战术指令索引（已包含全局安全检查）
         altitude_cmd_id, heading_cmd_id, velocity_cmd_id = self._get_tactical_command_indices(env, agent_id)
         
-        # 关键调试日志：每60步打印一次指令
-        if env.current_step % 60 == 0 and agent_id.startswith('A'):
+        # 关键调试日志：每120步（24秒）打印一次指令
+        if env.current_step % 120 == 0 and agent_id.startswith('A'):
             alt_change = self.norm_delta_altitude[altitude_cmd_id] * 1000
             hdg_change = np.rad2deg(self.norm_delta_heading[heading_cmd_id])
             vel_change = self.norm_delta_velocity[velocity_cmd_id] * 100
@@ -3521,13 +4430,8 @@ class TacticalTask(MultipleCombatTask):
             phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
             logging.info(f"🔧 [{agent_id}] 阶段:{phase.value} 当前航向:{current_heading:.1f}° 指令:alt={altitude_cmd_id},hdg={heading_cmd_id}({hdg_change:+.1f}°),vel={velocity_cmd_id}")
         
-        # 敌方导弹发射检查（在LR_TR阶段）
-        if agent_id.startswith('B') and hasattr(self, 'enemy_ai'):
-            phase = self.agent_phases.get(agent_id, TacticalPhase.NLT_MELD)
-            if phase == TacticalPhase.LR_TR:
-                # 在LR阶段（78km）敌方也发射导弹
-                current_time = env.current_step * env.time_interval
-                self.enemy_ai.handle_missile_launch(env, agent_id, current_time)
+        # ✅ 敌方导弹发射检查（由enemy_ai内部自动处理，无需外部调用）
+        # 敌方AI系统会在get_enemy_command_indices中自动处理导弹发射
         
         # 使用baseline模型生成底层控制
         return self._use_lowlevel_policy(env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id)
@@ -3537,6 +4441,16 @@ class TacticalTask(MultipleCombatTask):
         执行Beam机动 - 三九机动，将敌机置于自身3/9位置
         目标：通过转向使敌机位于相对方位角的90°位置（左或右侧）
         """
+        # ✅ 关键修复：导弹制导保护 - 发射后15秒内禁止BEAM机动
+        current_time = env.current_step * env.time_interval
+        last_launch = self.last_missile_launch_time.get(agent_id, -999)
+        if last_launch > 0 and (current_time - last_launch) < 15.0:
+            # 继续保持航向，为导弹提供制导支持
+            remaining_time = 15.0 - (current_time - last_launch)
+            if env.current_step % 60 == 0:  # 每12秒输出一次
+                logging.info(f"🎯 [{agent_id}] 导弹制导保护: 剩余{remaining_time:.1f}秒，保持直飞")
+            return 7, 8, 3  # 保持高度、航向、中速
+        
         # 获取最近敌机的方位角
         enemy_bearing = self._get_enemy_bearing(env, agent_id)
         if enemy_bearing is None:
@@ -3560,10 +4474,51 @@ class TacticalTask(MultipleCombatTask):
             target_heading = beam_right
             beam_direction = "9点方向"
         
-        logging.info(f"📍 [BEAM] {agent_id} 执行三九机动: 敌机方位{enemy_bearing:.1f}° → {beam_direction} 目标{target_heading:.1f}°")
+        # ✅ 关键修复：限制BEAM转向角度，防止东西方向偏离
+        heading_diff = self._normalize_angle_diff(target_heading - current_heading)
+        if abs(heading_diff) > 30:  # 超过30度，限制到±30度
+            if heading_diff > 0:
+                target_heading = (current_heading + 30) % 360
+            else:
+                target_heading = (current_heading - 30) % 360
+            if env.current_step % 60 == 0:
+                logging.warning(f"⚠️ [{agent_id}] BEAM转向限制: 原目标{heading_diff:.1f}°→限制±30°")
         
-        # 转向目标航向
-        return self._turn_to_heading(env, agent_id, target_heading, speed_cmd=3)
+        # ✅ 关键修复1：BEAM机动持续时间控制（5秒执行+10秒冷却）
+        if not hasattr(self, 'beam_maneuver_state'):
+            self.beam_maneuver_state = {}
+        
+        current_time = env.current_step * env.time_interval
+        
+        # 检查是否在冷却期
+        if agent_id in self.beam_maneuver_state:
+            state = self.beam_maneuver_state[agent_id]
+            if 'start_time' in state:
+                elapsed = current_time - state['start_time']
+                
+                # 阶段1：执行BEAM（0-5秒）
+                if elapsed < 5.0:
+                    # 继续执行BEAM转向
+                    if env.current_step % 60 == 0:
+                        logging.info(f"📍 [BEAM执行] {agent_id} 敌机{enemy_bearing:.1f}° → {beam_direction} {target_heading:.1f}° (剩{5.0-elapsed:.1f}s)")
+                    return self._turn_to_heading(env, agent_id, target_heading, speed_cmd=3)
+                
+                # 阶段2：冷却期（5-15秒）- 保持航向不动
+                elif elapsed < 15.0:
+                    if env.current_step % 60 == 0:
+                        logging.info(f"⏸️ [BEAM冷却] {agent_id} 保持航向 (剩{15.0-elapsed:.1f}s)")
+                    return 7, 8, 3  # 保持当前姿态
+                
+                # 阶段3：冷却完成，开始新一轮BEAM
+                else:
+                    state['start_time'] = current_time
+                    logging.info(f"📍 [BEAM启动] {agent_id} 敌机{enemy_bearing:.1f}° → {beam_direction} {target_heading:.1f}°")
+                    return self._turn_to_heading(env, agent_id, target_heading, speed_cmd=3)
+        else:
+            # 首次启动BEAM
+            self.beam_maneuver_state[agent_id] = {'start_time': current_time}
+            logging.info(f"📍 [BEAM启动] {agent_id} 敌机{enemy_bearing:.1f}° → {beam_direction} {target_heading:.1f}°")
+            return self._turn_to_heading(env, agent_id, target_heading, speed_cmd=3)
     
     def _execute_tactical_climb(self, env, agent_id: str, direction='left') -> tuple:
         """

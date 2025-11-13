@@ -1,0 +1,4 @@
+time,agent_id,phase,decision_type,selected_tactic,selected_maneuver,reason
+0.2,A0100,NLT_MELD,TACTIC,PINCER_ATTACK,None,"Threat:ADVANTAGE, Intent:ATTACK_TYPE"
+41.0,A0100,MELD_MTR,TACTIC,HIGH_LOW_ATTACK,None,Adjusted from PINCER_ATTACK
+291.6,A0100,MELD_MTR,TACTIC,SEQUENTIAL_ATTACK,None,Adjusted from HIGH_LOW_ATTACK

@@ -60,21 +60,85 @@ class IntentRecognizer:
         self.history_length = 5   # 保留最近5个历史记录
         
         logging.info("✅ 意图识别系统初始化完成")
-    
+
     def recognize_enemy_intent(
+        self,
+        my_aircraft,
+        enemy_aircraft
+    ) -> str:
+        """
+        识别敌方意图（简化版本）
+
+        Args:
+            my_aircraft: 我方飞机
+            enemy_aircraft: 敌方飞机
+
+        Returns:
+            str: 'ATTACK', 'NEUTRAL', 'RETREAT'
+        """
+        try:
+            if not my_aircraft or not enemy_aircraft:
+                return 'NEUTRAL'
+
+            if not my_aircraft.is_alive or not enemy_aircraft.is_alive:
+                return 'NEUTRAL'
+
+            # 获取位置和速度
+            my_pos = np.array(my_aircraft.get_position())
+            enemy_pos = np.array(enemy_aircraft.get_position())
+            my_vel = np.array(my_aircraft.get_velocity())
+            enemy_vel = np.array(enemy_aircraft.get_velocity())
+
+            # 计算相对位置和速度
+            rel_pos = my_pos - enemy_pos
+            distance = np.linalg.norm(rel_pos)
+
+            if distance < 1:
+                return 'NEUTRAL'
+
+            # 计算接近速率（负值表示接近）
+            rel_vel = my_vel - enemy_vel
+            closing_rate = -np.dot(rel_pos, rel_vel) / distance
+
+            # 计算敌机朝向我机的角度
+            enemy_heading_vec = np.array([
+                np.cos(enemy_aircraft.get_rpy()[2]),
+                np.sin(enemy_aircraft.get_rpy()[2]),
+                0
+            ])
+            to_me_vec = rel_pos / distance
+            heading_angle = np.arccos(np.clip(np.dot(enemy_heading_vec, to_me_vec), -1, 1))
+
+            # 简单规则判断
+            # 1. 如果敌机朝向我机且接近速率>0 → ATTACK
+            if heading_angle < np.pi/3 and closing_rate > 50:  # 60度内且接近速率>50m/s
+                return 'ATTACK'
+
+            # 2. 如果敌机背向我机且远离速率>0 → RETREAT
+            if heading_angle > 2*np.pi/3 and closing_rate < -50:  # 120度外且远离速率>50m/s
+                return 'RETREAT'
+
+            # 3. 其他情况 → NEUTRAL
+            return 'NEUTRAL'
+
+        except Exception as e:
+            logging.error(f"意图识别错误: {e}")
+            return 'NEUTRAL'
+
+    def recognize_enemy_intent_old(
         self,
         env,
         enemy_id: str,
         my_aircraft_list: List
     ) -> EnemyIntent:
         """
-        识别敌方意图
-        
+        识别敌方意图（旧版本，保留兼容性）
+
         Args:
             env: 环境对象
             enemy_id: 敌方飞机ID
             my_aircraft_list: 我方飞机列表
-            
+
         Returns:
             EnemyIntent: 识别的敌方意图
         """

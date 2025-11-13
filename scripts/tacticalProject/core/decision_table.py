@@ -42,6 +42,20 @@ class DecisionTable:
                 ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
             ),
             
+            # 激进肃清 - 敌我均势（补全缺失的NEUTRAL态势）
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            
             ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
                 ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
                 ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
@@ -67,6 +81,20 @@ class DecisionTable:
                 ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
             ),
             
+            # 保守肃清 - 敌我均势（补全缺失的NEUTRAL态势）
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            
             ('DEFENSIVE', 'ADVANTAGE', 'ATTACK_TYPE'): (
                 ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
                 ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
@@ -88,6 +116,20 @@ class DecisionTable:
                 ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
             ),
             ('DEFENSIVE', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            
+            # 防御意图 - 敌我均势（补全缺失的NEUTRAL态势）
+            ('DEFENSIVE', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
+            ),
+            ('DEFENSIVE', 'NEUTRAL', 'ESCAPE_TYPE'): (
                 ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
                 ['TACTICAL_CRANK', 'CRANK', 'LEVEL_FLIGHT', 'ACCELERATE', 'DECELERATE', 'CLIMB', 'TACTICAL_CLIMB']
             ),
@@ -156,6 +198,32 @@ class DecisionTable:
                 ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
             ),
             
+            # 激进肃清/保守肃清 - 敌我均势（补全NEUTRAL态势）
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['TACTICAL_EVASION'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_EVASION'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'ESCAPE_TYPE'): (
+                ['TACTICAL_EVASION'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'ESCAPE_TYPE'): (
+                ['TACTICAL_EVASION', 'TACTICAL_TURN'],
+                ['TACTICAL_CRANK', 'CRANK', 'NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            
             # 防御意图
             ('DEFENSIVE', 'ADVANTAGE', 'ATTACK_TYPE'): (
                 ['TACTICAL_TURN'],
@@ -178,6 +246,20 @@ class DecisionTable:
                 ['NOTCH_BACK', 'SHORT_SKATE']
             ),
             ('DEFENSIVE', 'DISADVANTAGE', 'ESCAPE_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            
+            # 防御意图 - 敌我均势（补全NEUTRAL态势）
+            ('DEFENSIVE', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['TACTICAL_TURN'],
+                ['NOTCH_BACK', 'SHORT_SKATE']
+            ),
+            ('DEFENSIVE', 'NEUTRAL', 'ESCAPE_TYPE'): (
                 ['TACTICAL_TURN'],
                 ['NOTCH_BACK', 'SHORT_SKATE']
             ),
@@ -213,6 +295,20 @@ class DecisionTable:
                 ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
             ),
             
+            # 激进肃清 - 敌我均势（补全NEUTRAL态势）
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('AGGRESSIVE_CLEAR', 'NEUTRAL', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            
             # 保守肃清 - 我方占优
             ('CONSERVATIVE_CLEAR', 'ADVANTAGE', 'ATTACK_TYPE'): (
                 ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
@@ -240,9 +336,64 @@ class DecisionTable:
                 ['NOTCH_BACK', 'SHORT_SKATE']
             ),
             
+            # 保守肃清 - 敌我均势（补全NEUTRAL态势）
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'ATTACK_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'NEUTRAL_TYPE'): (
+                ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            ('CONSERVATIVE_CLEAR', 'NEUTRAL', 'ESCAPE_TYPE'): (
+                ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'],
+                ['TACTICAL_CRANK', 'CRANK', 'SHORT_SKATE']
+            ),
+            
             # 防御意图：不进入此阶段（在TR节点已脱离）
         }
     
+    def query_candidates(self, control_distance, my_intent, enemy_intent, situation):
+        """
+        查询候选战术集合（用于完整智能战术选择系统）
+
+        Args:
+            control_distance: 控制距离 ('NLT', 'MELD', 'DOR', 'DR')
+            my_intent: 我方意图 ('AGGRESSIVE_CLEAR', 'CONSERVATIVE_CLEAR', 'DEFENSIVE')
+            enemy_intent: 敌方意图 ('ATTACK', 'NEUTRAL', 'RETREAT')
+            situation: 战场态势 ('ADVANTAGE', 'NEUTRAL', 'DISADVANTAGE')
+
+        Returns:
+            list: 候选战术列表
+        """
+        # 将敌方意图映射到决策表格式
+        intent_map = {
+            'ATTACK': 'ATTACK_TYPE',
+            'NEUTRAL': 'NEUTRAL_TYPE',
+            'RETREAT': 'ESCAPE_TYPE'
+        }
+        enemy_intent_type = intent_map.get(enemy_intent, 'ATTACK_TYPE')
+
+        # 根据控制距离选择决策表
+        if control_distance == 'NLT':
+            table = self.nlt_table
+        elif control_distance in ['MELD', 'DOR', 'DR']:
+            table = self.meld_table
+        else:
+            table = self.nlt_table
+
+        # 查询决策表
+        key = (my_intent, situation, enemy_intent_type)
+        result = table.get(key)
+        if result:
+            tactics, _ = result
+            logging.info(f"[决策表] {control_distance}查询: {key} -> 战术{tactics}")
+            return list(tactics)
+        else:
+            # 默认返回
+            logging.warning(f"[决策表] {control_distance}查询未找到: {key}, 使用默认")
+            return ['SIDE_BY_SIDE', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK']
+
     def query_nlt(self, my_intent, threat_level, enemy_intent_type):
         """查询NLT节点决策表"""
         key = (my_intent, threat_level, enemy_intent_type)

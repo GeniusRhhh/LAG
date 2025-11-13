@@ -139,6 +139,8 @@ class DecisionMaker:
         
         检查顺序：撤退 → 规避 → 继续
         """
+        # 早期阶段（NLT/MELD）：不因距离过远触发规避，专注接近
+        is_early_phase = phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR]
         # 1. 检查是否需要撤退
         # 条件：敌方进攻意图 + 总威胁度>0.8
         if enemy_intent in [EnemyIntent.ATTACK, EnemyIntent.COORDINATED, EnemyIntent.FEINT]:
@@ -172,13 +174,15 @@ class DecisionMaker:
             high_threat_items = []
             if 1 - situation.angle > self.evade_threat_threshold:
                 high_threat_items.append("角度")
-            if 1 - situation.distance > self.evade_threat_threshold:
+            # 早期阶段忽略距离威胁（需要主动接近）
+            if not is_early_phase and 1 - situation.distance > self.evade_threat_threshold:
                 high_threat_items.append("距离")
             if 1 - situation.altitude > self.evade_threat_threshold:
                 high_threat_items.append("高度")
             if 1 - situation.speed > self.evade_threat_threshold:
                 high_threat_items.append("速度")
-            if 1 - situation.detection > self.evade_threat_threshold:
+            # 早期阶段忽略探测威胁（远距离探测概率本来就低）
+            if not is_early_phase and 1 - situation.detection > self.evade_threat_threshold:
                 high_threat_items.append("探测")
             
             if 1 <= len(high_threat_items) <= 2:

@@ -81,18 +81,18 @@ class IntegratedTacticalSystem:
             self.situation_cache[cache_key] = situation
             self.threat_cache[cache_key] = threat
             
-            # 每60步打印一次态势
-            if env.current_step % 60 == 0:
-                logging.info(
-                    f"📊 [{my_agent_id}] 态势评估 (vs {enemy_agent_id}): "
-                    f"总分={situation.total:.2f} "
-                    f"(角度={situation.angle:.2f} "
-                    f"距离={situation.distance:.2f} "
-                    f"高度={situation.altitude:.2f} "
-                    f"速度={situation.speed:.2f} "
-                    f"探测={situation.detection:.2f}) "
-                    f"威胁={threat:.2f}"
-                )
+            # 每600步打印一次态势（减少输出）
+            # if env.current_step % 600 == 0:
+            #     logging.info(
+            #         f"📊 [{my_agent_id}] 态势评估 (vs {enemy_agent_id}): "
+            #         f"总分={situation.total:.2f} "
+            #         f"(角度={situation.angle:.2f} "
+            #         f"距离={situation.distance:.2f} "
+            #         f"高度={situation.altitude:.2f} "
+            #         f"速度={situation.speed:.2f} "
+            #         f"探测={situation.detection:.2f}) "
+            #         f"威胁={threat:.2f}"
+            #     )
         
         except Exception as e:
             logging.error(f"态势评估更新失败 {my_agent_id}: {e}")
@@ -116,8 +116,8 @@ class IntegratedTacticalSystem:
                 self.intent_cache[enemy_agent_id] = EnemyIntent.ESCAPE
                 return
             
-            # 识别意图
-            intent = self.intent_recognizer.recognize_enemy_intent(
+            # 识别意图（使用旧版本方法以保持兼容性）
+            intent = self.intent_recognizer.recognize_enemy_intent_old(
                 env,
                 enemy_agent_id,
                 my_aircraft_list
@@ -126,13 +126,13 @@ class IntegratedTacticalSystem:
             # 缓存结果
             self.intent_cache[enemy_agent_id] = intent
             
-            # 每60步打印一次意图
-            if env.current_step % 60 == 0:
-                confidence = self.intent_recognizer.get_intent_confidence(enemy_agent_id)
-                logging.info(
-                    f"🎯 [敌方{enemy_agent_id}] 意图识别: {intent.value} "
-                    f"(置信度={confidence:.2f})"
-                )
+            # 每600步打印一次意图（减少输出）
+            # if env.current_step % 600 == 0:
+            #     confidence = self.intent_recognizer.get_intent_confidence(enemy_agent_id)
+            #     logging.info(
+            #         f"🎯 [敌方{enemy_agent_id}] 意图识别: {intent.value} "
+            #         f"(置信度={confidence:.2f})"
+            #     )
         
         except Exception as e:
             logging.error(f"意图识别更新失败 {enemy_agent_id}: {e}")
@@ -177,15 +177,27 @@ class IntegratedTacticalSystem:
                 phase
             )
             
-            # 缓存决策
-            self.decision_cache[my_agent_id] = decision
+                # 缓存决策
+            # 只在决策改变且满足时间间隔时输出，避免日志刷屏
+            last_decision = getattr(self, '_last_decision', {}).get(my_agent_id)
+            last_log_step = getattr(self, '_last_log_step', {}).get(my_agent_id, -999)
+            current_step = getattr(env, 'current_step', 0)
             
-            # 打印决策
-            if env.current_step % 60 == 0 or decision.response != ThreatResponse.CONTINUE:
+            # 只在决策改变且距离上次日志>=60步时输出（12秒间隔）
+            if (last_decision is None or last_decision.response != decision.response) and \
+               (current_step - last_log_step >= 60):
                 logging.info(
                     f"⚖️ [{my_agent_id}] 战术决策: {decision.response.value} "
                     f"({decision.reason})"
                 )
+                if not hasattr(self, '_last_decision'):
+                    self._last_decision = {}
+                if not hasattr(self, '_last_log_step'):
+                    self._last_log_step = {}
+                self._last_decision[my_agent_id] = decision
+                self._last_log_step[my_agent_id] = current_step
+            
+            self.decision_cache[my_agent_id] = decision
             
             return decision
         

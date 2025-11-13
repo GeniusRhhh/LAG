@@ -219,37 +219,53 @@ class UnifiedEnemyTacticalAI:
         return best_target
 
     def _enemy_should_launch_missile(self, env, agent_id: str, target, distance: float, current_time: float) -> bool:
-        """敌方智能导弹发射判断"""
-        logging.info(f"[敌方导弹] {agent_id} 检查发射条件: 距离={distance/1000:.1f}km")
+        """敌方智能导弹发射判断 - 修复问题7：添加朝向检查"""
+        logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} 检查发射条件: 距离={distance/1000:.1f}km")
         
         # 基本条件检查
         if env.agents[agent_id].num_missiles <= 0:
-            logging.info(f"[敌方导弹] {agent_id} 导弹已用尽")
+            logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} 导弹已用尽")
             return False
 
         # 冷却时间检查
         last_launch = self.last_missile_launch_time.get(agent_id, -999)
         if current_time - last_launch < self.enemy_missile_cooldown:
-            logging.info(f"[敌方导弹] {agent_id} 冷却中 (剩余{self.enemy_missile_cooldown - (current_time - last_launch):.1f}s)")
-            return False
+            return False  # 冷却中不打印日志
 
-        # 距离条件：20-80km范围内发射（扩大范围）
+        # 距离条件：20-80km范围内发射
         if distance < 20000 or distance > 80000:
-            logging.info(f"[敌方导弹] {agent_id} 距离不满足 (需要20-80km)")
+            return False  # 距离不满足不打印日志
+
+        # 🔧 修复问题7：添加朝向检查，确保朝向目标才发射
+        current_pos = env.agents[agent_id].get_position()
+        target_pos = target.get_position()
+        current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_rad)
+        
+        # 计算目标方位角
+        dx = target_pos[0] - current_pos[0]
+        dy = target_pos[1] - current_pos[1]
+        target_bearing = np.arctan2(dy, dx)
+        
+        # 计算朝向偏差（航向与目标方位的夹角）
+        heading_error = abs(((target_bearing - current_heading + np.pi) % (2*np.pi)) - np.pi)
+        heading_error_deg = np.rad2deg(heading_error)
+        
+        # 🔧 修复：只有朝向目标±45度范围内才允许发射
+        if heading_error_deg > 45.0:
+            logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ❌ 朝向偏离{heading_error_deg:.1f}° > 45°，不发射")
             return False
 
         # 威胁评估：在高威胁情况下更积极发射
         threat = self.threat_assessment.get(agent_id)
         if threat and threat.threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
-            logging.info(f"[敌方导弹] {agent_id} ✓ 高威胁，满足发射条件！")
+            logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ✅ 高威胁+朝向正确({heading_error_deg:.1f}°)，满足发射条件！")
             return True
 
-        # 正常发射条件：30-70km最佳发射窗口（扩大范围）
+        # 正常发射条件：30-70km最佳发射窗口
         if 30000 <= distance <= 70000:
-            logging.info(f"[敌方导弹] {agent_id} ✓ 满足发射条件！")
+            logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ✅ 距离+朝向正确({heading_error_deg:.1f}°)，满足发射条件！")
             return True
 
-        logging.info(f"[敌方导弹] {agent_id} 不满足发射条件")
         return False
 
     def _launch_missile(self, env, agent_id: str, target, current_time: float):
@@ -403,7 +419,14 @@ class UnifiedEnemyTacticalAI:
             action_type = self._select_action(agent_id, tactical_mode, current_time)
 
             # 6. 动作执行
-            return self._execute_action(env, agent_id, action_type, current_time)
+            alt_cmd, hdg_cmd, vel_cmd = self._execute_action(env, agent_id, action_type, current_time)
+            
+            # ✅ 全局高度安全检查（最终防线）
+            alt_cmd, hdg_cmd, vel_cmd = self._apply_global_safety_check(
+                env, agent_id, alt_cmd, hdg_cmd, vel_cmd
+            )
+            
+            return alt_cmd, hdg_cmd, vel_cmd
 
         except Exception as e:
             logging.error(f"敌方{agent_id}战术指令生成失败: {e}")
@@ -668,12 +691,29 @@ class UnifiedEnemyTacticalAI:
             )
 
     def _update_tactical_phase(self, env, agent_id: str, situation: SituationData):
-        """更新战术阶段 - 基于距离的阶段转换"""
+        """更新战术阶段 - 基于距离的阶段转换 + 修复问题6：改进返航逻辑"""
         try:
             distance = situation.min_enemy_distance
 
+            # 🔧 修复问题6：记录最小距离，判断是否应该返航
+            if not hasattr(self, '_min_distance_reached'):
+                self._min_distance_reached = {}
+            
+            if agent_id not in self._min_distance_reached:
+                self._min_distance_reached[agent_id] = float('inf')
+            
+            # 更新最小距离
+            if distance < self._min_distance_reached[agent_id]:
+                self._min_distance_reached[agent_id] = distance
+
+            # 🔧 修复问题6：如果已经接近过(<40km)，现在距离又拉大(>65km)，说明应该返航了
+            should_return = (self._min_distance_reached[agent_id] < 40000 and distance > 65000)
+
             # 基于距离的阶段判断
-            if distance > 81000:
+            if should_return:
+                # 强制进入返航阶段
+                new_phase = EnemyTacticalPhase.DOR_DR
+            elif distance > 81000:
                 new_phase = EnemyTacticalPhase.NLT_MELD
             elif distance > 50000:
                 new_phase = EnemyTacticalPhase.MELD_MTR
@@ -688,7 +728,9 @@ class UnifiedEnemyTacticalAI:
             old_phase = self.current_phase.get(agent_id, EnemyTacticalPhase.MELD_MTR)
             if old_phase != new_phase:
                 self.current_phase[agent_id] = new_phase
-                # logging.info(f"敌方{agent_id}战术阶段转换: {old_phase.value} → {new_phase.value} (距离: {distance/1000:.1f}km)")
+                # 只在关键阶段转换时打印日志
+                if new_phase == EnemyTacticalPhase.DOR_DR and should_return:
+                    logging.info(f"[敌方{agent_id}] 接敌后拉开距离({distance/1000:.1f}km)，进入返航阶段")
 
         except Exception as e:
             logging.error(f"战术阶段更新失败 {agent_id}: {e}")
@@ -854,8 +896,8 @@ class UnifiedEnemyTacticalAI:
                 else:
                     logging.debug(f"✅ {agent_id} 高空({current_altitude:.0f}m)允许俯冲攻击")
 
-            # 🛡️ 低高度强制爬升
-            if current_altitude < 2000.0:
+            # 🛡️ 低高度强制爬升 - 降低阈值到1200米，避免过于频繁触发
+            if current_altitude < 1200.0:
                 # logging.error(f"🚨 {agent_id} 高度{current_altitude:.0f}m过低，强制爬升！")
                 return self._execute_altitude_change(env, agent_id, 500.0)  # 爬升500米
 
@@ -930,6 +972,54 @@ class UnifiedEnemyTacticalAI:
 
         except Exception as e:
             logging.error(f"动作执行失败 {agent_id} - {action_type.value}: {e}")
+            return 7, 8, 3  # 默认平稳飞行
+    
+    def _apply_global_safety_check(self, env, agent_id: str, alt_cmd: int, hdg_cmd: int, vel_cmd: int) -> Tuple[int, int, int]:
+        """
+        全局高度安全检查（最终防线）
+        确保所有指令都不会导致撞地
+        """
+        try:
+            current_alt = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            
+            # ✅ 三级保护：紧急拉升（<1500m）、强制水平（<3000m）、禁止下降（<5000m）
+            if current_alt < 1500:
+                # 紧急拉升：强制最大爬升+减速
+                alt_cmd = 0  # 最大爬升
+                vel_cmd = min(vel_cmd, 3)  # 限制速度
+                if current_alt < 500:
+                    logging.error(f"🚨 [{agent_id}] 极度危险！高度{current_alt:.0f}m < 500m，紧急拉升！")
+                else:
+                    logging.warning(f"🛡️ [{agent_id}] 紧急拉升: 高度{current_alt:.0f}m < 1500m")
+            
+            elif current_alt < 3000:
+                # 强制水平/爬升：禁止下降
+                from envs.JSBSim.core import catalog as c_local
+                norm_delta_altitude = np.array([-1.5, -1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5])
+                alt_change = norm_delta_altitude[alt_cmd] * 1000
+                
+                if alt_change < 0:
+                    # 禁止下降，改为水平飞行
+                    alt_cmd = 7  # 保持高度
+                    if env.current_step % 120 == 0:
+                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < 3000m，禁止下降")
+            
+            elif current_alt < 5000:
+                # 限制下降：只允许小幅下降
+                from envs.JSBSim.core import catalog as c_local
+                norm_delta_altitude = np.array([-1.5, -1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5])
+                alt_change = norm_delta_altitude[alt_cmd] * 1000
+                
+                if alt_change < -300:
+                    # 限制下降幅度到300m
+                    alt_cmd = 5  # -100m
+                    if env.current_step % 120 == 0:
+                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < 5000m，限制下降")
+            
+            return alt_cmd, hdg_cmd, vel_cmd
+            
+        except Exception as e:
+            logging.error(f"全局安全检查失败 {agent_id}: {e}")
             return 7, 8, 3  # 默认平稳飞行
 
     def _calculate_safe_altitude_change(self, current_altitude: Optional[float], action_name: str) -> float:
@@ -1226,14 +1316,23 @@ class UnifiedEnemyTacticalAI:
             current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
             current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
 
-            # 🛡️ 强化安全检查 - 如果高度过低，改为水平机动
-            safe_altitude_threshold = 5000.0  # 提高安全阈值到5000米
+            # 🛡️ 安全检查 - 如果高度过低，改为水平机动
+            safe_altitude_threshold = 2500.0  # 降低阈值到2500米，允许更多机动空间
             if current_altitude < safe_altitude_threshold:
-                logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲脱离改为水平转弯")
+                # 只在状态改变时输出日志
+                if not hasattr(self, '_dive_escape_blocked') or agent_id not in self._dive_escape_blocked:
+                    if not hasattr(self, '_dive_escape_blocked'):
+                        self._dive_escape_blocked = {}
+                    self._dive_escape_blocked[agent_id] = True
+                    logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲脱离改为水平转弯")
                 # 改为水平大角度转弯
                 turn_angle = random.choice([90.0, -90.0])  # 大角度转弯
                 target_heading = (current_heading + turn_angle) % 360.0
                 return self._maintain_heading_with_altitude_speed(env, agent_id, target_heading, 1, 5)  # 水平转弯+爬升+加速
+            else:
+                # 高度足够，清除阻止标记
+                if hasattr(self, '_dive_escape_blocked') and agent_id in self._dive_escape_blocked:
+                    del self._dive_escape_blocked[agent_id]
 
             # 随机选择俯冲方向（可选择性转弯）
             turn_angle = random.uniform(-30.0, 30.0)  # 减少转弯角度
@@ -1475,7 +1574,7 @@ class UnifiedEnemyTacticalAI:
         return self._maintain_heading_with_altitude(env, agent_id, split_heading, altitude_cmd)
 
     def _execute_return_to_base_unified(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
-        """执行统一的返航机动 - 可以包含Short Skate作为返航动作的一部分"""
+        """执行统一的返航机动 - 修复问题6：平稳返航，朝0度北向飞行"""
         try:
             # 初始化返航状态
             if not hasattr(self, 'return_states'):
@@ -1483,34 +1582,13 @@ class UnifiedEnemyTacticalAI:
 
             if agent_id not in self.return_states:
                 self._init_return_to_base_unified(agent_id, current_time)
+                logging.info(f"[T={current_time:.1f}s][敌方{agent_id}] 开始返航，目标航向0° (北向)")
 
             state = self.return_states[agent_id]
 
-            if state['phase'] == 'tactical_return':
-                # 阶段1：战术返航（可能包含Short Skate）
-                if state.get('use_short_skate', False):
-                    # 使用Short Skate作为返航机动
-                    result = self._execute_short_skate_unified(env, agent_id, current_time)
-
-                    # 检查Short Skate是否完成
-                    if agent_id in self.short_skate_states:
-                        ss_state = self.short_skate_states[agent_id]
-                        if ss_state['phase'] == 'escape':
-                            # Short Skate完成，转入直接返航
-                            state['phase'] = 'direct_return'
-                            # logging.info(f"敌方{agent_id}返航: 战术返航 → 直接返航")
-
-                    return result
-                else:
-                    # 直接转向北方
-                    state['phase'] = 'direct_return'
-
-            if state['phase'] == 'direct_return':
-                # 阶段2：直接返航 - 目标航向0度
-                return self._maintain_heading_precise(env, agent_id, 0.0)
-
-            # 默认返航
-            return self._maintain_heading_precise(env, agent_id, 0.0)
+            # 🔧 修复问题6：简化返航逻辑，直接朝北方平稳飞行
+            # 目标航向0度（北向），保持高度，保持速度
+            return self._maintain_heading_with_altitude_speed(env, agent_id, 0.0, 7, 3)
 
         except Exception as e:
             logging.error(f"返航执行失败 {agent_id}: {e}")
@@ -1538,11 +1616,24 @@ class UnifiedEnemyTacticalAI:
     def _execute_altitude_change(self, env, agent_id: str, altitude_change: float) -> Tuple[int, int, int]:
         """执行高度变化 - 🛡️ 智能高度感知安全机制"""
         current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+        
+        # 初始化动作状态跟踪
+        if not hasattr(self, 'altitude_action_state'):
+            self.altitude_action_state = {}
+        
+        # 为该智能体创建状态
+        if agent_id not in self.altitude_action_state:
+            self.altitude_action_state[agent_id] = {'last_action': None, 'count': 0}
 
         if altitude_change > 0:
             # 爬升指令
             altitude_cmd = 9  # 温和爬升150m（修复：原错误用0会导致极度俯冲1500m！）
-            logging.info(f"🛡️ {agent_id} 执行爬升{altitude_change:.0f}m（当前高度{current_altitude:.0f}m）")
+            action_key = 'climb'
+            # 只在状态改变或每10次输出一次日志
+            if self.altitude_action_state[agent_id]['last_action'] != action_key:
+                self.altitude_action_state[agent_id]['last_action'] = action_key
+                self.altitude_action_state[agent_id]['count'] = 0
+                logging.info(f"🛡️ {agent_id} 执行爬升{altitude_change:.0f}m（当前高度{current_altitude:.0f}m）")
         else:
             # 俯冲指令 - 🛡️ 智能安全检查
             target_altitude = current_altitude + altitude_change  # altitude_change为负值
@@ -1550,16 +1641,28 @@ class UnifiedEnemyTacticalAI:
             if current_altitude < 2000.0:
                 # 高度过低，完全禁用俯冲
                 altitude_cmd = 10  # 小幅爬升300m（修复：原错误用0会导致极度俯冲1500m！）
-                logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲{altitude_change:.0f}m已禁用，改为爬升")
+                action_key = 'climb_emergency'
+                if self.altitude_action_state[agent_id]['last_action'] != action_key:
+                    self.altitude_action_state[agent_id]['last_action'] = action_key
+                    self.altitude_action_state[agent_id]['count'] = 0
+                    logging.warning(f"🛡️ {agent_id} 高度{current_altitude:.0f}m过低，俯冲{altitude_change:.0f}m已禁用，改为爬升")
             elif target_altitude < 1800.0:
                 # 俯冲会导致过低，限制俯冲深度
                 safe_altitude_change = current_altitude - 1800.0  # 最低到1800m
                 altitude_cmd = 6  # 轻微俯冲50m（修复：原错误用-1实际是极度爬升1500m）
-                logging.warning(f"🛡️ {agent_id} 俯冲受限：原计划{altitude_change:.0f}m，限制为{safe_altitude_change:.0f}m")
+                action_key = 'dive_limited'
+                if self.altitude_action_state[agent_id]['last_action'] != action_key:
+                    self.altitude_action_state[agent_id]['last_action'] = action_key
+                    self.altitude_action_state[agent_id]['count'] = 0
+                    logging.warning(f"🛡️ {agent_id} 俯冲受限：原计划{altitude_change:.0f}m，限制为{safe_altitude_change:.0f}m")
             else:
                 # 安全俯冲
                 altitude_cmd = 6  # 轻微俯冲50m（修复：原错误用-1实际是极度爬升1500m）
-                logging.info(f"🛡️ {agent_id} 执行安全俯冲{altitude_change:.0f}m（当前高度{current_altitude:.0f}m → {target_altitude:.0f}m）")
+                action_key = 'dive_safe'
+                if self.altitude_action_state[agent_id]['last_action'] != action_key:
+                    self.altitude_action_state[agent_id]['last_action'] = action_key
+                    self.altitude_action_state[agent_id]['count'] = 0
+                    logging.info(f"🛡️ {agent_id} 执行安全俯冲{altitude_change:.0f}m（当前高度{current_altitude:.0f}m → {target_altitude:.0f}m）")
 
         return altitude_cmd, 8, 3  # 保持航向和速度
 

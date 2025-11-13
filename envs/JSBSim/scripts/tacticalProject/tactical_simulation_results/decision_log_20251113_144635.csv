@@ -1,0 +1,4 @@
+time,agent_id,phase,decision_type,selected_tactic,selected_maneuver,reason
+0.2,A0100,NLT_MELD,TACTIC,DRAG_SHOOT,None,Complete tactical system selection
+207.8,A0100,MELD_MTR,TACTIC,DRAG_SHOOT,None,Adjusted from TACTICAL_EVASION
+299.2,A0100,NLT_MELD,TACTIC,DRAG_SHOOT,None,Complete tactical system selection

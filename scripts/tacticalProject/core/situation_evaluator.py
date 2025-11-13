@@ -206,9 +206,10 @@ class SituationEvaluator:
             
             # 根据阶段设置理想距离范围
             if phase in [TacticalPhase.NLT_MELD, TacticalPhase.MELD_MTR]:
-                # 远距接敌阶段：希望快速接近，理想距离80-100km
-                ideal_distance = 90000
-                tolerance = 20000
+                # 远距接敌阶段：希望快速接近，理想距离80-120km
+                # 修复：初始120km不应触发威胁
+                ideal_distance = 100000
+                tolerance = 30000
             elif phase in [TacticalPhase.MTR_LR, TacticalPhase.LR_TR]:
                 # 发射准备阶段：理想距离78km左右
                 ideal_distance = 78000
