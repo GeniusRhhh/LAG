@@ -191,8 +191,8 @@ def run_simulation(
     print("\n🔧 初始化仿真环境...")
     
     try:
-        # 使用配置文件名创建环境（参考原项目）
-        env = MultipleCombatEnv("2v2/NoWeapon/Selfplay")
+        # 使用正确的配置文件名（能够发射导弹的配置）
+        env = MultipleCombatEnv("2v2/ShootMissile/HierarchySelfplay")
         env.max_steps = max_steps
         
         print("✓ JSBSim环境创建成功")
@@ -244,7 +244,7 @@ def run_simulation(
             # 定期打印状态
             if current_time - last_print_time >= print_interval:
                 # 从任务类获取决策信息
-                decisions = tactical_task.adapter.last_decisions if hasattr(tactical_task.adapter, 'last_decisions') else {}
+                decisions = {}
                 print_status(env, decisions, current_time, step)
                 last_print_time = current_time
             
@@ -296,7 +296,13 @@ def run_simulation(
         print(f"总时间: {current_time:.1f}秒")
         print(f"我方存活: {friendly_alive}/2")
         print(f"敌方存活: {enemy_alive}/2")
-        print(f"发射导弹: {adapter.missile_counter}枚")
+        # 计算已发射导弹数 = 初始导弹数 - 剩余导弹数
+        missiles_fired = 0
+        for agent_id in ['A0100', 'A0200']:
+            initial = 2  # 初始导弹数
+            remaining = tactical_task.state_manager.missiles_remaining.get(agent_id, 2)
+            missiles_fired += (initial - remaining)
+        print(f"发射导弹: {missiles_fired}枚")
         
         if friendly_alive > enemy_alive:
             print("\n🎉 我方获胜！")

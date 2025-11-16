@@ -191,7 +191,7 @@ def run_simulation(
         
         # 修复问题5：明确仿真开始标记
         print("\n" + "=" * 80)
-        print("🎬 2v2超视距空战仿真开始")
+        print("[START] 2v2超视距空战仿真开始")
         print("=" * 80)
         print(f"开始时间: {timestamp}")
         print(f"最大步数: {max_steps} 步 ({max_steps * env.time_interval:.1f}秒)")
@@ -201,7 +201,7 @@ def run_simulation(
         print("-" * 80)
         
         logging.info("="*80)
-        logging.info(f"🎬 仿真开始 - 2v2超视距空战")
+        logging.info("[SIMULATION START] 2v2超视距空战")
         logging.info(f"   我方: F-16C x2 (A0100, A0200)")
         logging.info(f"   敌方: Su-27 x2 (B0100, B0200)")
         logging.info(f"   最大步数: {max_steps}, 时间步长: {env.time_interval}s")
@@ -296,7 +296,7 @@ def run_simulation(
         # 修复问题5：明确仿真结束标记
         end_time = datetime.now()
         print("\n" + "=" * 80)
-        print("🏁 2v2超视距空战仿真结束")
+        print("[END] 2v2超视距空战仿真结束")
         print("=" * 80)
         
         # 统计结果
@@ -326,7 +326,7 @@ def run_simulation(
         
         # 日志记录
         logging.info("="*80)
-        logging.info(f"🏁 仿真结束")
+        logging.info(f"[SIMULATION END] 仿真结束")
         logging.info(f"   总时间: {step * dt:.1f}秒 ({step}步)")
         logging.info(f"   我方存活: {friendly_alive}/2")
         logging.info(f"   敌方存活: {enemy_alive}/2")
