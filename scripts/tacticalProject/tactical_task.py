@@ -394,6 +394,7 @@ class TacticalTask(MultipleCombatTask):
     def _select_tactic_at_phase(self, env, agent_id: str):
         """在关键节点选择战术"""
         current_phase = self.state_manager.get_agent_phase(agent_id)
+        current_time = env.current_step * env.time_interval
         
         # 战术选择条件：NLT节点 或 MELD节点 或 MTR_LR节点且还未选择战术
         should_select_tactic = False
@@ -415,7 +416,7 @@ class TacticalTask(MultipleCombatTask):
             # 检查是否有环境变量强制指定战术
             import os
             force_tactic = os.environ.get('FORCE_TACTIC')
-            if force_tactic and force_tactic in ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE']:
+            if force_tactic and force_tactic in ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE', 'FRONT_BACK']:
                 logging.info(f"🧪 环境变量强制选择战术: {force_tactic}")
                 self.selected_tactic = force_tactic
                 # 设置默认角色
@@ -427,33 +428,37 @@ class TacticalTask(MultipleCombatTask):
                     self.tactic_roles = {'A0100': 'first', 'A0200': 'second'}
                 elif force_tactic == 'SIDE_BY_SIDE':
                     self.tactic_roles = {'A0100': 'left', 'A0200': 'right'}
+                elif force_tactic == 'FRONT_BACK':
+                    self.tactic_roles = {'A0100': 'leader', 'A0200': 'wingman'}
                 else:  # DRAG_SHOOT
                     self.tactic_roles = {'A0100': 'lead', 'A0200': 'wingman'}
             else:
                 # 正常战术选择流程
-            print("=" * 80)
-            print(f"[{phase_name}] 开始战术决策（完整智能系统）")
-            logging.info("=" * 80)
-            logging.info(f"🎯 [{phase_name}] 开始战术决策（完整智能系统）")            
-            # 准备飞机列表
-            my_aircraft_list = [env.agents['A0100'], env.agents['A0200']]
-            enemy_aircraft_list = [env.agents['B0100'], env.agents['B0200']]
-            
-            # 强制选择特定战术进行测试
-            logging.info(f"🧪 测试模式：强制选择战术 SEQUENTIAL_ATTACK")
-            self.selected_tactic = 'SEQUENTIAL_ATTACK'
-            
-            # 设置默认角色分配
-            if 'SEQUENTIAL_ATTACK' == 'PINCER_ATTACK':
-                self.tactic_roles = {'A0100': 'left', 'A0200': 'right'}
-            elif 'SEQUENTIAL_ATTACK' == 'HIGH_LOW_ATTACK':
-                self.tactic_roles = {'A0100': 'high', 'A0200': 'low'}
-            elif 'SEQUENTIAL_ATTACK' == 'SEQUENTIAL_ATTACK':
-                self.tactic_roles = {'A0100': 'first', 'A0200': 'second'}
-            elif 'SEQUENTIAL_ATTACK' == 'SIDE_BY_SIDE':
-                self.tactic_roles = {'A0100': 'left', 'A0200': 'right'}
-            else:  # DRAG_SHOOT
-                self.tactic_roles = {'A0100': 'lead', 'A0200': 'wingman'}
+                logging.info("=" * 80)
+                logging.info(f"🎯 [{phase_name}] 开始战术决策（完整智能系统）")            
+                # 准备飞机列表
+                my_aircraft_list = [env.agents['A0100'], env.agents['A0200']]
+                enemy_aircraft_list = [env.agents['B0100'], env.agents['B0200']]
+                
+                # 调用完整战术系统选择战术
+                tactic_result = self.complete_tactical_system.select_tactic(
+                    env,
+                    my_aircraft_list,
+                    enemy_aircraft_list,
+                    phase_name.split('_')[0]  # NLT, MELD, MTR
+                )
+                
+                # 处理返回结果
+                if isinstance(tactic_result, dict):
+                    self.selected_tactic = tactic_result['tactic']
+                    self.tactic_roles = tactic_result['roles']
+                else:
+                    # 假设返回的是(tactic, roles)元组
+                    self.selected_tactic = tactic_result[0]
+                    self.tactic_roles = tactic_result[1]
+                
+                logging.info(f"✅ 智能选择战术: {self.selected_tactic}")
+                logging.info(f"✅ 角色分配: {self.tactic_roles}")
             
             # 更新决策标记
             if current_phase == TacticalPhase.NLT_MELD:
@@ -461,16 +466,21 @@ class TacticalTask(MultipleCombatTask):
             elif current_phase == TacticalPhase.MELD_MTR:
                 self.decision_made['MELD'] = True
                 
-            print(f"   选定战术: {self.selected_tactic}")
-            print(f"   角色分配: {self.tactic_roles}")
-            print("=" * 80)
-            logging.info(f"   ✅ 选定战术: {self.selected_tactic}")
-            logging.info(f"   ✅ 角色分配: {self.tactic_roles}")
+            logging.info(f"   ✅ 最终选定战术: {self.selected_tactic}")
+            logging.info(f"   ✅ 最终角色分配: {self.tactic_roles}")
             logging.info("=" * 80)
     
     def _decide_at_lr(self, env, agent_id: str):
         """LR节点决策：根据态势决定是Crank还是平飞"""
         try:
+            # 🎯 HIGH_LOW_ATTACK战术特殊处理：僚机不执行Crank，保持高空直飞
+            if (self.selected_tactic == 'HIGH_LOW_ATTACK' and 
+                self.tactic_roles.get(agent_id) == 'low' and 
+                agent_id == 'A0200'):
+                self.lr_maneuver[agent_id] = 'straight'
+                logging.info(f"🎯 [HIGH_LOW_ATTACK-僚机LR] {agent_id} 战术特定：跳过Crank决策，保持直飞")
+                return
+            
             # 获取敌机方位
             target_id = get_target_with_fallback(agent_id, env)
             if target_id is None:

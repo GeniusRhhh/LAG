@@ -43,9 +43,18 @@ class ManeuverLibrary:
         heading_cmd_id = 8   # 保持航向
         velocity_cmd_id = 3  # 保持速度
         
+        # 🔍 调试信息：HIGH_LOW_ATTACK僚机航向控制
+        if agent_id == "A0200" and env.current_step % 100 == 0:
+            logging.info(f"🔍 [DEBUG-A0200] 当前航向={current_heading:.1f}°, 目标航向={target_heading:.1f}°, 航向差={heading_diff:.1f}°")
+        
         # 精度控制：3度精度（防止过于灵敏）
         if abs(heading_diff) > 3.0:
             heading_cmd_id = self.task._convert_heading_to_index(np.deg2rad(heading_diff))
+            if agent_id == "A0200" and env.current_step % 100 == 0:
+                logging.info(f"🔍 [DEBUG-A0200] 航向差超过3°，航向指令索引={heading_cmd_id}")
+        else:
+            if agent_id == "A0200" and env.current_step % 100 == 0:
+                logging.info(f"🔍 [DEBUG-A0200] 航向差在3°内，保持航向指令索引=8")
         
         return altitude_cmd_id, heading_cmd_id, velocity_cmd_id
     

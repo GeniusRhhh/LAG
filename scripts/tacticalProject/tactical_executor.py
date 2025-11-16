@@ -50,16 +50,10 @@ class TacticalExecutor:
                     logging.info(f"🚀 [DRAG_SHOOT-长机] {agent_id} 设置导弹发射标记")
                     self.task.missile_launched[agent_id] = True
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if env.current_step % 5 == 0:  # 每秒打印一次
-                    logging.info(f"🔍 [拖曳射击-长机LR_TR] {agent_id} lr_maneuver={lr_maneuver}")
-                
-                if lr_maneuver == 'crank':
-                    direction = 'left' if is_lead else 'right'
-                    logging.info(f"🔄 【拖曳射击-长机Crank】{agent_id} 开始{direction}侧Crank机动")
-                    return self.task._execute_tactical_crank(env, agent_id, direction, climb=False)
-                else:
-                    return self.task._maintain_heading_precise(env, agent_id, 0.0)
+                # 🎯 战术优先：DRAG_SHOOT长机在LR_TR阶段保持直飞，不执行Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [DRAG_SHOOT-长机LR_TR] {agent_id} 战术特定：保持直飞诱敌")
+                return self.task._maintain_heading_precise(env, agent_id, 0.0)
             elif self.task.current_phase.value == 'TR_DOR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
@@ -90,11 +84,10 @@ class TacticalExecutor:
                 if last_launch < 0:
                     self.task.missile_launched[agent_id] = True
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    return self.task._execute_tactical_crank(env, agent_id, 'right', climb=False)
-                else:
-                    return self.task._maintain_heading_precise(env, agent_id, 350.0)
+                # 🎯 战术优先：DRAG_SHOOT僚机在LR_TR阶段轻微偏转350°进行射击
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [DRAG_SHOOT-僚机LR_TR] {agent_id} 战术特定：350°射击角度")
+                return self.task._maintain_heading_precise(env, agent_id, 350.0)
             elif wingman_phase.value == 'TR_DOR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
@@ -165,11 +158,10 @@ class TacticalExecutor:
                         logging.info(f"🎯 [{agent_id}] 导弹制导保护: 剩余{remaining_time:.1f}秒，保持当前姿态")
                     return 7, 8, 3
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    return self.task._execute_tactical_crank(env, agent_id, 'left', climb=False)
-                else:
-                    return self.task._maintain_heading_precise(env, agent_id, 0.0)
+                # 🎯 战术优先：PINCER_ATTACK长机在LR_TR阶段保持左分离姿态，不执行额外Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [PINCER_ATTACK-长机LR_TR] {agent_id} 战术特定：保持左分离姿态")
+                return self.task._maintain_heading_precise(env, agent_id, 0.0)
             elif lead_phase.value == 'TR_DOR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 15.0:
@@ -217,14 +209,10 @@ class TacticalExecutor:
                 if last_launch < 0:  # 还未发射
                     self.task.missile_launched[agent_id] = True  # 标记需要发射
                 
-                # ✅ 根据LR决策执行Crank或平飞（原版逻辑）
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    # 执行Crank机动（偏转30°保持规避余度）
-                    return self.task._execute_tactical_crank(env, agent_id, 'right', climb=False)
-                else:
-                    # 平飞保持航向，完成中制导
-                    return self.task._maintain_heading_precise(env, agent_id, 350.0)
+                # 🎯 战术优先：PINCER_ATTACK僚机在LR_TR阶段保持右分离姿态350°，不执行额外Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [PINCER_ATTACK-僚机LR_TR] {agent_id} 战术特定：保持右分离姿态350°")
+                return self.task._maintain_heading_precise(env, agent_id, 350.0)
             elif wingman_phase.value == 'TR_DOR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 15.0:
@@ -279,11 +267,10 @@ class TacticalExecutor:
                 if last_launch < 0:
                     self.task.missile_launched[agent_id] = True
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    return self.task._execute_tactical_crank(env, agent_id, 'left', climb=False)
-                else:
-                    return self.task._maintain_heading_precise(env, agent_id, 0.0)
+                # 🎯 战术优先：HIGH_LOW_ATTACK长机在LR_TR阶段保持低空直飞，不执行Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [HIGH_LOW_ATTACK-长机LR_TR] {agent_id} 战术特定：低空直飞")
+                return self.task._maintain_heading_precise(env, agent_id, 0.0)
             elif self.task.current_phase.value == 'TR_DOR':
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
@@ -306,25 +293,23 @@ class TacticalExecutor:
             
             target_altitude = self.task.vertical_split_targets.get(agent_id, 9144.0)
             
-            lead_pos = env.agents['A0100'].get_position()
-            wing_pos = env.agents[agent_id].get_position()
-            lateral_separation = abs(wing_pos[1] - lead_pos[1])
-            target_lateral_separation = 5000
-            
-            wing_y = wing_pos[1]
-            approaching_boundary = abs(wing_y) > 50000
-            
-            if approaching_boundary:
-                heading_offset = -10.0
-                if env.current_step % 200 == 0:
-                    logging.warning(f"⚠️ [{agent_id}] 接近CAP边界(Y={wing_y/1000:.1f}km)，强制左偏返回")
-            elif lateral_separation >= target_lateral_separation:
-                heading_offset = 0.0
+            # 🎯 战术优先：HIGH_LOW_ATTACK僚机纯粹高度分离，不进行任何横向偏转
+            # 使用固定的初始航向，避免航向漂移
+            if agent_id in self.task.initial_heading:
+                target_heading = self.task.initial_heading[agent_id]  # 使用度数
             else:
-                heading_offset = 10.0
+                target_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+                self.task.initial_heading[agent_id] = target_heading
+                
+            current_heading = np.rad2deg(env.agents[agent_id].get_property_value(c.attitude_psi_rad))
+            if env.current_step % 200 == 0:
+                logging.info(f"🎯 [HIGH_LOW_ATTACK-僚机] {agent_id} 战术特定：纯粹高度变化，固定航向{target_heading:.1f}° (当前{current_heading:.1f}°)")
             
             if wingman_phase.value == 'NLT_MELD':
-                return self.task._maintain_heading_precise(env, agent_id, heading_offset)
+                action = self.task._maintain_heading_precise(env, agent_id, target_heading)
+                if env.current_step % 100 == 0 and agent_id == "A0200":
+                    logging.info(f"🔍 [DEBUG-A0200-NLT_MELD] 目标航向={target_heading:.1f}°, 返回动作: {action}")
+                return action
             elif wingman_phase.value == 'MELD_MTR':
                 alt_diff = target_altitude - current_alt
                 if abs(alt_diff) > 200:
@@ -344,22 +329,31 @@ class TacticalExecutor:
                         alt_cmd_value = alt_diff
                     
                     alt_cmd = self.task._convert_altitude_to_index(alt_cmd_value)
-                    hdg_cmd = self.task._convert_heading_to_index(np.deg2rad(heading_offset))
-                    return alt_cmd, hdg_cmd, 3
+                    # 纯高度变化，不进行航向调整
+                    hdg_cmd = 8  # 保持航向索引
+                    action = (alt_cmd, hdg_cmd, 3)
+                    if env.current_step % 100 == 0 and agent_id == "A0200":
+                        logging.info(f"🔍 [DEBUG-A0200-MELD_MTR] 高度差={alt_diff:.0f}m, 目标航向={target_heading:.1f}°, 返回动作: {action}")
+                    return action
                 else:
-                    return self.task._maintain_heading_precise(env, agent_id, heading_offset)
+                    action = self.task._maintain_heading_precise(env, agent_id, target_heading)
+                    if env.current_step % 100 == 0 and agent_id == "A0200":
+                        logging.info(f"🔍 [DEBUG-A0200-MELD_MTR] 高度接近目标，目标航向={target_heading:.1f}°, 返回动作: {action}")
+                    return action
             elif wingman_phase.value == 'MTR_LR':
-                return self.task._maintain_heading_precise(env, agent_id, heading_offset)
+                action = self.task._maintain_heading_precise(env, agent_id, target_heading)
+                if env.current_step % 100 == 0 and agent_id == "A0200":
+                    logging.info(f"🔍 [DEBUG-A0200-MTR_LR] 目标航向={target_heading:.1f}°, 返回动作: {action}")
+                return action
             elif wingman_phase.value == 'LR_TR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch < 0:
                     self.task.missile_launched[agent_id] = True
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    return self.task._execute_tactical_crank(env, agent_id, 'right', climb=False)
-                else:
-                    return self.task._maintain_heading_precise(env, agent_id, heading_offset)
+                # 🎯 战术优先：HIGH_LOW_ATTACK僚机在LR_TR阶段保持高空直飞，不执行Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [HIGH_LOW_ATTACK-僚机LR_TR] {agent_id} 战术特定：高空直飞，保持固定航向{target_heading:.1f}°")
+                return self.task._maintain_heading_precise(env, agent_id, target_heading)
             elif wingman_phase.value == 'TR_DOR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
@@ -394,11 +388,10 @@ class TacticalExecutor:
                 if last_launch < 0:
                     self.task.missile_launched[agent_id] = True
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    return self.task._execute_tactical_crank(env, agent_id, 'left', climb=False)
-                else:
-                    return self.task._maintain_heading_precise(env, agent_id, 0.0)
+                # 🎯 战术优先：FRONT_BACK长机在LR_TR阶段保持直飞，不执行Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [FRONT_BACK-长机LR_TR] {agent_id} 战术特定：保持直飞")
+                return self.task._maintain_heading_precise(env, agent_id, 0.0)
             elif self.task.current_phase.value == 'TR_DOR':
                 # TR阶段（75km）：中制导结束，准备规避
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
@@ -434,15 +427,15 @@ class TacticalExecutor:
                 if last_launch < 0:
                     self.task.missile_launched[agent_id] = True
                 
-                lr_maneuver = getattr(self.task, 'lr_maneuver', {}).get(agent_id, 'straight')
-                if lr_maneuver == 'crank':
-                    return self.task._execute_tactical_crank(env, agent_id, 'right', climb=False)
-                else:
-                    if hasattr(self.task, 'wingman_crank_state') and self.task.wingman_crank_state.get("completed", False):
-                        recent_completion = current_time - self.task.wingman_crank_state.get("completed_time", 0) < 60.0
-                        if recent_completion:
-                            return self.task._establish_rear_formation(env, agent_id, current_time)
-                    return self.task._maintain_rear_formation(env, agent_id)
+                # 🎯 战术优先：FRONT_BACK僚机在LR_TR阶段保持后排队形，不执行Crank
+                if env.current_step % 60 == 0:
+                    logging.info(f"🎯 [FRONT_BACK-僚机LR_TR] {agent_id} 战术特定：保持后排队形")
+                
+                if hasattr(self.task, 'wingman_crank_state') and self.task.wingman_crank_state.get("completed", False):
+                    recent_completion = current_time - self.task.wingman_crank_state.get("completed_time", 0) < 60.0
+                    if recent_completion:
+                        return self.task._establish_rear_formation(env, agent_id, current_time)
+                return self.task._maintain_rear_formation(env, agent_id)
             elif wingman_phase.value == 'TR_DOR':
                 last_launch = self.task.last_missile_launch_time.get(agent_id, -999)
                 if last_launch > 0 and (current_time - last_launch) > 5.0:
