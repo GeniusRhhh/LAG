@@ -1,3 +1,24 @@
+# 导入导弹与雷达检查（优先用旧工程 r27er_missile，如不可用再回退本项目实现）
+import os, sys
+R27ERMissileSimulator = None
+try:
+    legacy_path = os.path.join(os.path.dirname(__file__), '..', 'tacticalTemplateProject')
+    if legacy_path not in sys.path:
+        sys.path.insert(0, legacy_path)
+    try:
+        from r27er_missile import R27ERMissileSimulator as _LegacyR27ER
+        R27ERMissileSimulator = _LegacyR27ER
+    except Exception:
+        pass
+    if R27ERMissileSimulator is None:
+        from simulation.r27er_missile import R27ERMissileSimulator as _LocalR27ER
+        R27ERMissileSimulator = _LocalR27ER
+except Exception:
+    pass
+try:
+    from simulation.radar_manager import check_missile_launch_conditions
+except Exception:
+    check_missile_launch_conditions = None
 #!/usr/bin/env python3
 """
 统一敌方战术AI系统 - 适用于所有战术项目的通用敌方AI架构
@@ -158,6 +179,11 @@ class UnifiedEnemyTacticalAI:
         # 导弹发射管理
         self.last_missile_launch_time = {}  # 上次导弹发射时间
         self.enemy_missile_cooldown = 10.0  # 敌方10秒冷却时间
+        self._last_enemy_missile_log = {}
+        self._last_enemy_heading_log = {}
+        
+        # 敌方阶段状态管理
+        self._enemy_phases = {}  # 添加缺少的属性
 
         # 随机化参数
         self.mode_switch_cooldown = {}   # 模式切换冷却时间
@@ -220,7 +246,10 @@ class UnifiedEnemyTacticalAI:
 
     def _enemy_should_launch_missile(self, env, agent_id: str, target, distance: float, current_time: float) -> bool:
         """敌方智能导弹发射判断 - 修复问题7：添加朝向检查"""
-        logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} 检查发射条件: 距离={distance/1000:.1f}km")
+        last = self._last_enemy_missile_log.get(agent_id, -999)
+        if current_time - last >= 5.0:
+            logging.debug(f"[T={current_time:.1f}s][敌方导弹] {agent_id} 检查发射条件: 距离={distance/1000:.1f}km")
+            self._last_enemy_missile_log[agent_id] = current_time
         
         # 基本条件检查
         if env.agents[agent_id].num_missiles <= 0:
@@ -252,7 +281,10 @@ class UnifiedEnemyTacticalAI:
         
         # 🔧 修复：只有朝向目标±45度范围内才允许发射
         if heading_error_deg > 45.0:
-            logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ❌ 朝向偏离{heading_error_deg:.1f}° > 45°，不发射")
+            last = self._last_enemy_heading_log.get(agent_id, -999)
+            if current_time - last >= 5.0:
+                logging.debug(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ❌ 朝向偏离{heading_error_deg:.1f}° > 45°，不发射")
+                self._last_enemy_heading_log[agent_id] = current_time
             return False
 
         # 威胁评估：在高威胁情况下更积极发射
@@ -263,7 +295,18 @@ class UnifiedEnemyTacticalAI:
 
         # 正常发射条件：30-70km最佳发射窗口
         if 30000 <= distance <= 70000:
-            logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ✅ 距离+朝向正确({heading_error_deg:.1f}°)，满足发射条件！")
+            last = self._last_enemy_heading_log.get(agent_id, -999)
+            if current_time - last >= 5.0:
+                logging.info(f"[T={current_time:.1f}s][敌方导弹] {agent_id} ✅ 距离+朝向正确({heading_error_deg:.1f}°)，满足发射条件！")
+                self._last_enemy_heading_log[agent_id] = current_time
+            # 追加 3.7.2 雷达/锁定/Notch/探测概率检查
+            if check_missile_launch_conditions is not None:
+                try:
+                    chk = check_missile_launch_conditions(env, agent_id, target.uid)
+                    if not chk.get('can_launch', False):
+                        return False
+                except Exception:
+                    pass
             return True
 
         return False
@@ -275,20 +318,31 @@ class UnifiedEnemyTacticalAI:
 
             aircraft = env.agents[agent_id]
 
-            # 创建导弹ID
-            missile_count = 2 - aircraft.num_missiles + 1
+            # 创建导弹ID - 支持4枚导弹编号
+            missile_count = 4 - aircraft.num_missiles + 1  # 1-4枚导弹
             base_id = agent_id[0] + agent_id[2:]  # B0100 → B100
-            missile_uid = f"{base_id}{missile_count}"  # B100 → B1001
+            missile_uid = f"{base_id}{missile_count:0>2}"  # B100 → B10001, B10002, B10003, B10004
 
-            # 创建导弹模拟器
-            missile = MissileSimulator.create(
-                parent=aircraft,
-                target=target,
-                uid=missile_uid
-            )
+            # 创建导弹模拟器（优先使用R-27ER仿真器）
+            if R27ERMissileSimulator is not None:
+                missile = R27ERMissileSimulator.create(
+                    parent=aircraft,
+                    target=target,
+                    uid=missile_uid
+                )
+            else:
+                missile = MissileSimulator.create(
+                    parent=aircraft,
+                    target=target,
+                    uid=missile_uid
+                )
 
             # 添加到环境
             env.add_temp_simulator(missile)
+            # 记录到环境导弹表，供威胁评估/RWR使用
+            if not hasattr(env, 'missiles') or env.missiles is None:
+                env.missiles = {}
+            env.missiles[missile_uid] = missile
 
             # 更新发射时间
             self.last_missile_launch_time[agent_id] = current_time
@@ -406,19 +460,23 @@ class UnifiedEnemyTacticalAI:
             # 1. 态势感知
             situation = self._analyze_situation(env, agent_id, current_time)
 
-            # 2. 威胁评估
+            # 2. 检查是否处于返航状态
+            if agent_id in self._enemy_phases and self._enemy_phases[agent_id] == "RETURNING":
+                return self._execute_return_to_base_unified(env, agent_id, current_time)
+
+            # 3. 威胁评估
             threat = self._assess_threat(situation, agent_id, current_time)
 
-            # 3. 更新战术阶段
+            # 4. 更新战术阶段
             self._update_tactical_phase(env, agent_id, situation)
 
-            # 4. 战术模式选择
+            # 5. 战术模式选择
             tactical_mode = self._select_tactical_mode(agent_id, threat, current_time)
 
-            # 5. 机动决策
+            # 6. 机动决策
             action_type = self._select_action(agent_id, tactical_mode, current_time)
 
-            # 6. 动作执行
+            # 7. 动作执行
             alt_cmd, hdg_cmd, vel_cmd = self._execute_action(env, agent_id, action_type, current_time)
             
             # ✅ 全局高度安全检查（最终防线）
@@ -534,6 +592,20 @@ class UnifiedEnemyTacticalAI:
                         dx = friendly_pos[0] - current_pos[0]
                         dy = friendly_pos[1] - current_pos[1]
                         closest_bearing = np.rad2deg(np.arctan2(dy, dx))
+
+            # 返航条件检查
+            should_return_home = self._should_return_to_base(env, agent_id, current_time, min_distance)
+            if should_return_home:
+                # 强制切换到返航阶段
+                if agent_id not in self._enemy_phases:
+                    self._enemy_phases[agent_id] = "RETURNING"
+                elif self._enemy_phases[agent_id] != "RETURNING":
+                    self._enemy_phases[agent_id] = "RETURNING"
+                    logging.debug(f"{agent_id} 切换到返航阶段")
+                # 不直接返回，继续创建SituationData但标记为返航状态
+                returning_to_base = True
+            else:
+                returning_to_base = False
 
             # 如果没有找到敌机，使用默认方位
             if closest_bearing is None:
@@ -1665,6 +1737,124 @@ class UnifiedEnemyTacticalAI:
                     logging.info(f"🛡️ {agent_id} 执行安全俯冲{altitude_change:.0f}m（当前高度{current_altitude:.0f}m → {target_altitude:.0f}m）")
 
         return altitude_cmd, 8, 3  # 保持航向和速度
+
+    def _should_return_to_base(self, env, agent_id: str, current_time: float, closest_enemy_distance: float) -> bool:
+        """检查是否应该返航 - 优化版本，减少长时间纠缠"""
+        try:
+            aircraft = env.agents[agent_id]
+            
+            # 返航条件1：导弹用尽且距离敌机较远且无敌方导弹威胁
+            missiles_remaining = getattr(aircraft, 'num_missiles', 0)
+            
+            # 检查是否存在敌方导弹威胁（二次进攻时）
+            enemy_missile_threat = False
+            if hasattr(env, '_tempsims'):
+                for missile_id, missile_sim in env._tempsims.items():
+                    if missile_id.startswith('A'):  # 友方导弹威胁
+                        missile_pos = missile_sim.get_position()
+                        aircraft_pos = aircraft.get_position()
+                        missile_distance = np.linalg.norm(np.array(aircraft_pos) - np.array(missile_pos))
+                        if missile_distance < 80000:  # 80km内的导弹威胁
+                            enemy_missile_threat = True
+                            break
+            
+            # 只有在无导弹威胁时才考虑因弹药耗尽返航
+            if missiles_remaining == 0 and closest_enemy_distance > 80000 and not enemy_missile_threat:
+                # 减少日志频率
+                if not hasattr(self, '_last_rtb_log_time'):
+                    self._last_rtb_log_time = {}
+                if agent_id not in self._last_rtb_log_time or (current_time - self._last_rtb_log_time[agent_id]) > 30.0:
+                    logging.info(f"🚀 {agent_id} 导弹用尽且距离较远({closest_enemy_distance/1000:.1f}km)且无威胁，返航")
+                    self._last_rtb_log_time[agent_id] = current_time
+                return True
+            
+            # 返航条件2：仿真时间超过8分钟（480秒）- 延长任务时间支持二次进攻
+            if current_time > 480.0:
+                if not hasattr(self, '_last_rtb_log_time'):
+                    self._last_rtb_log_time = {}
+                if agent_id not in self._last_rtb_log_time or (current_time - self._last_rtb_log_time[agent_id]) > 30.0:
+                    logging.info(f"⏰ {agent_id} 任务时间结束({current_time:.1f}s)，返航")
+                    self._last_rtb_log_time[agent_id] = current_time
+                return True
+            
+            # 返航条件3：高度过低且无法爬升
+            current_altitude = aircraft.get_property_value(c.position_h_sl_m)
+            if current_altitude < 2000 and closest_enemy_distance > 40000:  # 降低距离阈值
+                return True
+                
+            # 返航条件4：距离敌机超过200km且无明确威胁且仿真时间超过6分钟
+            if closest_enemy_distance > 200000 and current_time > 360.0:
+                if not hasattr(self, '_last_rtb_log_time'):
+                    self._last_rtb_log_time = {}
+                if agent_id not in self._last_rtb_log_time or (current_time - self._last_rtb_log_time[agent_id]) > 30.0:
+                    logging.info(f"📏 {agent_id} 距离过远({closest_enemy_distance/1000:.1f}km)且任务时间长，返航")
+                    self._last_rtb_log_time[agent_id] = current_time
+                return True
+            
+            # 返航条件5：任务目标达成（敌机数量减少或威胁消除）
+            if self._is_mission_complete(env, agent_id):
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logging.debug(f"返航条件检查失败 {agent_id}: {e}")
+            return False
+
+    def _is_mission_complete(self, env, agent_id: str) -> bool:
+        """判断任务是否完成 - 增强版支持二次进攻"""
+        try:
+            # 检查友方敌机的存活状态
+            friendly_agents = ['A0100', 'A0200']
+            active_friendlies = 0
+            
+            for friendly_id in friendly_agents:
+                if friendly_id in env.agents and env.agents[friendly_id].is_alive:
+                    active_friendlies += 1
+            
+            # 如果己方被全部击毁，敌方任务完成
+            if active_friendlies == 0:
+                return True
+                
+            # 检查己方（敌方）的状态
+            enemy_agents = ['B0100', 'B0200']
+            active_enemies = 0
+            
+            for enemy_id in enemy_agents:
+                if enemy_id in env.agents and env.agents[enemy_id].is_alive:
+                    active_enemies += 1
+            
+            # 检查是否在敌方导弹威胁下 - 二次进攻期间不应撤退
+            current_time = getattr(env, 'current_step', 0) * getattr(env, 'time_interval', 0.2)
+            under_missile_threat = False
+            
+            if hasattr(env, '_tempsims'):
+                for missile_id, missile_sim in env._tempsims.items():
+                    if missile_id.startswith('A'):  # 友方导弹威胁
+                        try:
+                            missile_pos = missile_sim.get_position()
+                            aircraft = env.agents[agent_id]
+                            aircraft_pos = aircraft.get_position()
+                            missile_distance = np.linalg.norm(np.array(aircraft_pos) - np.array(missile_pos))
+                            if missile_distance < 100000:  # 100km内的导弹威胁
+                                under_missile_threat = True
+                                break
+                        except:
+                            continue
+            
+            # 在导弹威胁下或仿真时间较短时不撤退（支持二次进攻）
+            if under_missile_threat or current_time < 300.0:  # 5分钟内不考虑撤退
+                return False
+            
+            # 只有在极端劣势且无威胁时才撤退
+            if active_enemies == 1 and active_friendlies >= 2:
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logging.debug(f"任务完成判断失败 {agent_id}: {e}")
+            return False
 
     # ==================== 辅助函数 ====================
 

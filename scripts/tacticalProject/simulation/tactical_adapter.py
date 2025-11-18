@@ -255,7 +255,11 @@ class TacticalAdapter:
             elevator = -0.3
             throttle = 0.8
         elif maneuver_type == 'beam':
-            # 侧对机动
+            # Beam机动：保持垂直于威胁方向
+            aileron = np.clip(heading_diff / 30.0, -1.0, 1.0)
+            throttle = 0.8
+        elif maneuver_type == 'pincer_converge':
+            # 钳形收拢机动：长机东向90°，僚机西向270°
             aileron = np.clip(heading_diff / 30.0, -1.0, 1.0)
             throttle = 0.8
         

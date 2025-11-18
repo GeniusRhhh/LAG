@@ -27,7 +27,7 @@ aircraft_configs: {
       ic_psi_true_deg: 0.0,       # 朝北
       ic_u_fps: 900.0,            # 985英尺/秒 (约300m/s, 0.9马赫)
     },
-    missile: 2
+    missile: 4                    # 每架飞机4枚导弹
   },
   A0200: {
     color: Red,
@@ -39,7 +39,7 @@ aircraft_configs: {
       ic_psi_true_deg: 0.0,       # 朝北
       ic_u_fps: 900.0,            # 800英尺/秒
     },
-    missile: 2
+    missile: 4                    # 每架飞机4枚导弹
   },
   B0100: {
     color: Blue,
@@ -51,7 +51,7 @@ aircraft_configs: {
       ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
       ic_u_fps: 900.0,            # 800英尺/秒
     },
-    missile: 2
+    missile: 4                    # 增加到4枚导弹，增强敌方
   },
   B0200: {
     color: Blue,
@@ -63,7 +63,7 @@ aircraft_configs: {
       ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
       ic_u_fps: 900.0,            # 800英尺/秒
     },
-    missile: 2
+    missile: 4                    # 增加到4枚导弹，增强敌方
   }
 }
 

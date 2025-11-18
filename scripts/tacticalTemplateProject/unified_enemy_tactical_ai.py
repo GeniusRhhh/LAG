@@ -222,7 +222,7 @@ class UnifiedEnemyTacticalAI:
         return best_target
 
     def _enemy_should_launch_missile(self, env, agent_id: str, target, distance: float, current_time: float) -> bool:
-        """敌方智能导弹发射判断"""
+        """敌方智能导弹发射判断 - 优化时机选择"""
         # 基本条件检查
         if env.agents[agent_id].num_missiles <= 0:
             return False
@@ -232,18 +232,50 @@ class UnifiedEnemyTacticalAI:
         if current_time - last_launch < self.enemy_missile_cooldown:
             return False
 
-        # 距离条件：20-60km范围内发射
-        if distance < 20000 or distance > 60000:
+        # 距离条件：15-70km范围内发射，扩大发射窗口
+        if distance < 15000 or distance > 70000:
             return False
+
+        # 检查友方状态，避免等到友方返航才发射
+        try:
+            friendly_agents = ['A0100', 'A0200']
+            has_active_friendlies = False
+            approaching_friendlies = 0
+            
+            for friendly_id in friendly_agents:
+                if friendly_id in env.agents and env.agents[friendly_id].is_alive:
+                    has_active_friendlies = True
+                    friendly_pos = env.agents[friendly_id].get_position()
+                    enemy_pos = env.agents[agent_id].get_position()
+                    friendly_distance = np.linalg.norm(np.array(friendly_pos) - np.array(enemy_pos))
+                    
+                    # 如果友方在接近（距离在减少），优先发射
+                    if friendly_distance < 50000:  # 50km内算接近
+                        approaching_friendlies += 1
+            
+            # 如果没有活跃友方，不发射
+            if not has_active_friendlies:
+                return False
+                
+        except Exception as e:
+            logging.debug(f"友方状态检查失败: {e}")
 
         # 威胁评估：在高威胁情况下更积极发射
         threat = self.threat_assessment.get(agent_id)
         if threat and threat.threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
-            return True
+            # 高威胁时在更远距离就发射
+            if distance <= 60000:
+                return True
 
-        # 正常发射条件：30-50km最佳发射窗口
-        if 30000 <= distance <= 50000:
+        # 最佳发射窗口：25-45km，友方接近时优先发射
+        if 25000 <= distance <= 45000 and approaching_friendlies > 0:
             return True
+            
+        # 次优发射窗口：20-55km
+        if 20000 <= distance <= 55000:
+            # 随机因子，避免过于可预测
+            if random.random() < 0.7:  # 70%概率发射
+                return True
 
         return False
 
@@ -760,7 +792,7 @@ class UnifiedEnemyTacticalAI:
             return TacticalMode.NEUTRAL
 
     def _select_action(self, agent_id: str, tactical_mode: TacticalMode, current_time: float) -> ActionType:
-        """机动决策模块 - 基于权重矩阵的随机化动作选择"""
+        """机动决策模块 - 基于权重矩阵和距离控制的智能动作选择"""
         try:
             current_phase = self.current_phase.get(agent_id, EnemyTacticalPhase.MELD_MTR)
 
@@ -785,19 +817,42 @@ class UnifiedEnemyTacticalAI:
 
             action_weights = self.action_weights[tactical_mode][current_phase].copy()
 
-            # 长机-僚机差异化调整
-            if agent_id == "B0100":  # 长机
-                # 长机更倾向于主动动作
+            # 距离控制优化 - 根据与敌机距离调整动作权重
+            distance_to_enemy = self._get_closest_enemy_distance(agent_id)
+            if distance_to_enemy:
+                if distance_to_enemy < 15000:  # 15km以内，优先防御
+                    # 增加防御动作权重
+                    if ActionType.DEFENSIVE_SPLIT in action_weights:
+                        action_weights[ActionType.DEFENSIVE_SPLIT] *= 2.0
+                    if ActionType.NOTCH_BACK in action_weights:
+                        action_weights[ActionType.NOTCH_BACK] *= 1.8
+                    # 降低激进动作权重
+                    if ActionType.AGGRESSIVE_APPROACH in action_weights:
+                        action_weights[ActionType.AGGRESSIVE_APPROACH] *= 0.3
+                
+                elif distance_to_enemy > 40000:  # 40km以外，考虑接近或返航
+                    # 增加接近动作权重
+                    if ActionType.AGGRESSIVE_APPROACH in action_weights:
+                        action_weights[ActionType.AGGRESSIVE_APPROACH] *= 1.5
+                    if ActionType.SHORT_SKATE in action_weights:
+                        action_weights[ActionType.SHORT_SKATE] *= 1.3
+                    # 增加返航权重
+                    if ActionType.RETURN_TO_BASE in action_weights:
+                        action_weights[ActionType.RETURN_TO_BASE] *= 1.5
+
+            # 长机-僚机差异化调整（减少随机性）
+            if agent_id == "B0100":  # 长机 - 更加稳定的决策
+                # 长机优先选择主动但稳定的动作
                 if ActionType.SHORT_SKATE in action_weights:
-                    action_weights[ActionType.SHORT_SKATE] *= 1.3
-                if ActionType.AGGRESSIVE_APPROACH in action_weights:
-                    action_weights[ActionType.AGGRESSIVE_APPROACH] *= 1.2
-            elif agent_id == "B0200":  # 僚机
-                # 僚机更倾向于支援和防御动作
+                    action_weights[ActionType.SHORT_SKATE] *= 1.2
+                if ActionType.MAINTAIN_HEADING in action_weights:
+                    action_weights[ActionType.MAINTAIN_HEADING] *= 1.4  # 增加稳定性
+            elif agent_id == "B0200":  # 僚机 - 更加协调的决策
+                # 僚机更倾向于支援和配合
                 if ActionType.DEFENSIVE_SPLIT in action_weights:
-                    action_weights[ActionType.DEFENSIVE_SPLIT] *= 1.3
-                if ActionType.RETURN_TO_BASE in action_weights:
-                    action_weights[ActionType.RETURN_TO_BASE] *= 1.1
+                    action_weights[ActionType.DEFENSIVE_SPLIT] *= 1.1
+                if ActionType.MAINTAIN_HEADING in action_weights:
+                    action_weights[ActionType.MAINTAIN_HEADING] *= 1.3  # 增加稳定性
 
             # 归一化权重
             total_weight = sum(action_weights.values())
@@ -806,28 +861,52 @@ class UnifiedEnemyTacticalAI:
 
             action_weights = {action: weight/total_weight for action, weight in action_weights.items()}
 
-            # 随机选择动作
+            # 智能动作选择 - 减少随机性，采用确定性选择
+            # 使用加权选择，但倾向于权重最高的动作
+            sorted_actions = sorted(action_weights.items(), key=lambda x: x[1], reverse=True)
+            
+            # 85%概率选择权重最高的动作，15%概率选择次高权重动作
             rand_val = random.random()
-            cumulative_weight = 0.0
-            selected_action = ActionType.MAINTAIN_HEADING
-
-            for action, weight in action_weights.items():
-                cumulative_weight += weight
-                if rand_val <= cumulative_weight:
-                    selected_action = action
-                    break
+            if rand_val < 0.85:
+                selected_action = sorted_actions[0][0]
+            elif len(sorted_actions) > 1:
+                selected_action = sorted_actions[1][0]
+            else:
+                selected_action = sorted_actions[0][0]
 
             # 记录新动作
             self.current_action[agent_id] = selected_action
             self.action_start_time[agent_id] = current_time
 
-            logging.debug(f"敌方{agent_id}选择动作: {selected_action.value} (模式: {tactical_mode.value}, 阶段: {current_phase.value})")
+            logging.debug(f"敌方{agent_id}选择动作: {selected_action.value} (模式: {tactical_mode.value}, 距离: {distance_to_enemy/1000 if distance_to_enemy else '未知'}km)")
 
             return selected_action
 
         except Exception as e:
             logging.error(f"机动决策失败 {agent_id}: {e}")
             return ActionType.MAINTAIN_HEADING
+
+    def _get_closest_enemy_distance(self, agent_id: str) -> float:
+        """获取与最近敌机的距离"""
+        try:
+            if not hasattr(self, '_current_env') or not self._current_env:
+                return None
+                
+            agent_pos = np.array(self._current_env.agents[agent_id].get_position())
+            min_distance = float('inf')
+            
+            # 检查所有友方（对敌方AI来说是敌方）智能体
+            for friendly_id in ['A0100', 'A0200']:
+                if friendly_id in self._current_env.agents and self._current_env.agents[friendly_id].is_alive:
+                    friendly_pos = np.array(self._current_env.agents[friendly_id].get_position())
+                    distance = np.linalg.norm(agent_pos - friendly_pos)
+                    min_distance = min(min_distance, distance)
+            
+            return min_distance if min_distance != float('inf') else None
+            
+        except Exception as e:
+            logging.debug(f"距离计算失败 {agent_id}: {e}")
+            return None
 
     def _execute_action(self, env, agent_id: str, action_type: ActionType, current_time: float) -> Tuple[int, int, int]:
         """动作执行模块 - 将动作类型转换为具体的飞行指令 - 🛡️ 多层安全保护机制"""
@@ -1417,7 +1496,7 @@ class UnifiedEnemyTacticalAI:
             self._defensive_split_states[agent_id] = {
                 'start_step': current_step,
                 'split_angle': None,
-                'duration_limit': 150,  # 30秒限制（150步 * 0.2秒/步）
+                'duration_limit': random.randint(50, 75),  # 10-15秒限制（50-75步 * 0.2秒/步）
                 'completed': False
             }
 
@@ -1425,18 +1504,25 @@ class UnifiedEnemyTacticalAI:
 
         # 检查是否已经完成防御分离机动
         if state['completed'] or (current_step - state['start_step']) > state['duration_limit']:
-            # 防御分离完成，切换到正常机动
+            # 防御分离完成，切换状态并删除状态记录
             if agent_id in self._defensive_split_states:
                 del self._defensive_split_states[agent_id]
+            # 根据距离决定下一步策略
+            if agent_id in self._enemy_phases:
+                distance = np.linalg.norm(np.array(ownship_pos) - np.array(target_pos))
+                if distance > 30000:  # 距离过远则接近
+                    self._enemy_phases[agent_id] = "APPROACHING"
+                else:
+                    self._enemy_phases[agent_id] = "ENGAGING" 
             # 返回正常的直飞指令
             return 7, 8, 3  # 直飞+保持高度+保持速度
 
         # 确定分离角度（限制在安全范围内）
         if state['split_angle'] is None:
-            if agent_id == "B0100":  # 长机左分离 - 限制角度
-                state['split_angle'] = random.uniform(-35.0, -20.0)  # 减小角度范围
-            elif agent_id == "B0200":  # 僚机右分离 - 限制角度
-                state['split_angle'] = random.uniform(20.0, 35.0)   # 减小角度范围
+            if agent_id == "B0100":  # 长机左分离 - 进一步减小角度
+                state['split_angle'] = random.uniform(-25.0, -15.0)  # 减小到15-25度
+            elif agent_id == "B0200":  # 僚机右分离 - 进一步减小角度
+                state['split_angle'] = random.uniform(15.0, 25.0)   # 减小到15-25度
             else:
                 state['split_angle'] = random.choice([-30.0, 30.0])  # 限制最大角度
 

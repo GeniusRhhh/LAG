@@ -219,6 +219,9 @@ class UnifiedRadarManager:
             "B0200": 0.0
         }
 
+        # 日志节流：ECM激活日志时间戳（每机体）
+        self._last_ecm_log_time = {}
+
         # 敌方雷达锁定目标
         self.enemy_lock_targets = {
             "B0100": None,
@@ -677,7 +680,10 @@ class UnifiedRadarManager:
             # 基于威胁等级的概率激活
             if random.random() < activation_prob:
                 self._activate_ecm(agent_id, current_time)
-                logging.info(f"🛡️ {agent_id} 因{threat_reason}(威胁等级{max_threat_level})激活ECM")
+                last = self._last_ecm_log_time.get(agent_id, -999)
+                if current_time - last >= 10.0:
+                    logging.info(f"🛡️ {agent_id} 因{threat_reason}(威胁等级{max_threat_level})激活ECM")
+                    self._last_ecm_log_time[agent_id] = current_time
                     
         except Exception as e:
             logging.error(f"❌ {agent_id} 友方ECM激活检查错误: {e}")

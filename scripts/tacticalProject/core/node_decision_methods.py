@@ -238,14 +238,26 @@ class NodeDecisionMethods:
         
         # 在时间窗口内保持防御姿态
         if window_remaining > 0:
-            logging.info(f"   → DR窗口: 剩余{window_remaining:.1f}秒，保持Beam姿态")
-            return {
-                'node': 'DR',
-                'tactic': None,
-                'maneuver': 'beam',
-                'in_window': True,
-                'window_remaining': window_remaining
-            }
+            # 🎯 钳形攻击特殊处理：DR阶段不执行beam机动，而是继续钳形收拢
+            current_tactic = context.custom_data.get('current_tactic', None)
+            if current_tactic == 'PINCER_ATTACK':
+                logging.info(f"   → DR窗口: 剩余{window_remaining:.1f}秒，钳形攻击继续收拢")
+                return {
+                    'node': 'DR',
+                    'tactic': None,
+                    'maneuver': 'pincer_converge',  # 钳形收拢而非beam
+                    'in_window': True,
+                    'window_remaining': window_remaining
+                }
+            else:
+                logging.info(f"   → DR窗口: 剩余{window_remaining:.1f}秒，保持Beam姿态")
+                return {
+                    'node': 'DR',
+                    'tactic': None,
+                    'maneuver': 'beam',
+                    'in_window': True,
+                    'window_remaining': window_remaining
+                }
         
         # 时间窗口结束，进行决策
         logging.info(f"⚡ [DR决策] 时间窗口结束，评估是否重新进攻")
@@ -265,7 +277,7 @@ class NodeDecisionMethods:
         )
         
         if should_reengage:
-            # 重新进攻
+            # 重新进攻 - 修改为正确触发战术回转
             logging.info(f"   → 决定重新进攻！敌机{enemies_alive}架，威胁{threat_level:.2f}")
             
             # 选择第二轮战术
@@ -281,13 +293,22 @@ class NodeDecisionMethods:
             
             selected_tactic = candidates[0] if candidates else 'PINCER_ATTACK'
             
-            return {
+            # 正确触发战术回转
+            decision_result = {
                 'node': 'DR',
-                'tactic': selected_tactic,
-                'maneuver': 'turn',
+                'tactic': 'TACTICAL_TURN',  # 明确指定战术回转
+                'maneuver': 'TACTICAL_TURN',  # 设置战术回转机动
+                'turn_type': 'reengage_turn',  # 重新交战回转
                 'reengage': True,
-                'is_second_attack': True
+                'is_second_attack': True,
+                'target_heading': 'toward_enemy',  # 明确指定朝向敌机
+                'second_attack_tactic': selected_tactic  # 保留选中的战术
             }
+            
+            # 保存决策结果供战术执行器使用
+            self.last_decision = decision_result
+            
+            return decision_result
         else:
             # 撤退
             logging.info(f"   → 决定撤退。敌机{enemies_alive}架，威胁{threat_level:.2f}")
@@ -314,16 +335,35 @@ class NodeDecisionMethods:
         """
         logging.info(f"⚡ [MTR决策] 距离{context.distance/1000:.0f}km")
         
-        # 根据当前战术选择合适的机动
-        current_tactic = context.custom_data.get('current_tactic', 'PINCER_ATTACK')
-        
-        # MTR阶段机动选择（简化处理）
-        selected_maneuver = 'straight'  # 默认保持直线飞行
+        # 计算温和的攻击占位点（小幅度调整）
+        try:
+            my_ac = context.env.agents.get(context.agent_id)
+            tgt_id = context.env.target_map.get(context.agent_id) if hasattr(context.env, 'target_map') else None
+            if not tgt_id:
+                from tactical_types import get_target_with_fallback
+                tgt_id = get_target_with_fallback(context.agent_id, context.env)
+            tgt_ac = context.env._jsbsims.get(tgt_id) if tgt_id else None
+            if my_ac and tgt_ac and tgt_ac.is_alive:
+                my_pos = my_ac.get_position()
+                tgt_pos = tgt_ac.get_position()
+                los = tgt_pos - my_pos
+                los[:2] = los[:2] / (np.linalg.norm(los[:2]) + 1e-6)
+                # 前向8km占位，侧向微偏移2km（根据机号区分左右）
+                forward = 8000.0
+                lateral = 2000.0 if context.agent_id.endswith('100') else -2000.0
+                perp = np.array([ -los[1], los[0], 0.0 ])
+                wp = my_pos + los * forward + perp * (lateral / (np.linalg.norm(perp[:2]) + 1e-6))
+                wp[2] = my_pos[2]
+            else:
+                wp = None
+        except Exception:
+            wp = None
         
         return {
             'node': 'MTR',
-            'tactic': None,  # 不改变战术
-            'maneuver': selected_maneuver
+            'tactic': None,
+            'maneuver': 'straight',
+            'attack_waypoint': wp.tolist() if wp is not None else None
         }
     
     def decide_at_tr(self, context: Any) -> Dict[str, Any]:

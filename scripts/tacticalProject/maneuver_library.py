@@ -442,31 +442,42 @@ class ManeuverLibrary:
         return 7, 8, 3
     
     def execute_notch_back(self, env, agent_id: str, direction='left') -> tuple:
-        """执行Notch Back机动 - 180°回旋下降"""
+        """执行Notch Back机动 - 90°偏置+下降规避导弹"""
         current_time = env.current_step * env.time_interval
         current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
+        
+        # 检查是否在返航状态，返航时不执行Notch Back
+        if hasattr(self.task, 'returning_agents') and agent_id in getattr(self.task, 'returning_agents', set()):
+            logging.debug(f"{agent_id} 正在返航，跳过Notch Back机动")
+            return 7, 8, 4  # 直飞+保持高度+保持速度
         
         if agent_id not in self.task.maneuver_states or self.task.maneuver_states[agent_id].get('type') != 'notch_back':
             self.task.maneuver_states[agent_id] = {
                 'type': 'notch_back',
-                'phase': 'turn_descend',
+                'phase': 'beam_descend',
                 'start_time': current_time,
                 'phase_start_time': current_time,
                 'direction': direction,
                 'initial_heading': current_heading
             }
-            logging.info(f"🔄 【Notch Back】{agent_id}开始180°回旋下降机动")
+            
+            logging.info(f"🔄 【Notch Back】{agent_id}开始90°偏置下降机动")
         
         state = self.task.maneuver_states[agent_id]
         phase_time = current_time - state['phase_start_time']
         
-        if state['phase'] == 'turn_descend':
-            if phase_time < 8.0:
-                return 3, 16, 5
+        if state['phase'] == 'beam_descend':
+            # 延长持续时间到15秒，让机动更加充分
+            if phase_time < 15.0:  # 15秒而非8秒
+                # 90度偏置下降：beam机动(垂直于威胁方向) + 下降 + 保持速度
+                if state['direction'] == 'left':
+                    return 3, 16, 4  # 左转 + 下降 + 保持速度
+                else:
+                    return 5, 16, 4  # 右转 + 下降 + 保持速度
             else:
                 del self.task.maneuver_states[agent_id]
                 logging.info(f"✅ 【Notch Back】{agent_id}完成机动")
-                return 7, 8, 4
+                return 7, 8, 4  # 直飞+保持高度+保持速度
         
         return 7, 8, 4
     

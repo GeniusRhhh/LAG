@@ -36,6 +36,7 @@ class TacticalSelectorAlgorithm:
         
         # 当前战术（用于连续性检查）
         self.current_tactic = None
+        self.last_tactic_change_time = 0.0
         
         logging.info("✅ 战术选择算法初始化完成")
     
@@ -58,6 +59,7 @@ class TacticalSelectorAlgorithm:
             str: 选定的战术模板名称
         """
         try:
+            current_time = getattr(env, 'current_step', 0) * getattr(env, 'time_interval', 0.2)
             # 更新当前战术
             if current_tactic:
                 self.current_tactic = current_tactic
@@ -151,6 +153,9 @@ class TacticalSelectorAlgorithm:
             
             if best_tactic:
                 logging.info(f"🎯 选定战术: {best_tactic} (适应度: {best_score:.3f})")
+                # 记录切换时间
+                if best_tactic != self.current_tactic:
+                    self.last_tactic_change_time = current_time
                 self.current_tactic = best_tactic
                 return best_tactic
             else:
@@ -159,7 +164,10 @@ class TacticalSelectorAlgorithm:
             
         except Exception as e:
             logging.error(f"战术选择错误: {e}")
-            return 'SIDE_BY_SIDE'
+            try:
+                return current_tactic if current_tactic else 'SIDE_BY_SIDE'
+            except Exception:
+                return 'SIDE_BY_SIDE'
     
     def _compute_tactical_fitness(self, tactic, situation, my_intent, enemy_intent,
                                   my_aircraft, enemy_aircraft, env):
@@ -218,35 +226,96 @@ class TacticalSelectorAlgorithm:
         - 攻击性战术：威胁越低，适应性越强
         """
         try:
-            # 计算平均威胁等级
+            # 计算动态威胁等级（基于距离、数量、RWR等）
             total_threat = 0.0
             count = 0
+            current_time = getattr(env, 'current_step', 0) * getattr(env, 'time_interval', 0.2)
 
             for my_ac in my_aircraft:
                 if my_ac and my_ac.is_alive:
+                    # 获取RWR威胁等级
+                    try:
+                        from simulation.radar_manager import get_unified_radar_manager
+                        rm = get_unified_radar_manager()
+                        agent_id = getattr(my_ac, 'agent_id', None) or getattr(my_ac, 'uid', 'unknown')
+                        rwr_level = rm.get_rwr_threat_level(agent_id)
+                        rwr_threat = rwr_level / 5.0  # 归一化到[0,1]
+                    except:
+                        rwr_threat = 0.0
+
                     for enemy_ac in enemy_aircraft:
                         if enemy_ac and enemy_ac.is_alive:
-                            threat = self.threat_evaluator.calculate_total_threat(my_ac, enemy_ac, env)
-                            total_threat += threat
-                            count += 1
+                            # 计算基础威胁（距离相关）
+                            try:
+                                my_pos = my_ac.get_position()
+                                enemy_pos = enemy_ac.get_position()
+                                distance = ((my_pos[0] - enemy_pos[0])**2 + (my_pos[1] - enemy_pos[1])**2)**0.5
+                                # 距离威胁：近距离威胁高
+                                distance_threat = max(0, (80000 - distance) / 80000)
+                                
+                                # 角度威胁
+                                angle_threat = self.threat_evaluator.calculate_angle_threat(my_ac, enemy_ac, env)
+                                
+                                # 综合威胁
+                                individual_threat = (distance_threat + angle_threat + rwr_threat) / 3.0
+                                total_threat += individual_threat
+                                count += 1
+                            except:
+                                # 回退到简单计算
+                                threat = self.threat_evaluator.calculate_total_threat(my_ac, enemy_ac, env)
+                                total_threat += threat
+                                count += 1
 
             if count > 0:
                 avg_threat = total_threat / count
             else:
                 avg_threat = 0.5
 
-            # 归一化威胁等级（假设威胁等级已经在[0,1]）
-            normalized_threat = avg_threat
+            # 添加时间因素（仿真进行越久，威胁可能变化）
+            time_factor = min(1.0, current_time / 300.0) * 0.1  # 5分钟内从0增长到0.1
+            avg_threat += time_factor
 
-            # 根据战术类型计算适应度
+            # 归一化威胁等级
+            normalized_threat = np.clip(avg_threat, 0.0, 1.0)
+
+            # 根据战术类型计算适应度 - 平衡各战术选择
             if tactic in ['TACTICAL_EVASION', 'TACTICAL_TURN']:
                 # 防御性战术：威胁越高，适应性越强
                 threat_fitness = normalized_threat  # 威胁高 → 分数高
             else:
-                # 攻击性战术：威胁越低，适应性越强
-                threat_fitness = 1.0 - normalized_threat  # 威胁低 → 分数高
+                # 攻击性战术：威胁评估更平衡，避免DRAG_SHOOT过度优势
+                base_fitness = 1.0 - normalized_threat  # 威胁低 → 分数高
+                
+                # 为不同攻击性战术添加特色调整
+                if tactic == 'DRAG_SHOOT':
+                    # 拖曳射击：在中等威胁时表现更佳
+                    if 0.3 <= normalized_threat <= 0.7:
+                        adjustment = 0.1  # 中等威胁时小幅加成
+                    else:
+                        adjustment = -0.05  # 其他情况小幅减分
+                elif tactic == 'PINCER_ATTACK':
+                    # 钳形攻击：在低威胁时表现更佳
+                    if normalized_threat <= 0.4:
+                        adjustment = 0.15  # 低威胁时加成
+                    else:
+                        adjustment = 0.0
+                elif tactic == 'HIGH_LOW_ATTACK':
+                    # 高低攻击：在高威胁时表现更佳
+                    if normalized_threat >= 0.6:
+                        adjustment = 0.12  # 高威胁时加成
+                    else:
+                        adjustment = 0.0
+                else:
+                    adjustment = 0.0
+                    
+                threat_fitness = base_fitness + adjustment
 
-            return threat_fitness
+            # 减少随机扰动，但保持一定变化
+            import random
+            random_factor = random.uniform(0.95, 1.05)  # 减小随机范围
+            threat_fitness *= random_factor
+
+            return np.clip(threat_fitness, 0.0, 1.0)
 
         except Exception as e:
             logging.error(f"威胁适应度评估错误: {e}")
@@ -254,7 +323,7 @@ class TacticalSelectorAlgorithm:
 
     def _evaluate_formation_fitness(self, tactic):
         """
-        队形切换代价评估（权重0.25）
+        队形切换代价评估（权重0.25）- 平衡各战术选择概率
 
         计算从当前队形到目标队形的转换成本
         """
@@ -264,28 +333,24 @@ class TacticalSelectorAlgorithm:
             if self.current_tactic == tactic:
                 return 1.0  # 无需切换，适应度最高
 
-            # 定义队形切换代价矩阵（简化版本）
-            # 相似战术之间切换代价较低
-            formation_cost = {
-                ('PINCER_ATTACK', 'HIGH_LOW_ATTACK'): 0.3,  # 钳形→上下，代价中等
-                ('PINCER_ATTACK', 'SEQUENTIAL_ATTACK'): 0.5,  # 钳形→前后，代价较高
-                ('PINCER_ATTACK', 'SIDE_BY_SIDE'): 0.2,  # 钳形→并排，代价较低
-                ('HIGH_LOW_ATTACK', 'PINCER_ATTACK'): 0.3,
-                ('HIGH_LOW_ATTACK', 'SEQUENTIAL_ATTACK'): 0.4,
-                ('HIGH_LOW_ATTACK', 'SIDE_BY_SIDE'): 0.5,
-                ('SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE'): 0.2,
-                ('SIDE_BY_SIDE', 'SEQUENTIAL_ATTACK'): 0.2,
+            # 定义队形切换代价矩阵（平衡化基础值+随机扰动）
+            base_costs = {
+                'DRAG_SHOOT': 0.20,  # 提高拖曳射击代价：0.1 → 0.20
+                'PINCER_ATTACK': 0.18,  # 降低钳形攻击代价：0.25 → 0.18 
+                'HIGH_LOW_ATTACK': 0.22,  # 轻微降低：0.3 → 0.22
+                'SEQUENTIAL_ATTACK': 0.19,  # 轻微降低：0.2 → 0.19
+                'SIDE_BY_SIDE': 0.21,  # 提高：0.15 → 0.21
             }
 
-            # 查询切换代价
-            key = (self.current_tactic, tactic) if self.current_tactic else None
-            if key and key in formation_cost:
-                cost = formation_cost[key]
-            else:
-                cost = 0.4  # 默认代价
+            base_cost = base_costs.get(tactic, 0.20)
+            
+            # 增加随机扰动幅度，增加选择多样性
+            import random
+            random_factor = random.uniform(0.85, 1.15)  # 扩大随机范围：±15%
+            cost = base_cost * random_factor
 
             # 适应度 = 1 - 代价
-            formation_fitness = 1.0 - cost
+            formation_fitness = max(0.0, 1.0 - cost)
 
             return formation_fitness
 

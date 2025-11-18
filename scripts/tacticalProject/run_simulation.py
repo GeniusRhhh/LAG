@@ -1,12 +1,24 @@
 """
 战术仿真运行脚本
 支持5种战术的完整2v2空战仿真
+
+🎯 战术选择配置：
+修改下面的 FORCE_TACTIC 参数来强制选择特定战术进行测试：
+- None: 使用智能战术选择（默认）
+- 'DRAG_SHOOT': 拖拽射击战术
+- 'PINCER_ATTACK': 钳形攻势战术
+- 'HIGH_LOW_ATTACK': 高低攻击战术
+- 'FRONT_BACK': 前后攻击战术
+- 'TACTICAL_TURN': 战术转弯战术
 """
 import os
 import sys
 import logging
 import argparse
 from datetime import datetime
+
+# 🎯 战术选择配置 - 修改此参数来强制选择特定战术
+FORCE_TACTIC = None  # 选项: None, 'DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'FRONT_BACK', 'TACTICAL_TURN'
 
 # 添加项目路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -87,7 +99,7 @@ def print_banner(tactic_name: str = "通用战术"):
 def run_simulation(
     tactic_type: str = "front_back",  # 修改默认战术为前后攻击
     our_intent: str = "conservative_clear",
-    max_steps: int = 1650,
+    max_steps: int = 2400,  # 480秒 @ 0.2s/步 (从360秒延长到480秒)
     output_dir: str = None
 ):
     """
@@ -172,8 +184,14 @@ def run_simulation(
             decision_manager = TacticalDecisionManager(our_intent_type=our_intent)
         
         # 创建战术任务
-        tactical_task = TacticalTask(env.config, decision_manager=decision_manager)
+        tactical_task = TacticalTask(env.config, decision_manager=decision_manager, force_tactic=FORCE_TACTIC)
         env.task = tactical_task
+
+        # 打印战术选择信息
+        if FORCE_TACTIC:
+            logging.info(f"🎯 强制选择战术: {FORCE_TACTIC}")
+        else:
+            logging.info("🎯 使用智能战术选择")
         
         # 重置环境
         # print("重置环境...")  # 注释掉无用信息
@@ -335,12 +353,18 @@ def run_simulation(
         
         print(f"\n详细日志: {log_file}")
         
-        # 保存数据
+        # 保存数据（DataLogger会在TacticalTask内按步记录，这里统一导出全部表格）
         if trajectory_data:
             import pandas as pd
             traj_file = os.path.join(output_dir, f'trajectory_{timestamp}.csv')
             pd.DataFrame(trajectory_data).to_csv(traj_file, index=False)
             print(f"轨迹数据: {traj_file}")
+        try:
+            if hasattr(env, 'task') and hasattr(env.task, 'data_logger'):
+                env.task.data_logger.save_all()
+                print(f"数据表输出目录: {env.task.data_logger.output_dir}")
+        except Exception:
+            pass
         
         # 显示ACMI文件
         if os.path.exists(acmi_filepath):
@@ -369,7 +393,7 @@ def main():
     parser.add_argument('--intent', type=str, default='conservative_clear',
                        choices=['conservative_clear', 'aggressive_clear', 'defensive'],
                        help='我方意图')
-    parser.add_argument('--steps', type=int, default=1650,
+    parser.add_argument('--steps', type=int, default=1800,
                        help='最大步数')
     parser.add_argument('--output', type=str, default=None,
                        help='输出目录（默认为脚本所在目录下的tactical_simulation_results）')

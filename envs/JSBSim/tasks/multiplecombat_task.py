@@ -343,6 +343,15 @@ class MultipleCombatTask(SingleCombatTask):
         self.allocation_counter = 0
         self._target_allocation = {}
 
+        # 设置不同阵营的初始速度
+        for agent_id in env.agents:
+            if agent_id.startswith('A'):  # 友方智能体
+                # 300m/s = 984.25 fps
+                env.agents[agent_id].set_property_value(c.ic_u_fps, 984.25)
+            elif agent_id.startswith('B'):  # 敌方智能体
+                # 280m/s = 918.64 fps  
+                env.agents[agent_id].set_property_value(c.ic_u_fps, 918.64)
+        
         # 重置奖励函数
         for func in self.reward_functions:
             if hasattr(func, 'reset'):

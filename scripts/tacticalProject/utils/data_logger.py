@@ -8,6 +8,11 @@ import os
 import logging
 from typing import Dict, List, Any
 from datetime import datetime
+import numpy as np
+try:
+    from envs.JSBSim.core.catalog import Catalog as c
+except Exception:
+    c = None
 
 
 class DataLogger:
@@ -36,6 +41,102 @@ class DataLogger:
         self.phase_log = []
         
         logging.info(f"✅ 数据记录器初始化完成: {output_dir}")
+    
+    def record_step(self, env, current_time: float):
+        """按步记录核心数据：轨迹、雷达、导弹。
+        该方法被 TacticalTask 每10步调用一次。
+        """
+        try:
+            # 1) 轨迹
+            for agent_id, agent in env.agents.items():
+                if not agent.is_alive:
+                    continue
+                pos = agent.get_position()
+                vel = agent.get_velocity()
+                if c is not None:
+                    try:
+                        heading = float(np.rad2deg(agent.get_property_value(c.attitude_psi_rad)))
+                        pitch = float(np.rad2deg(agent.get_property_value(getattr(c, 'attitude_pitch_rad', 'attitude/pitch-rad'))))
+                        roll = float(np.rad2deg(agent.get_property_value(getattr(c, 'attitude_phi_rad', 'attitude/phi-rad'))))
+                    except Exception:
+                        heading, pitch, roll = 0.0, 0.0, 0.0
+                else:
+                    heading, pitch, roll = 0.0, 0.0, 0.0
+                self.log_trajectory(current_time, agent_id, pos, vel, heading, pitch, roll)
+
+            # 2) 雷达
+            radar = getattr(getattr(env, 'task', None), 'radar_manager', None)
+            if radar is not None:
+                # 友方
+                for aid in radar.friendly_radar_states.keys():
+                    mode = radar.friendly_radar_states.get(aid)
+                    targets = radar.friendly_radar_targets.get(aid, {})
+                    target_id, distance, lock_q, snr = 'None', 0.0, 0.0, 0.0
+                    if targets:
+                        # 选择最近目标
+                        try:
+                            tid, t = min(targets.items(), key=lambda x: x[1].distance)
+                            target_id = tid
+                            distance = float(t.distance)
+                            lock_q = float(getattr(t, 'track_quality', 0.0))
+                            snr = float(getattr(t, 'snr', 0.0))
+                        except Exception:
+                            pass
+                    self.log_radar_status(current_time, aid, str(getattr(mode, 'name', mode)), target_id, distance, lock_q, snr)
+                # 敌方
+                for bid in radar.enemy_radar_states.keys():
+                    mode = radar.enemy_radar_states.get(bid)
+                    targets = radar.enemy_radar_targets.get(bid, {})
+                    target_id, distance, lock_q, snr = 'None', 0.0, 0.0, 0.0
+                    if targets:
+                        try:
+                            tid, t = min(targets.items(), key=lambda x: x[1].distance)
+                            target_id = tid
+                            distance = float(t.distance)
+                            lock_q = float(getattr(t, 'track_quality', 0.0))
+                            snr = float(getattr(t, 'snr', 0.0))
+                        except Exception:
+                            pass
+                    self.log_radar_status(current_time, bid, str(getattr(mode, 'name', mode)), target_id, distance, lock_q, snr)
+
+            # 3) 导弹
+            missiles = getattr(env, 'missiles', {}) or {}
+            for mid, m in missiles.items():
+                try:
+                    pos = m.get_position() if hasattr(m, 'get_position') else getattr(m, 'position', (0.0, 0.0, 0.0))
+                    if hasattr(m, 'get_velocity'):
+                        vel = m.get_velocity()
+                        speed = float(np.linalg.norm(vel))
+                    else:
+                        speed = float(getattr(m, 'speed', 0.0))
+                    launcher_id = getattr(getattr(m, 'parent', None), 'uid', 'UNKNOWN')
+                    target_obj = getattr(m, 'target', None)
+                    target_id = getattr(target_obj, 'uid', 'UNKNOWN')
+                    # 距离
+                    if target_obj is not None and hasattr(target_obj, 'get_position'):
+                        tpos = target_obj.get_position()
+                        distance_to_target = float(np.linalg.norm(np.array(tpos) - np.array(pos)))
+                    else:
+                        distance_to_target = 0.0
+                    # 制导模式（尽力获取）
+                    guidance_mode = 'UNKNOWN'
+                    try:
+                        if hasattr(m, '_phase') and hasattr(m, 'MIDCOURSE_PHASE') and hasattr(m, 'TERMINAL_PHASE'):
+                            if m._phase == getattr(m, 'MIDCOURSE_PHASE'):
+                                guidance_mode = 'MID_COURSE'
+                            elif m._phase == getattr(m, 'TERMINAL_PHASE'):
+                                guidance_mode = 'TERMINAL'
+                            else:
+                                guidance_mode = 'BOOST'
+                        elif hasattr(m, 'guidance_mode'):
+                            guidance_mode = str(getattr(m, 'guidance_mode'))
+                    except Exception:
+                        guidance_mode = 'UNKNOWN'
+                    self.log_missile_status(current_time, mid, launcher_id, target_id, pos, speed, distance_to_target, guidance_mode)
+                except Exception:
+                    continue
+        except Exception as e:
+            logging.debug(f"数据记录失败: {e}")
     
     def log_trajectory(self, time: float, agent_id: str, position: tuple, velocity: tuple, 
                       heading: float, pitch: float, roll: float):
