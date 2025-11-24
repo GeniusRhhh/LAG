@@ -30,38 +30,9 @@ class MultipleCombatEnv(BaseEnv):
         self._create_records = False  # 是否创建记录，默认为 False
         self.renderer = TacviewRenderer(filepath=None)  # 初始化 Tacview 渲染器，用于可视化仿真
 
-        # 定义战术控制距离（单位：米），用于空战中的探测、交战和导弹发射等决策
-        self.tactical_distances = {
-            "detection_range": 80000,  # 80km探测距离
-            "engagement_range": 60000,  # 60km交战距离
-            "launch_range": 40000,  # 40km发射距离
-            "mar_range": 20000,  # 20km最小规避距离
-            "wez_range": 32000,  # 32km武器交战区
-            "rmax": 60000,  # 60km导弹最大射程
-            "rmin": 5000  # 3km导弹最小射程
-        }
-
-        # 初始化任务时间线，用于跟踪任务中的关键时间点
-        self.mission_timeline = {
-            "mission_start": 0,  # 任务开始时间
-            "contact_time": None,  # 探测到敌方时间
-            "engagement_time": None,  # 进入交战状态时间
-            "launch_time": None,  # 导弹发射时间
-            "impact_time": None,  # 导弹命中时间
-            "mission_end": None  # 任务结束时间
-        }
-
-        # 初始化战术态势评估，记录威胁等级、交战几何、能量状态和信息质量
-        self.tactical_situation = {
-            "threat_level": "LOW",  # 威胁等级：低（LOW）、中（MEDIUM）、高（HIGH）、危急（CRITICAL）
-            "engagement_geometry": "NEUTRAL",  # 交战几何：进攻（OFFENSIVE）、防御（DEFENSIVE）、中立（NEUTRAL）
-            "energy_state": "BALANCED",  # 能量状态：优势（ADVANTAGE）、平衡（BALANCED）、劣势（DISADVANTAGE）
-            "information_quality": "GOOD"  # 信息质量：良好（GOOD）、降级（DEGRADED）、较差（POOR）
-        }
-
         # 记录初始化日志，包含交互步数和时间间隔
         logging.info(f"Initialized MultipleCombatEnv with agent_interaction_steps={self.agent_interaction_steps}, "
-                     f"time_interval={self.time_interval}, tactical_distances={self.tactical_distances}")
+                     f"time_interval={self.time_interval}")
 
     @property
     def share_observation_space(self) -> spaces.Space:
@@ -90,22 +61,7 @@ class MultipleCombatEnv(BaseEnv):
             logging.error(f"Unknown task name: {taskname}")  # 记录错误日志
             raise NotImplementedError(f"Unknown taskname: {taskname}")  # 抛出未实现异常
 
-        # 将 tactical_distances 传递给任务对象
-        if hasattr(self, 'tactical_distances'):
-            self.task.tactical_distances = self.tactical_distances
-        else:
-            # 如果未定义 tactical_distances，使用默认值
-            logging.warning("tactical_distances not found, using default values")
-            self.task.tactical_distances = {
-                "detection_range": 80000,  # 80km探测距离（66km应该能探测）
-                "engagement_range": 60000,  # 60km交战距离（66km暂时不交战，需要机动接近）
-                "launch_range": 40000,  # 40km发射距离
-                "mar_range": 20000,  # 20km最小规避距离
-                "wez_range": 32000,  # 32km武器交战区
-                "rmax": 60000,  # 60km导弹最大射程
-                "rmin": 5000  # 3km导弹最小射程
-            }
-        logging.info(f"Loaded task: {taskname} with tactical distance configuration")
+        logging.info(f"Loaded task: {taskname}")
 
     def load_simulator(self):
         """加载并初始化飞机模拟器，设置编队和敌我关系。"""
@@ -189,24 +145,6 @@ class MultipleCombatEnv(BaseEnv):
         self.current_step = 0  # 重置当前步数
         self.agent_interaction_steps = 12  # 设置智能体交互步数
 
-        # 重置任务时间线
-        self.mission_timeline = {
-            "mission_start": 0,
-            "contact_time": None,
-            "engagement_time": None,
-            "launch_time": None,
-            "impact_time": None,
-            "mission_end": None
-        }
-
-        # 重置战术态势
-        self.tactical_situation = {
-            "threat_level": "LOW",
-            "engagement_geometry": "NEUTRAL",
-            "energy_state": "BALANCED",
-            "information_quality": "GOOD"
-        }
-
         self.reset_simulators()  # 重置所有模拟器
         self.task.reset(self)  # 重置任务状态
         obs = self.get_obs()  # 获取观测值
@@ -232,6 +170,8 @@ class MultipleCombatEnv(BaseEnv):
         self._tempsims.clear()  # 清空临时模拟器（如导弹）
         if hasattr(self, '_finished_missiles'):
             self._finished_missiles.clear()  # 清空已结束的导弹
+        if hasattr(self, '_missiles_pending_cleanup'):
+            self._missiles_pending_cleanup.clear()  # 清空待清理导弹列表
         logging.info("All simulators reset")
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
@@ -258,10 +198,6 @@ class MultipleCombatEnv(BaseEnv):
             elif action.ndim != 3 or action.shape[1] != self.num_agents:
                 raise ValueError(
                     f"Invalid action shape {action.shape}, expected (n_rollout_threads, {self.num_agents}, {self.action_space.shape[0]})")
-
-        # 更新任务时间线和战术态势
-        self._update_mission_timeline()
-        self._update_tactical_situation()
 
         action_dict = self._unpack(action)  # 将动作数组解包为字典
         last_positions = {aid: self._jsbsims[aid].get_position() for aid in self._jsbsims}  # 保存当前位置
@@ -296,6 +232,48 @@ class MultipleCombatEnv(BaseEnv):
             for sim in self._tempsims.values():
                 sim.run()  # 运行临时模拟器（如导弹）
 
+        # === 导弹清理逻辑 ===
+        # 标记已完成的导弹，但延迟一帧清理以确保爆炸效果正确渲染
+        if not hasattr(self, '_missiles_pending_cleanup'):
+            self._missiles_pending_cleanup = {}
+        
+        # 检查新完成的导弹
+        for uid, sim in self._tempsims.items():
+            if hasattr(sim, 'is_done') and sim.is_done:
+                if uid not in self._missiles_pending_cleanup:
+                    # 标记为待清理，记录完成帧
+                    self._missiles_pending_cleanup[uid] = self.current_step
+                    logging.debug(f"Missile {uid} completed at step {self.current_step}, marked for delayed cleanup")
+        
+        # 清理已完成且延迟足够的导弹（延迟2帧确保爆炸效果渲染）
+        missiles_to_remove = []
+        for uid, completion_step in list(self._missiles_pending_cleanup.items()):
+            if self.current_step >= completion_step + 2:  # 延迟2帧
+                if uid in self._tempsims:  # 确保导弹还在
+                    missiles_to_remove.append(uid)
+                    logging.debug(f"Cleaning up missile {uid} (completed at step {completion_step}, current {self.current_step})")
+                # 从待清理列表中移除
+                del self._missiles_pending_cleanup[uid]
+        
+        # 移除延迟清理的导弹
+        for uid in missiles_to_remove:
+            removed_sim = self._tempsims.pop(uid, None)
+            if removed_sim:
+                logging.info(f"🚀 Removed completed missile: {uid} (delayed cleanup after explosion)")
+                # 从发射平台的导弹列表中移除
+                if hasattr(removed_sim, 'parent_aircraft') and removed_sim.parent_aircraft:
+                    if hasattr(removed_sim.parent_aircraft, 'launch_missiles'):
+                        if removed_sim in removed_sim.parent_aircraft.launch_missiles:
+                            removed_sim.parent_aircraft.launch_missiles.remove(removed_sim)
+                # 从目标的威胁导弹列表中移除
+                if hasattr(removed_sim, 'target_aircraft') and removed_sim.target_aircraft:
+                    if hasattr(removed_sim.target_aircraft, 'under_missiles'):
+                        if removed_sim in removed_sim.target_aircraft.under_missiles:
+                            removed_sim.target_aircraft.under_missiles.remove(removed_sim)
+        
+        if missiles_to_remove:
+            logging.info(f"Cleaned {len(missiles_to_remove)} completed missiles from _tempsims")
+
         # 检查位置跳跃（防止仿真错误）
         for agent_id in self._jsbsims:
             pos = self._jsbsims[agent_id].get_position()
@@ -316,8 +294,6 @@ class MultipleCombatEnv(BaseEnv):
         info["bloods"] = {agent_id: self._jsbsims[agent_id].bloods for agent_id in self._jsbsims.keys()}  # 飞机生命值
         info["missiles"] = {uid: {"active": sim.is_alive, "success": sim.is_success}
                             for uid, sim in self._tempsims.items()}  # 导弹状态
-        info["mission_timeline"] = self.mission_timeline.copy()  # 任务时间线
-        info["tactical_situation"] = self.tactical_situation.copy()  # 战术态势
 
         agent_ids = list(self._jsbsims.keys())  # 获取所有智能体 ID
         # 将 infos 转换为索引格式：{0: {...}, 1: {...}, ...}
@@ -329,9 +305,7 @@ class MultipleCombatEnv(BaseEnv):
         indexed_infos.update({
             "bloods": {agent_id: self._jsbsims[agent_id].bloods for agent_id in self._jsbsims.keys()},
             "missiles": {uid: {"active": sim.is_alive, "success": sim.is_success}
-                         for uid, sim in self._tempsims.items()},
-            "mission_timeline": self.mission_timeline.copy(),
-            "tactical_situation": self.tactical_situation.copy()
+                         for uid, sim in self._tempsims.items()}
         })
         # 添加调试日志
         logging.debug(f"After task.step, agents: {list(self._jsbsims.keys())}")
@@ -347,121 +321,15 @@ class MultipleCombatEnv(BaseEnv):
         )
 
     # 加强时间线管理
-    def _update_mission_timeline(self):
-        """更新任务时间线，动态基于当前存在的智能体"""
-        current_time = self.current_step * self.time_interval
-        min_distance = float('inf')
-
-        # 动态获取红蓝方智能体
-        red_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('A')]
-        blue_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('B')]
-        logging.debug(f"Updating timeline with agents: red={red_agents}, blue={blue_agents}")
-
-        # 计算红蓝方之间的最小距离
-        for red_id in red_agents:
-            for blue_id in blue_agents:
-                if (red_id in self._jsbsims and blue_id in self._jsbsims and
-                        self._jsbsims[red_id].is_alive and self._jsbsims[blue_id].is_alive):
-                    dist = np.linalg.norm(
-                        self._jsbsims[red_id].get_position() - self._jsbsims[blue_id].get_position()
-                    )
-                    min_distance = min(min_distance, dist)
-
-        # 更新时间线逻辑保持不变
-        timeline_updates = []
-        if min_distance <= self.tactical_distances["detection_range"] and self.mission_timeline["contact_time"] is None:
-            self.mission_timeline["contact_time"] = current_time
-            timeline_updates.append(f"CONTACT at {current_time:.1f}s, distance={min_distance:.0f}m")
-        if min_distance <= self.tactical_distances["engagement_range"] and self.mission_timeline[
-            "engagement_time"] is None:
-            self.mission_timeline["engagement_time"] = current_time
-            timeline_updates.append(f"ENGAGEMENT at {current_time:.1f}s, distance={min_distance:.0f}m")
-        if min_distance <= self.tactical_distances["launch_range"] and self.mission_timeline["launch_time"] is None:
-            self.mission_timeline["launch_time"] = current_time
-            timeline_updates.append(f"LAUNCH_WINDOW at {current_time:.1f}s, distance={min_distance:.0f}m")
-
-        any_missile_launched = any(agent.launch_missiles for agent in self._jsbsims.values() if agent.is_alive)
-        if any_missile_launched and "first_missile_launch" not in self.mission_timeline:
-            self.mission_timeline["first_missile_launch"] = current_time
-            timeline_updates.append(f"FIRST_MISSILE_LAUNCH at {current_time:.1f}s")
-
-        if min_distance <= self.tactical_distances["mar_range"] and "mar_entry" not in self.mission_timeline:
-            self.mission_timeline["mar_entry"] = current_time
-            timeline_updates.append(f"MAR_ENTRY at {current_time:.1f}s, distance={min_distance:.0f}m")
-
-        red_alive = sum(1 for aid in red_agents if self._jsbsims[aid].is_alive)
-        blue_alive = sum(1 for aid in blue_agents if self._jsbsims[aid].is_alive)
-        if (red_alive == 0 or blue_alive == 0) and self.mission_timeline["mission_end"] is None:
-            self.mission_timeline["mission_end"] = current_time
-            winner = "RED" if blue_alive == 0 else "BLUE"
-            timeline_updates.append(f"MISSION_END at {current_time:.1f}s, WINNER: {winner}")
-
-        for update in timeline_updates:
-            logging.info(f"Timeline Update: {update}")
-
-        if hasattr(self.task, 'mission_timeline'):
-            self.task.mission_timeline = self.mission_timeline.copy()
-
     def get_timeline_summary(self):
-        """获取时间线总结报告"""
-        summary = {
-            "mission_duration": self.mission_timeline.get("mission_end", self.current_step * self.time_interval),
-            "contact_delay": self.mission_timeline.get("contact_time", 0),
+        """获取时间线总结报告（保留空方法避免外部调用错误）"""
+        return {
+            "mission_duration": self.current_step * self.time_interval,
+            "contact_delay": 0,
             "engagement_duration": None,
             "launch_window_duration": None,
             "terminal_phase_duration": None
         }
-
-        # 计算各阶段持续时间
-        if self.mission_timeline.get("contact_time") and self.mission_timeline.get("engagement_time"):
-            summary["engagement_duration"] = self.mission_timeline["engagement_time"] - self.mission_timeline[
-                "contact_time"]
-
-        if self.mission_timeline.get("engagement_time") and self.mission_timeline.get("launch_time"):
-            summary["launch_window_duration"] = self.mission_timeline["launch_time"] - self.mission_timeline[
-                "engagement_time"]
-
-        return summary
-
-    def _update_tactical_situation(self):
-        """更新战术态势，动态基于当前存在的智能体"""
-        min_distance = float('inf')
-        missile_threats = 0
-
-        # 动态获取红蓝方智能体
-        red_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('A')]
-        blue_agents = [aid for aid in self._jsbsims.keys() if aid.startswith('B')]
-        logging.debug(f"Updating situation with agents: red={red_agents}, blue={blue_agents}")
-
-        # 计算威胁和最小距离
-        for agent_id, agent in self._jsbsims.items():
-            if agent.is_alive:
-                if agent.check_missile_warning():
-                    missile_threats += 1
-                for enemy in agent.enemies:
-                    if enemy.is_alive:
-                        dist = np.linalg.norm(agent.get_position() - enemy.get_position())
-                        min_distance = min(min_distance, dist)
-
-        # 更新威胁等级
-        if missile_threats > 0 or min_distance < self.tactical_distances["mar_range"]:
-            self.tactical_situation["threat_level"] = "CRITICAL"
-        elif min_distance < self.tactical_distances["wez_range"]:
-            self.tactical_situation["threat_level"] = "HIGH"
-        elif min_distance < self.tactical_distances["launch_range"]:
-            self.tactical_situation["threat_level"] = "MEDIUM"
-        else:
-            self.tactical_situation["threat_level"] = "LOW"
-
-        # 更新交战几何
-        red_alive = sum(1 for aid in red_agents if self._jsbsims[aid].is_alive)
-        blue_alive = sum(1 for aid in blue_agents if self._jsbsims[aid].is_alive)
-        if red_alive > blue_alive:
-            self.tactical_situation["engagement_geometry"] = "OFFENSIVE"
-        elif red_alive < blue_alive:
-            self.tactical_situation["engagement_geometry"] = "DEFENSIVE"
-        else:
-            self.tactical_situation["engagement_geometry"] = "NEUTRAL"
 
     def add_temp_simulator(self, simulator: BaseSimulator):
         """添加临时模拟器（如导弹）。
@@ -471,30 +339,6 @@ class MultipleCombatEnv(BaseEnv):
         """
         self._tempsims[simulator.uid] = simulator
         logging.info(f"Added temporary simulator: {simulator.uid}")
-
-    def get_tactical_distances(self) -> Dict[str, float]:
-        """获取战术距离配置。
-
-        Returns:
-            Dict[str, float]: 战术距离字典的副本
-        """
-        return self.tactical_distances.copy()
-
-    def get_mission_timeline(self) -> Dict[str, Any]:
-        """获取任务时间线。
-
-        Returns:
-            Dict[str, Any]: 任务时间线字典的副本
-        """
-        return self.mission_timeline.copy()
-
-    def get_tactical_situation(self) -> Dict[str, str]:
-        """获取当前战术态势。
-
-        Returns:
-            Dict[str, str]: 战术态势字典的副本
-        """
-        return self.tactical_situation.copy()
 
     def render(self, mode="txt", filepath=None, tacview=None):
         """渲染当前环境状态。

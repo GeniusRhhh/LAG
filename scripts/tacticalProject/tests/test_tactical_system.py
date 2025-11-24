@@ -2,7 +2,7 @@
 战术决策系统测试
 """
 import numpy as np
-from core import ThreatCalculator, TacticSelector, TacticalDecisionManager
+from core import ThreatEvaluator, TacticSelector, TacticalDecisionManager
 from intent import OurIntentSystem, EnemyIntentRecognizer
 from situation import SituationEvaluator
 
@@ -13,7 +13,7 @@ def test_threat_calculator():
     print("测试威胁值计算")
     print("=" * 50)
     
-    calc = ThreatCalculator()
+    calc = ThreatEvaluator()
     
     # 我机状态
     my_state = {

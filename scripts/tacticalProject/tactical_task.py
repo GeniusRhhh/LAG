@@ -115,7 +115,11 @@ class TacticalTask(MultipleCombatTask):
         self.termination_conditions = [TacticalTermination(self.config)]
 
         # 🎯 强制战术选择配置
-        self.force_tactic = force_tactic
+        # 处理字符串 'None' 转换为 Python 对象 None
+        if force_tactic == 'None':
+            self.force_tactic = None
+        else:
+            self.force_tactic = force_tactic
         
         # ===== 初始化模块化组件 =====
         # 1. 状态管理器
@@ -288,7 +292,13 @@ class TacticalTask(MultipleCombatTask):
         self.missile_manager.reset()
         
         # 重置其他状态
-        self.selected_tactic = None
+        # 🎯 保留强制战术设置，不被重置覆盖
+        if not self.force_tactic:
+            self.selected_tactic = None
+        else:
+            # 强制战术模式下，保持强制战术不变
+            logging.info(f"🎯 重置时保持强制战术: {self.force_tactic}")
+            self.selected_tactic = self.force_tactic
         self.tactic_roles = {}
         self.decision_made = {'NLT': False, 'MELD': False, 'MTR': False}
         self.formation_established = False
@@ -507,7 +517,7 @@ class TacticalTask(MultipleCombatTask):
             
         if should_select_tactic:
             # 🎯 优先检查force_tactic参数（来自run_simulation.py）
-            if self.force_tactic and self.force_tactic in ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'FRONT_BACK', 'TACTICAL_TURN']:
+            if self.force_tactic and self.force_tactic in ['DRAG_SHOOT', 'PINCER_ATTACK', 'HIGH_LOW_ATTACK', 'FRONT_BACK', 'SIDE_BY_SIDE']:
                 logging.info(f"🎯 强制选择战术: {self.force_tactic}")
                 self.selected_tactic = self.force_tactic
                 # 设置默认角色
@@ -694,11 +704,19 @@ class TacticalTask(MultipleCombatTask):
             
             if decision.get('tactic'):
                 new_tactic = decision['tactic']
+
+                # 🎯 检查是否有强制战术设置，防御战术除外
+                if self.force_tactic and new_tactic not in ['TACTICAL_EVASION', 'TACTICAL_TURN']:
+                    logging.info(f"🎯 节点决策尝试切换到{new_tactic}，但强制战术{self.force_tactic}优先级更高，忽略切换")
+                    return  # 忽略非防御战术的切换
+
                 # 若切换到防御类战术，记录之前的战术用于TTL后恢复
                 if new_tactic in ['TACTICAL_EVASION', 'TACTICAL_TURN']:
                     if getattr(self, '_defense_prev_tactic', None) is None:
-                        self._defense_prev_tactic = self.selected_tactic
+                        # 如果有强制战术，备份强制战术而不是当前战术
+                        self._defense_prev_tactic = self.force_tactic if self.force_tactic else self.selected_tactic
                     self.selected_tactic = new_tactic
+                    logging.info(f"🛡️ 切换到防御战术{new_tactic}，备份战术: {self._defense_prev_tactic}")
                 else:
                     self.selected_tactic = new_tactic
                     # 切回普通战术后清理备份

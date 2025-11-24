@@ -57,7 +57,7 @@ class EnemyAIAdapter:
     
     # ==================== 主要接口函数 ====================
     
-    def get_enemy_command_indices(self, env, agent_id: str, current_time: float = None) -> Tuple[int, int, int]:
+    def get_enemy_command_indices(self, env, agent_id: str, current_time: float = None, task=None) -> Tuple[int, int, int]:
         """
         获取敌方战术指令索引 - 主要接口函数
         兼容现有战术任务的调用方式
@@ -66,6 +66,7 @@ class EnemyAIAdapter:
             env: 环境对象
             agent_id: 智能体ID
             current_time: 当前时间（可选）
+            task: 战术任务对象（可选，用于获取飞机专用参数）
             
         Returns:
             Tuple[int, int, int]: (高度指令, 航向指令, 速度指令)
@@ -75,8 +76,8 @@ class EnemyAIAdapter:
             if current_time is None:
                 current_time = getattr(env, 'current_step', 0) * getattr(env, 'time_interval', 0.2)
             
-            # 调用统一AI系统
-            return self.unified_ai.get_enemy_command(env, agent_id, current_time)
+            # 调用统一AI系统，传递task参数
+            return self.unified_ai.get_enemy_command(env, agent_id, current_time, task)
             
         except Exception as e:
             logging.error(f"敌方AI适配器指令生成失败 {agent_id}: {e}")

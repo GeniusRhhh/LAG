@@ -1296,8 +1296,15 @@ class HierarchicalMultipleCombatShootTask(HierarchicalMultipleCombatTask):
                     logging.info(
                         f"Agent {agent_id} FORCED missile launch at distance={distance:.0f}m, angle={attack_angle:.1f}deg")
                 if shoot_flag:
+                    # 生成唯一导弹ID避免复用问题 - 使用原始数字格式
+                    missile_counter = getattr(self, '_missile_counter', {})
+                    if agent_id not in missile_counter:
+                        missile_counter[agent_id] = 0
+                    missile_counter[agent_id] += 1
+                    self._missile_counter = missile_counter
+                    new_missile_uid = f"{agent_id}{missile_counter[agent_id]:02d}"
+                    
                     # 创建导弹
-                    new_missile_uid = f"{agent_id}{self._remaining_missiles[agent_id]}"
                     missile = MissileSimulator.create(
                         parent=agent,
                         target=target,

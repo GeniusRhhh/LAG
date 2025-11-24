@@ -11,6 +11,47 @@ from core.target_assignment import get_target_with_fallback
 from formation_reset_manager import FormationResetManager
 from nodes.mtr_prime_node import MTRPrimeNode
 
+def log_phase_transition(agent_id, old_phase, new_phase, current_time, distance=None, altitude=None):
+    """记录战术阶段切换的详细信息"""
+    try:
+        transition_info = f"📍 [阶段切换] {agent_id}: {old_phase} → {new_phase} (时间: {current_time:.1f}s)"
+        if distance is not None:
+            transition_info += f" | 距离: {distance:.1f}km"
+        if altitude is not None:
+            transition_info += f" | 高度: {altitude:.0f}m"
+        logging.info(transition_info)
+    except Exception as e:
+        logging.error(f"阶段切换日志记录失败: {e}")
+
+def log_maneuver_execution(agent_id, maneuver_type, current_heading, target_heading, current_time, additional_info=""):
+    """记录机动执行的详细信息"""
+    try:
+        maneuver_info = f"🛩️ [机动执行] {agent_id}: {maneuver_type} | {current_heading:.1f}° → {target_heading:.1f}° (时间: {current_time:.1f}s)"
+        if additional_info:
+            maneuver_info += f" | {additional_info}"
+        logging.info(maneuver_info)
+    except Exception as e:
+        logging.error(f"机动执行日志记录失败: {e}")
+
+def log_missile_launch_check(agent_id, distance_ok, heading_ok, distance_val, heading_val, current_time):
+    """记录导弹发射条件检查的详细结果"""
+    try:
+        status = "✅ 满足" if (distance_ok and heading_ok) else "❌ 不满足"
+        distance_status = "✅" if distance_ok else "❌"
+        heading_status = "✅" if heading_ok else "❌"
+
+        logging.info(f"🎯 [发射条件检查] {agent_id} {status} (时间: {current_time:.1f}s)")
+        logging.info(f"    距离: {distance_status} {distance_val:.1f}km | 朝向: {heading_status} {heading_val:.1f}°")
+    except Exception as e:
+        logging.error(f"导弹发射条件日志记录失败: {e}")
+
+def log_enemy_behavior(agent_id, behavior_type, details, current_time):
+    """记录敌方行为"""
+    try:
+        logging.info(f"🔴 [敌方行为] {agent_id}: {behavior_type} | {details} (时间: {current_time:.1f}s)")
+    except Exception as e:
+        logging.error(f"敌方行为日志记录失败: {e}")
+
 
 class TacticalExecutor:
     """战术执行器 - 负责执行各种战术"""
@@ -307,17 +348,18 @@ class TacticalExecutor:
                 if last_launch > 0 and (current_time - last_launch) > 15.0:
                     return self.task._execute_short_skate_precise(env, agent_id, current_time, skate_direction)
                 else:
-                    return 7, 8, 3
+                    # 制导保护期间，继续保持350°航向（右分离姿态）
+                    return self.task._maintain_heading_precise(env, agent_id, 350.0)
             elif wingman_phase.value == 'DOR_DR':
-                # DOR_DR阶段：钳形夹击收拢，僚机从右侧向内侧（西向270°）收拢
+                # DOR_DR阶段：钳形夹击收拢，僚机从右侧向内收拢到西向（270°）
                 if env.current_step % 60 == 0:
-                    logging.info(f"[PINCER_ATTACK-僚机DOR_DR] {agent_id} 从右侧向内收拢270°")
-                return self.task._maintain_heading_precise(env, agent_id, 270.0)
+                    logging.info(f"[PINCER_ATTACK-僚机DOR_DR] {agent_id} 执行右侧Crank机动+向西内收拢")
+                return self.task._execute_tactical_crank(env, agent_id, direction='right', climb=False)
             elif wingman_phase.value == 'DR_MAR':
-                # DR_MAR阶段：继续保持收拢姿态，不重置航向
+                # DR_MAR阶段：继续右侧Crank机动，逐渐向西内收拢
                 if env.current_step % 60 == 0:
-                    logging.info(f"[PINCER_ATTACK-僚机DR_MAR] {agent_id} 保持收拢姿态270°")
-                return self.task._maintain_heading_precise(env, agent_id, 270.0)
+                    logging.info(f"[PINCER_ATTACK-僚机DR_MAR] {agent_id} 继续右侧Crank机动+向西收拢")
+                return self.task._execute_tactical_crank(env, agent_id, direction='right', climb=False)
             elif wingman_phase.value == 'BEYOND_MAR':
                 # 超越Mar阶段：执行Short Skate机动返航180°
                 if env.current_step % 60 == 0:
@@ -371,45 +413,123 @@ class TacticalExecutor:
         state = self.evasion_states.get(agent_id)
         if state and (current_time - state['start'] >= state['ttl']):
             self.evasion_states.pop(agent_id, None)
-            if getattr(self.task, '_defense_prev_tactic', None):
+            # 🎯 恢复战术：优先恢复强制战术，其次恢复备份战术
+            if hasattr(self.task, 'force_tactic') and self.task.force_tactic:
+                # 有强制战术，直接恢复到强制战术
+                self.task.selected_tactic = self.task.force_tactic
+                logging.info(f"✅ {agent_id} 战术规避完成")
+                logging.info(f"🔄 {agent_id} 恢复到强制战术: {self.task.force_tactic}")
+            elif getattr(self.task, '_defense_prev_tactic', None):
+                # 没有强制战术，恢复到备份战术
                 self.task.selected_tactic = self.task._defense_prev_tactic
+                logging.info(f"✅ {agent_id} 战术规避完成")
+                logging.info(f"🔄 {agent_id} 恢复到备份战术: {self.task._defense_prev_tactic}")
         return action
 
+    def _calculate_shortest_turn_to_north(self, current_heading: float) -> dict:
+        """
+        计算从当前航向到0°的最短路径
+
+        Args:
+            current_heading: 当前航向（0-360度）
+
+        Returns:
+            dict: {
+                'turn_direction': 'left'/'right'/'none',
+                'turn_angle': 转向角度（0-180度）,
+                'target_heading': 0.0
+            }
+        """
+        # 归一化航向到0-360度
+        current_heading = current_heading % 360.0
+        target_heading = 0.0
+
+        # 计算航向差
+        heading_diff = target_heading - current_heading
+
+        # 处理360度边界问题
+        if heading_diff > 180:
+            heading_diff -= 360
+        elif heading_diff < -180:
+            heading_diff += 360
+
+        # 判断转向方向和角度
+        if abs(heading_diff) <= 5.0:
+            return {
+                'turn_direction': 'none',
+                'turn_angle': 0.0,
+                'target_heading': 0.0
+            }
+        elif heading_diff > 0:
+            return {
+                'turn_direction': 'right',
+                'turn_angle': abs(heading_diff),
+                'target_heading': 0.0
+            }
+        else:
+            return {
+                'turn_direction': 'left',
+                'turn_angle': abs(heading_diff),
+                'target_heading': 0.0
+            }
+
     def execute_tactical_turn(self, env, agent_id: str) -> tuple:
-        """执行战术回转机动 - 两次180度转向，最终朝向敌方"""
+        """执行战术回转机动 - 智能航向计算，最短路径返回0°"""
         current_time = env.current_step * env.time_interval
         current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_deg)
-        
+
         # 初始化回转状态
         if agent_id not in self.turn_states:
+            # 计算最短转向路径
+            turn_info = self._calculate_shortest_turn_to_north(current_heading)
+
             self.turn_states[agent_id] = {
-                'start': current_time, 
-                'phase': 'first_turn',  # 第一次80度转向
+                'start': current_time,
+                'phase': 'turning_to_north',  # 智能转向到北向
                 'phase_start': current_time,
                 'initial_heading': current_heading,
-                'turn_type': 'standard'
+                'turn_type': 'standard',
+                'turn_direction': turn_info['turn_direction'],
+                'turn_angle': turn_info['turn_angle'],
+                'target_heading': 0.0
             }
             # 保存之前的战术
             if not hasattr(self.task, '_defense_prev_tactic'):
                 self.task._defense_prev_tactic = self.task.selected_tactic
-            
+
             # 检查是否是重新交战回转
             if hasattr(self.task.node_decision_maker, 'last_decision'):
                 last_decision = getattr(self.task.node_decision_maker, 'last_decision', {})
                 if last_decision.get('turn_type') == 'reengage_turn':
                     self.turn_states[agent_id]['turn_type'] = 'reengage_turn'
-                    logging.info(f"🔄 {agent_id} 开始重新交战回转（两次180度）")
-                else:
-                    logging.info(f"🔄 {agent_id} 开始标准战术回转")
-        
+
+            # 记录智能转向信息
+            turn_info = self.turn_states[agent_id]
+            if turn_info['turn_direction'] == 'none':
+                logging.info(f"🔄 {agent_id} 已朝向北方，无需转向")
+            else:
+                logging.info(f"🔄 {agent_id} 开始智能战术回转：{turn_info['initial_heading']:.1f}° → 0°")
+                logging.info(f"🔄 {agent_id} 转向方向：{turn_info['turn_direction']}，转向角度：{turn_info['turn_angle']:.1f}°")
+
         state = self.turn_states[agent_id]
         phase_time = current_time - state['phase_start']
         total_time = current_time - state['start']
         
-        # 第一阶段：第一次80度转向（12秒）- 增加时间确保完成180度转向
-        if state['phase'] == 'first_turn':
-            if phase_time < 12.0:
-                # 🛡️ 超强化高度保护检查（特别针对急转弯）
+        # 智能转向阶段：根据计算的最短路径转向到0°
+        if state['phase'] == 'turning_to_north':
+            # 检查是否已经到达目标航向
+            heading_diff = abs(current_heading - state['target_heading'])
+            if heading_diff > 180:
+                heading_diff = 360 - heading_diff
+
+            if heading_diff <= 5.0:
+                # 已到达目标航向，转向完成
+                state['phase'] = 'turn_complete'
+                state['phase_start'] = current_time
+                logging.info(f"✅ {agent_id} 智能转向完成：{state['initial_heading']:.1f}° → {current_heading:.1f}°")
+            else:
+                # 继续转向
+                # 🛡️ 高度保护检查
                 current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
                 if current_altitude < 2000:  # 危险高度：禁止TACTICAL_TURN，直接爬升
                     alt_cmd = 14  # 最大爬升+1500m
@@ -417,7 +537,7 @@ class TacticalExecutor:
                     vel_cmd = 2   # 减速以确保安全
                     if env.current_step % 30 == 0:
                         logging.error(f"🚨🚨 [{agent_id}] TACTICAL_TURN危险高度 {current_altitude:.0f}m < 2000m，禁止转弯，强制爬升")
-                    return alt_cmd, hdg_cmd, vel_cmd  # 🎯 修复：正确的参数顺序
+                    return alt_cmd, hdg_cmd, vel_cmd
                 elif current_altitude < 3000:  # 警告高度：限制转弯幅度
                     alt_cmd = 12  # 大幅爬升+500m
                     if self.should_log('tactical_turn_protection', current_time):
@@ -429,130 +549,74 @@ class TacticalExecutor:
                 else:
                     alt_cmd = 7  # 保持高度
 
-                # 执行急转弯实现80度转向 - 🎯 修复：正确的参数顺序(alt_cmd, hdg_cmd, vel_cmd)
-                if agent_id.endswith('100'):  # 长机左转
+                # 根据计算的转向方向执行转向
+                if state['turn_direction'] == 'left':
                     return alt_cmd, 0, 3  # 高度保护 + 急左转 + 保持速度
-                else:  # 僚机右转
+                elif state['turn_direction'] == 'right':
                     return alt_cmd, 16, 3  # 高度保护 + 急右转 + 保持速度
-            else:
-                # 第一次转向完成，进入间隔阶段
-                state['phase'] = 'hold_heading'
-                state['phase_start'] = current_time
-                logging.info(f"🔄 {agent_id} 第一次180度转向完成，保持航向5秒")
-        
-        # 间隔阶段：保持当前航向（5秒）- 增加稳定时间
-        elif state['phase'] == 'hold_heading':
-            if phase_time < 5.0:
-                # 强化高度保护检查（间隔阶段也要保护
-                current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
-                if current_altitude < 1000:
-                    alt_cmd = 10  # 大幅爬升
-                    if env.current_step % 30 == 0:
-                        logging.error(f"🚨🚨 [{agent_id}] TACTICAL_TURN间隔极危{current_altitude:.0f}m < 1000m")
-                elif current_altitude < 2000:
-                    alt_cmd = 9  # 爬升
-                    if env.current_step % 60 == 0:
-                        logging.warning(f"🚨 [{agent_id}] TACTICAL_TURN间隔危险高度: {current_altitude:.0f}m < 2000m")
-                elif current_altitude < 4000:
-                    alt_cmd = 8  # 轻微爬升
-                    if env.current_step % 60 == 0:
-                        logging.warning(f"🛡{agent_id}] TACTICAL_TURN间隔高度保护: {current_altitude:.0f}m < 4000m")
                 else:
-                    alt_cmd = 7  # 保持高度
-                
-                return alt_cmd, 7, 3  # 高度保护 + 直飞 + 保持速度
+                    # 无需转向，直接完成
+                    state['phase'] = 'turn_complete'
+                    state['phase_start'] = current_time
+                    logging.info(f"✅ {agent_id} 无需转向，已朝向北方")
+
+        # 转向完成阶段：保持0°航向并完成战术回转
+        elif state['phase'] == 'turn_complete':
+            # 精确保持0°航向
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            if current_altitude < 2000:  # 危险高度保护
+                alt_cmd = 9  # 爬升
+                if env.current_step % 60 == 0:
+                    logging.warning(f"🛡️ [{agent_id}] TACTICAL_TURN完成阶段高度保护: {current_altitude:.0f}m < 2000m")
             else:
-                # 间隔完成，进入第二次转向
-                state['phase'] = 'second_turn'
-                state['phase_start'] = current_time
-                logging.info(f"🔄 {agent_id} 间隔完成，开始第二次180度转向")
-        
-        # 第二阶段：第二次180度转向（12秒）- 充足时间完成回转
-        elif state['phase'] == 'second_turn':
-            if phase_time < 12.0:
-                # 强化高度保护检查（第二次转向更要小心）
-                current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
-                if current_altitude < 1000:  # 极危险：最强爬升
-                    alt_cmd = 10  # 大幅爬升
-                    if env.current_step % 30 == 0:
-                        logging.error(f"🚨🚨 [{agent_id}] TACTICAL_TURN第二次转向极危险: {current_altitude:.0f}m < 1000m")
-                elif current_altitude < 2000:  # 很危险：强力爬升
-                    alt_cmd = 9  # 爬升
-                    if env.current_step % 60 == 0:
-                        logging.warning(f"🚨 [{agent_id}] TACTICAL_TURN第二次转向危{current_altitude:.0f}m < 2000m")
-                elif current_altitude < 4000:  # 警告：普通爬�?
-                    alt_cmd = 8  # 轻微爬升
-                    if env.current_step % 60 == 0:
-                        logging.warning(f"🛡{agent_id}] TACTICAL_TURN第二次转向保�? {current_altitude:.0f}m < 4000m")
-                else:
-                    alt_cmd = 7  # 保持高度
-                
-                # 执行反向急转弯，回到初始方向 - 🎯 修复：正确的参数顺序
-                if agent_id.endswith('100'):  # 长机右转回到0度
-                    return alt_cmd, 16, 3  # 高度保护 + 急右转 + 保持速度
-                else:  # 僚机左转回到0度
-                    return alt_cmd, 0, 3  # 高度保护 + 急左转 + 保持速度
-            else:
-                # 第二次转向完成，进入航向调整阶段
-                state['phase'] = 'heading_adjust'
-                state['phase_start'] = current_time
-                logging.info(f"🔄 {agent_id} 第二次180度转向完成，调整航向到0度")
-        
-        # 第三阶段：精确调整航向至0度（6秒）- 确保精确到位
-        elif state['phase'] == 'heading_adjust':
-            if phase_time < 6.0:
-                # 最终调整阶段的高度保护
-                current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
-                if current_altitude < 1000:  # 极危险
-                    alt_cmd = 10  # 大幅爬升
-                    if env.current_step % 30 == 0:
-                        logging.error(f"🚨🚨 [{agent_id}] TACTICAL_TURN调整阶段极危险{current_altitude:.0f}m < 1000m")
-                elif current_altitude < 2000:  # 危险
-                    alt_cmd = 9   # 爬升
-                    if env.current_step % 60 == 0:
-                        logging.warning(f"🚨 [{agent_id}] TACTICAL_TURN调整阶段危险: {current_altitude:.0f}m < 2000m")
-                elif current_altitude < 3000:  # 警告
-                    alt_cmd = 8   # 轻微爬升
-                    if env.current_step % 60 == 0:
-                        logging.warning(f"🛡️ [{agent_id}] TACTICAL_TURN调整阶段保护: {current_altitude:.0f}m < 3000m")
-                else:
-                    alt_cmd = 7   # 保持高度
-                
-                # 精确调整�?度航向（修正目标航向�?
-                target_heading = 0.0  # 明确目标航向为北向（0�?360度）
-                heading_diff = (target_heading - current_heading + 360) % 360
-                if heading_diff > 180:
-                    heading_diff -= 360
-                
-                if abs(heading_diff) < 5:
-                    return alt_cmd, 8, 3  # 高度保护 + 直飞 + 保持速度
-                elif heading_diff > 0:
-                    return alt_cmd, 10, 3  # 高度保护 + 轻微右转 + 保持速度
-                else:
-                    return alt_cmd, 6, 3  # 高度保护 + 轻微左转 + 保持速度
-            else:
-                # 战术回转完全完成
-                turn_type = state.get('turn_type', 'standard')
-                self.turn_states.pop(agent_id, None)
-                
-                if turn_type == 'reengage_turn':
-                    # 重新交战回转完成，切换到攻击战术
-                    logging.info(f"✅{agent_id} 重新交战回转完成，开始二次进攻")
-                    if hasattr(self.task.node_decision_maker, 'last_decision'):
-                        last_decision = getattr(self.task.node_decision_maker, 'last_decision', {})
-                        second_attack_tactic = last_decision.get('second_attack_tactic', 'PINCER_ATTACK')
+                alt_cmd = 7  # 保持高度
+
+            # 精确航向控制到0°
+            target_heading = 0.0
+            heading_diff = (target_heading - current_heading + 360) % 360
+            if heading_diff > 180:
+                heading_diff -= 360
+
+            if abs(heading_diff) < 3:
+                # 航向精确，检查是否完成战术回转
+                if phase_time > 3.0:  # 保持3秒确保稳定
+                    # 战术回转完全完成
+                    turn_type = state.get('turn_type', 'standard')
+                    self.turn_states.pop(agent_id, None)
+
+                    if turn_type == 'reengage_turn':
+                        # 重新交战回转完成，切换到攻击战术
+                        logging.info(f"✅ {agent_id} 重新交战回转完成，开始二次进攻")
+
+                        # 🎯 选择二次进攻战术：优先使用强制战术
+                        if self.task.force_tactic:
+                            # 有强制战术，直接使用强制战术
+                            second_attack_tactic = self.task.force_tactic
+                            logging.info(f"🎯 {agent_id} 智能回转完成，恢复强制战术: {second_attack_tactic}")
+                        else:
+                            # 没有强制战术，智能选择二次进攻战术
+                            if hasattr(self.task.node_decision_maker, 'last_decision'):
+                                last_decision = getattr(self.task.node_decision_maker, 'last_decision', {})
+                                second_attack_tactic = last_decision.get('second_attack_tactic', 'PINCER_ATTACK')
+                            else:
+                                second_attack_tactic = 'PINCER_ATTACK'  # 默认战术
+                            logging.info(f"🎯 {agent_id} 智能回转完成，开始二次进攻战术: {second_attack_tactic}")
+
                         self.task.selected_tactic = second_attack_tactic
                         self.task.is_second_attack = True
-                        logging.info(f"🎯 {agent_id} 切换到二次进攻战术 {second_attack_tactic}")
                     else:
-                        self.task.selected_tactic = 'PINCER_ATTACK'  # 默认战术
-                else:
-                    # 标准战术回转完成，恢复之前战术
-                    if getattr(self.task, '_defense_prev_tactic', None):
-                        self.task.selected_tactic = self.task._defense_prev_tactic
-                        logging.info(f"✅{agent_id} 标准战术回转完成，恢复战术 {self.task.selected_tactic}")
-                        
-        return 8, 7, 3  # 默认直飞（修正索引=直飞�?
+                        # 标准战术回转完成，恢复之前战术
+                        if getattr(self.task, '_defense_prev_tactic', None):
+                            self.task.selected_tactic = self.task._defense_prev_tactic
+                            logging.info(f"✅ {agent_id} 标准战术回转完成，恢复战术 {self.task.selected_tactic}")
+
+                return alt_cmd, 8, 3  # 高度保护 + 直飞 + 保持速度
+            elif heading_diff > 0:
+                return alt_cmd, 10, 3  # 高度保护 + 轻微右转 + 保持速度
+            else:
+                return alt_cmd, 6, 3  # 高度保护 + 轻微左转 + 保持速度
+
+        return 7, 8, 3  # 默认直飞
     
     def _heading_to_attack_wp_or_default(self, env, agent_id: str, default_heading: float) -> float:
         try:

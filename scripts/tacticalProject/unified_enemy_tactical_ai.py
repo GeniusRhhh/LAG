@@ -189,10 +189,65 @@ class UnifiedEnemyTacticalAI:
         self.mode_switch_cooldown = {}   # 模式切换冷却时间
         self.last_mode_switch = {}       # 上次模式切换时间
         
+        # 🛩️ 飞机型号相关参数
+        self.aircraft_parameters = {
+            "f16": {
+                "min_altitude": 2500,      # F-16最低高度
+                "max_altitude": 15000,     # F-16最高高度
+                "min_speed": 120,          # F-16最低速度
+                "max_speed": 400,          # F-16最高速度
+                "turn_rate": 8.0,          # F-16转弯率
+                "climb_rate": 50.0         # F-16爬升率
+            },
+            "su27sk": {
+                "min_altitude": 3000,      # SU-27最低高度（更高）
+                "max_altitude": 18000,     # SU-27最高高度
+                "min_speed": 140,          # SU-27最低速度（更高）
+                "max_speed": 500,          # SU-27最高速度
+                "turn_rate": 6.5,          # SU-27转弯率（较低）
+                "climb_rate": 60.0         # SU-27爬升率
+            }
+        }
+        
+        # ✈️ 添加工作的SU-27控制函数索引数组（从pure_maneuver_task移植）
+        self.norm_delta_altitude = np.array([-1.5, -1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5])
+        self.norm_delta_heading = np.array([-1.0, -0.75, -0.5, -0.25, -0.125, -0.0625, 0.0, 0.0625, 0.125, 0.25, 0.5, 0.75, 1.0])
+        self.norm_delta_velocity = np.array([-1.0, -0.75, -0.5, -0.25, -0.125, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0])
+        
+        # 为SU-27优化的控制数值（和pure_maneuver_task保持一致）
+        self._inner_rnn_states = {}  # RNN状态缓存
+        
         # 动作权重配置
         self._init_action_weights()
         
         logging.info("🎯 统一敌方战术AI系统初始化完成")
+    
+    def _detect_aircraft_model(self, env, agent_id: str) -> str:
+        """检测飞机型号"""
+        try:
+            if hasattr(env, 'agents') and agent_id in env.agents:
+                agent = env.agents[agent_id]
+                # 尝试从agent获取模型信息
+                if hasattr(agent, 'model_name'):
+                    return agent.model_name
+                elif hasattr(agent, 'config') and hasattr(agent.config, 'model'):
+                    return agent.config.model
+            
+            # 从环境配置中获取
+            if hasattr(env, 'config') and hasattr(env.config, 'aircraft_configs'):
+                if agent_id in env.config.aircraft_configs:
+                    model_type = env.config.aircraft_configs[agent_id].get('model', 'f16')
+                    return model_type
+            
+            return "f16"  # 默认F-16
+        except Exception as e:
+            logging.warning(f"检测飞机型号失败: {e}，使用默认F-16")
+            return "f16"
+    
+    def _get_aircraft_parameters(self, env, agent_id: str) -> Dict:
+        """获取飞机特定参数"""
+        model_type = self._detect_aircraft_model(env, agent_id)
+        return self.aircraft_parameters.get(model_type, self.aircraft_parameters["f16"])
 
     def handle_missile_launch(self, env, agent_id: str, current_time: float):
         """处理敌方导弹发射逻辑"""
@@ -318,10 +373,13 @@ class UnifiedEnemyTacticalAI:
 
             aircraft = env.agents[agent_id]
 
-            # 创建导弹ID - 支持4枚导弹编号
-            missile_count = 4 - aircraft.num_missiles + 1  # 1-4枚导弹
-            base_id = agent_id[0] + agent_id[2:]  # B0100 → B100
-            missile_uid = f"{base_id}{missile_count:0>2}"  # B100 → B10001, B10002, B10003, B10004
+            # 创建导弹ID - 使用递增计数器避免ID复用，格式与我方一致
+            if not hasattr(self, '_enemy_missile_counter'):
+                self._enemy_missile_counter = {}
+            if agent_id not in self._enemy_missile_counter:
+                self._enemy_missile_counter[agent_id] = 0
+            self._enemy_missile_counter[agent_id] += 1
+            missile_uid = f"{agent_id}{self._enemy_missile_counter[agent_id]:02d}"
 
             # 创建导弹模拟器（优先使用R-27ER仿真器）
             if R27ERMissileSimulator is not None:
@@ -454,7 +512,7 @@ class UnifiedEnemyTacticalAI:
             }
         }
 
-    def get_enemy_command(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+    def get_enemy_command(self, env, agent_id: str, current_time: float, task=None) -> Tuple[int, int, int]:
         """获取敌方战术指令 - 统一入口点"""
         try:
             # 1. 态势感知
@@ -462,7 +520,7 @@ class UnifiedEnemyTacticalAI:
 
             # 2. 检查是否处于返航状态
             if agent_id in self._enemy_phases and self._enemy_phases[agent_id] == "RETURNING":
-                return self._execute_return_to_base_unified(env, agent_id, current_time)
+                return self._execute_return_to_base_unified(env, agent_id, current_time, task)
 
             # 3. 威胁评估
             threat = self._assess_threat(situation, agent_id, current_time)
@@ -477,11 +535,11 @@ class UnifiedEnemyTacticalAI:
             action_type = self._select_action(agent_id, tactical_mode, current_time)
 
             # 7. 动作执行
-            alt_cmd, hdg_cmd, vel_cmd = self._execute_action(env, agent_id, action_type, current_time)
+            alt_cmd, hdg_cmd, vel_cmd = self._execute_action(env, agent_id, action_type, current_time, task)
             
-            # ✅ 全局高度安全检查（最终防线）
+            # ✅ 全局高度安全检查（最终防线）- 传递task参数
             alt_cmd, hdg_cmd, vel_cmd = self._apply_global_safety_check(
-                env, agent_id, alt_cmd, hdg_cmd, vel_cmd
+                env, agent_id, alt_cmd, hdg_cmd, vel_cmd, task
             )
             
             return alt_cmd, hdg_cmd, vel_cmd
@@ -948,7 +1006,7 @@ class UnifiedEnemyTacticalAI:
             logging.error(f"机动决策失败 {agent_id}: {e}")
             return ActionType.MAINTAIN_HEADING
 
-    def _execute_action(self, env, agent_id: str, action_type: ActionType, current_time: float) -> Tuple[int, int, int]:
+    def _execute_action(self, env, agent_id: str, action_type: ActionType, current_time: float, task=None) -> Tuple[int, int, int]:
         """动作执行模块 - 将动作类型转换为具体的飞行指令 - 🛡️ 多层安全保护机制"""
         try:
             # 🛡️ 设置环境引用供参数生成使用
@@ -1026,7 +1084,7 @@ class UnifiedEnemyTacticalAI:
                 return self._execute_defensive_split(env, agent_id)
 
             elif action_type == ActionType.RETURN_TO_BASE:
-                return self._execute_return_to_base_unified(env, agent_id, current_time)
+                return self._execute_return_to_base_unified(env, agent_id, current_time, task)
 
             elif action_type == ActionType.CLIMB:
                 altitude_change = params.altitude_change if params.altitude_change is not None else 500.0
@@ -1046,53 +1104,230 @@ class UnifiedEnemyTacticalAI:
             logging.error(f"动作执行失败 {agent_id} - {action_type.value}: {e}")
             return 7, 8, 3  # 默认平稳飞行
     
-    def _apply_global_safety_check(self, env, agent_id: str, alt_cmd: int, hdg_cmd: int, vel_cmd: int) -> Tuple[int, int, int]:
+    def _apply_global_safety_check(self, env, agent_id: str, alt_cmd: int, hdg_cmd: int, vel_cmd: int, task=None) -> Tuple[int, int, int]:
         """
         全局高度安全检查（最终防线）
-        确保所有指令都不会导致撞地
+        确保所有指令都不会导致撞地 - 支持不同飞机型号
         """
         try:
             current_alt = env.agents[agent_id].get_property_value(c.position_h_sl_m)
             
-            # ✅ 三级保护：紧急拉升（<1500m）、强制水平（<3000m）、禁止下降（<5000m）
-            if current_alt < 1500:
+            # 🛩️ 获取飞机特定的安全参数 - 优先使用task提供的参数
+            if task and hasattr(task, 'get_aircraft_flight_params'):
+                aircraft_params = task.get_aircraft_flight_params(agent_id)
+                min_altitude = aircraft_params['min_safe_altitude']
+                min_speed = aircraft_params['min_speed']
+                max_speed = aircraft_params['max_speed']
+            else:
+                # 回退到内置参数
+                aircraft_params = self._get_aircraft_parameters(env, agent_id)
+                min_altitude = aircraft_params["min_altitude"]
+                min_speed = aircraft_params["min_speed"]  
+                max_speed = aircraft_params["max_speed"]
+            
+            # ✅ 三级保护：紧急拉升、强制水平、禁止下降
+            emergency_threshold = min_altitude * 0.5   # 紧急高度（如SU-27: 1750m）
+            warning_threshold = min_altitude * 1.0     # 警告高度（如SU-27: 3500m）  
+            caution_threshold = min_altitude * 1.67    # 注意高度（如SU-27: 5833m）
+            
+            if current_alt < emergency_threshold:
                 # 紧急拉升：强制最大爬升+减速
                 alt_cmd = 0  # 最大爬升
                 vel_cmd = min(vel_cmd, 3)  # 限制速度
-                if current_alt < 500:
-                    logging.error(f"🚨 [{agent_id}] 极度危险！高度{current_alt:.0f}m < 500m，紧急拉升！")
+                if current_alt < min_altitude * 0.17:  # 极度危险（如SU-27: 595m）
+                    logging.error(f"🚨 [{agent_id}] 极度危险！高度{current_alt:.0f}m < {min_altitude*0.17:.0f}m，紧急拉升！")
                 else:
-                    logging.warning(f"🛡️ [{agent_id}] 紧急拉升: 高度{current_alt:.0f}m < 1500m")
+                    logging.warning(f"🛡️ [{agent_id}] 紧急拉升: 高度{current_alt:.0f}m < {emergency_threshold:.0f}m")
             
-            elif current_alt < 3000:
+            elif current_alt < warning_threshold:
                 # 强制水平/爬升：禁止下降
                 from envs.JSBSim.core import catalog as c_local
-                norm_delta_altitude = np.array([-1.5, -1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5])
-                alt_change = norm_delta_altitude[alt_cmd] * 1000
+                alt_change = self.norm_delta_altitude[alt_cmd] * 1000
                 
                 if alt_change < 0:
                     # 禁止下降，改为水平飞行
                     alt_cmd = 7  # 保持高度
                     if env.current_step % 120 == 0:
-                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < 3000m，禁止下降")
+                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < {warning_threshold:.0f}m，禁止下降")
             
-            elif current_alt < 5000:
+            elif current_alt < caution_threshold:
                 # 限制下降：只允许小幅下降
                 from envs.JSBSim.core import catalog as c_local
-                norm_delta_altitude = np.array([-1.5, -1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5])
-                alt_change = norm_delta_altitude[alt_cmd] * 1000
+                alt_change = self.norm_delta_altitude[alt_cmd] * 1000
                 
                 if alt_change < -300:
                     # 限制下降幅度到300m
                     alt_cmd = 5  # -100m
                     if env.current_step % 120 == 0:
-                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < 5000m，限制下降")
+                        logging.info(f"🛡️ [{agent_id}] 高度保护: 高度{current_alt:.0f}m < {caution_threshold:.0f}m，限制下降")
+            
+            # 速度安全检查
+            current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+            if current_velocity < min_speed:
+                vel_cmd = min(6, vel_cmd + 1)  # 加速
+                if env.current_step % 120 == 0:
+                    logging.info(f"🛡️ [{agent_id}] 速度保护: 速度{current_velocity:.0f}m/s < {min_speed:.0f}m/s")
+            elif current_velocity > max_speed:
+                vel_cmd = max(0, vel_cmd - 1)  # 减速
+                if env.current_step % 120 == 0:
+                    logging.info(f"🛡️ [{agent_id}] 速度限制: 速度{current_velocity:.0f}m/s > {max_speed:.0f}m/s")
             
             return alt_cmd, hdg_cmd, vel_cmd
             
         except Exception as e:
             logging.error(f"全局安全检查失败 {agent_id}: {e}")
             return 7, 8, 3  # 默认平稳飞行
+            
+    # ✈️ 从pure_maneuver_task移植的工作控制函数
+    def _convert_altitude_to_index(self, altitude_offset):
+        """高度偏移转换为索引 - SU-27优化版本"""
+        altitude_values = np.array([-1500.0, -1000.0, -750.0, -500.0, -250.0, -100.0, 0.0, 0.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 1500.0])
+        if altitude_offset >= 1200.0:  # 大幅爬升
+            return 13
+        elif altitude_offset >= 800.0:  # 中等爬升
+            return 12
+        elif altitude_offset >= 400.0:  # 轻微爬升
+            return 11
+        elif altitude_offset >= 150.0:  # 微调爬升
+            return 10
+        elif altitude_offset >= 50.0:  # 小幅爬升
+            return 9
+        elif altitude_offset >= -50.0:  # 平飞
+            return 7
+        elif altitude_offset >= -150.0:  # 小幅下降
+            return 5
+        elif altitude_offset >= -400.0:  # 轻微下降
+            return 4
+        elif altitude_offset >= -800.0:  # 中等下降
+            return 2
+        elif altitude_offset <= -1200.0:  # 大幅下降
+            return 1
+        else:
+            distances = np.abs(altitude_values - altitude_offset)
+            return np.argmin(distances)
+
+    def _convert_heading_to_index(self, heading_offset):
+        """航向偏移转换为索引 - SU-27优化版本"""
+        heading_values = np.array([-180.0, -135.0, -90.0, -45.0, -22.5, -11.25, 0.0, 11.25, 22.5, 45.0, 90.0, 135.0, 180.0])
+        if heading_offset >= 160.0:  # 大转弯右
+            return 12
+        elif heading_offset >= 110.0:  # 中转弯右
+            return 11
+        elif heading_offset >= 70.0:  # 小转弯右
+            return 10
+        elif heading_offset >= 35.0:  # 微调右
+            return 9
+        elif heading_offset >= 15.0:  # 轻微右
+            return 8
+        elif heading_offset >= -15.0:  # 直飞
+            return 6
+        elif heading_offset >= -35.0:  # 轻微左
+            return 5
+        elif heading_offset >= -70.0:  # 微调左
+            return 4
+        elif heading_offset >= -110.0:  # 小转弯左
+            return 3
+        elif heading_offset >= -160.0:  # 中转弯左
+            return 2
+        elif heading_offset <= -160.0:  # 大转弯左
+            return 1
+        else:
+            distances = np.abs(heading_values - heading_offset)
+            return np.argmin(distances)
+
+    def _convert_velocity_to_index(self, velocity_offset):
+        """速度偏移转换为索引 - SU-27优化版本"""
+        velocity_values = np.array([-100.0, -75.0, -50.0, -25.0, -12.5, 0.0, 12.5, 25.0, 50.0, 75.0, 100.0])
+        if velocity_offset >= 80.0:  # 大幅加速
+            return 10
+        elif velocity_offset >= 60.0:  # 中等加速
+            return 9
+        elif velocity_offset >= 30.0:  # 轻微加速
+            return 8
+        elif velocity_offset >= 15.0:  # 微调加速
+            return 7
+        elif velocity_offset >= 5.0:  # 小幅加速
+            return 6
+        elif velocity_offset >= -5.0:  # 保持速度
+            return 5
+        elif velocity_offset >= -15.0:  # 小幅减速
+            return 4
+        elif velocity_offset >= -30.0:  # 轻微减速
+            return 3
+        elif velocity_offset >= -60.0:  # 中等减速
+            return 2
+        elif velocity_offset <= -80.0:  # 大幅减速
+            return 1
+        else:
+            distances = np.abs(velocity_values - velocity_offset)
+            return np.argmin(distances)
+            
+    def _direct_control_mapping(self, env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id, basic_maneuver_name="default"):
+        """直接控制映射 - 从pure_maneuver_task移植的SU-27版本"""
+        try:
+            from envs.JSBSim.core import catalog as c
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_rad)
+            current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+            
+            # 安全索引访问
+            altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
+            heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+            velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
+            
+            target_altitude_change = self.norm_delta_altitude[altitude_cmd_id] * 1000
+            target_heading_change = self.norm_delta_heading[heading_cmd_id] * 180
+            target_velocity_change = self.norm_delta_velocity[velocity_cmd_id] * 100
+            
+            aileron = 0.0
+            elevator = 0.0
+            rudder = 0.0
+            throttle = 0.7
+            
+            # 高度控制
+            if target_altitude_change > 300:
+                elevator = 0.3
+                throttle = 0.9
+            elif target_altitude_change > 100:
+                elevator = 0.15
+                throttle = 0.8
+            elif target_altitude_change < -300:
+                elevator = -0.2
+                throttle = 0.5
+            elif target_altitude_change < -100:
+                elevator = -0.1
+                throttle = 0.6
+            
+            # 航向控制
+            if target_heading_change > 20:
+                aileron = 0.3
+                rudder = 0.15
+            elif target_heading_change > 5:
+                aileron = 0.15
+                rudder = 0.08
+            elif target_heading_change < -20:
+                aileron = -0.3
+                rudder = -0.15
+            elif target_heading_change < -5:
+                aileron = -0.15
+                rudder = -0.08
+            
+            # 速度控制
+            if target_velocity_change > 30:
+                throttle = min(1.0, throttle + 0.2)
+            elif target_velocity_change < -30:
+                throttle = max(0.3, throttle - 0.2)
+            
+            # 关键：低高度保护（和pure_maneuver_task保持一致）
+            if current_altitude < 1000:
+                elevator = max(elevator, 0.1)
+                throttle = max(throttle, 0.8)
+                
+            return np.array([aileron, elevator, rudder, throttle])
+            
+        except Exception as e:
+            logging.error(f"直接控制映射错误: {e}")
+            return np.array([0.0, 0.0, 0.0, 0.7])
 
     def _calculate_safe_altitude_change(self, current_altitude: Optional[float], action_name: str) -> float:
         """🛡️ 智能高度感知俯冲策略 - 根据当前高度计算安全的高度变化"""
@@ -1389,7 +1624,9 @@ class UnifiedEnemyTacticalAI:
             current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
 
             # 🛡️ 安全检查 - 如果高度过低，改为水平机动
-            safe_altitude_threshold = 2500.0  # 降低阈值到2500米，允许更多机动空间
+            # 获取飞机特定参数
+            aircraft_params = self._get_aircraft_parameters(env, agent_id)
+            safe_altitude_threshold = aircraft_params["min_altitude"]  # 使用飞机特定的最低高度
             if current_altitude < safe_altitude_threshold:
                 # 只在状态改变时输出日志
                 if not hasattr(self, '_dive_escape_blocked') or agent_id not in self._dive_escape_blocked:
@@ -1645,7 +1882,7 @@ class UnifiedEnemyTacticalAI:
 
         return self._maintain_heading_with_altitude(env, agent_id, split_heading, altitude_cmd)
 
-    def _execute_return_to_base_unified(self, env, agent_id: str, current_time: float) -> Tuple[int, int, int]:
+    def _execute_return_to_base_unified(self, env, agent_id: str, current_time: float, task=None) -> Tuple[int, int, int]:
         """执行统一的返航机动 - 修复问题6：平稳返航，朝0度北向飞行"""
         try:
             # 初始化返航状态
@@ -2140,6 +2377,158 @@ class UnifiedEnemyTacticalAI:
             elif phase == 'escape':
                 return "SHORT_SKATE_ESCAPE"
         return "SHORT_SKATE"
+
+    # ✈️ 从pure_maneuver_task移植的工作控制函数
+    def _convert_altitude_to_index(self, altitude_offset):
+        """高度偏移转换为索引 - SU-27优化版本"""
+        altitude_values = np.array([-1500.0, -1000.0, -750.0, -500.0, -250.0, -100.0, 0.0, 0.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 1500.0])
+        if altitude_offset >= 1200.0:  # 大幅爬升
+            return 13
+        elif altitude_offset >= 800.0:  # 中等爬升
+            return 12
+        elif altitude_offset >= 400.0:  # 轻微爬升
+            return 11
+        elif altitude_offset >= 150.0:  # 微调爬升
+            return 10
+        elif altitude_offset >= 50.0:  # 小幅爬升
+            return 9
+        elif altitude_offset >= -50.0:  # 平飞
+            return 7
+        elif altitude_offset >= -150.0:  # 小幅下降
+            return 5
+        elif altitude_offset >= -400.0:  # 轻微下降
+            return 4
+        elif altitude_offset >= -800.0:  # 中等下降
+            return 2
+        elif altitude_offset <= -1200.0:  # 大幅下降
+            return 1
+        else:
+            distances = np.abs(altitude_values - altitude_offset)
+            return np.argmin(distances)
+
+    def _convert_heading_to_index(self, heading_offset):
+        """航向偏移转换为索引 - SU-27优化版本"""
+        heading_values = np.array([-180.0, -135.0, -90.0, -45.0, -22.5, -11.25, 0.0, 11.25, 22.5, 45.0, 90.0, 135.0, 180.0])
+        if heading_offset >= 160.0:  # 大转弯右
+            return 12
+        elif heading_offset >= 110.0:  # 中转弯右
+            return 11
+        elif heading_offset >= 70.0:  # 小转弯右
+            return 10
+        elif heading_offset >= 35.0:  # 微调右
+            return 9
+        elif heading_offset >= 15.0:  # 轻微右
+            return 8
+        elif heading_offset >= -15.0:  # 直飞
+            return 6
+        elif heading_offset >= -35.0:  # 轻微左
+            return 5
+        elif heading_offset >= -70.0:  # 微调左
+            return 4
+        elif heading_offset >= -110.0:  # 小转弯左
+            return 3
+        elif heading_offset >= -160.0:  # 中转弯左
+            return 2
+        elif heading_offset <= -160.0:  # 大转弯左
+            return 1
+        else:
+            distances = np.abs(heading_values - heading_offset)
+            return np.argmin(distances)
+
+    def _convert_velocity_to_index(self, velocity_offset):
+        """速度偏移转换为索引 - SU-27优化版本"""
+        velocity_values = np.array([-100.0, -75.0, -50.0, -25.0, -12.5, 0.0, 12.5, 25.0, 50.0, 75.0, 100.0])
+        if velocity_offset >= 80.0:  # 大幅加速
+            return 10
+        elif velocity_offset >= 60.0:  # 中等加速
+            return 9
+        elif velocity_offset >= 30.0:  # 轻微加速
+            return 8
+        elif velocity_offset >= 15.0:  # 微调加速
+            return 7
+        elif velocity_offset >= 5.0:  # 小幅加速
+            return 6
+        elif velocity_offset >= -5.0:  # 保持速度
+            return 5
+        elif velocity_offset >= -15.0:  # 小幅减速
+            return 4
+        elif velocity_offset >= -30.0:  # 轻微减速
+            return 3
+        elif velocity_offset >= -60.0:  # 中等减速
+            return 2
+        elif velocity_offset <= -80.0:  # 大幅减速
+            return 1
+        else:
+            distances = np.abs(velocity_values - velocity_offset)
+            return np.argmin(distances)
+            
+    def _direct_control_mapping(self, env, agent_id, altitude_cmd_id, heading_cmd_id, velocity_cmd_id, basic_maneuver_name="default"):
+        """直接控制映射 - 从pure_maneuver_task移植的SU-27版本"""
+        try:
+            from envs.JSBSim.core import catalog as c
+            current_altitude = env.agents[agent_id].get_property_value(c.position_h_sl_m)
+            current_heading = env.agents[agent_id].get_property_value(c.attitude_psi_rad)
+            current_velocity = env.agents[agent_id].get_property_value(c.velocities_u_mps)
+            
+            # 安全索引访问
+            altitude_cmd_id = min(altitude_cmd_id, len(self.norm_delta_altitude) - 1)
+            heading_cmd_id = min(heading_cmd_id, len(self.norm_delta_heading) - 1)
+            velocity_cmd_id = min(velocity_cmd_id, len(self.norm_delta_velocity) - 1)
+            
+            target_altitude_change = self.norm_delta_altitude[altitude_cmd_id] * 1000
+            target_heading_change = self.norm_delta_heading[heading_cmd_id] * 180
+            target_velocity_change = self.norm_delta_velocity[velocity_cmd_id] * 100
+            
+            aileron = 0.0
+            elevator = 0.0
+            rudder = 0.0
+            throttle = 0.7
+            
+            # 高度控制（SU-27特定参数）
+            if target_altitude_change > 300:
+                elevator = 0.3
+                throttle = 0.9
+            elif target_altitude_change > 100:
+                elevator = 0.15
+                throttle = 0.8
+            elif target_altitude_change < -300:
+                elevator = -0.2
+                throttle = 0.5
+            elif target_altitude_change < -100:
+                elevator = -0.1
+                throttle = 0.6
+            
+            # 航向控制（SU-27特定参数）
+            if target_heading_change > 20:
+                aileron = 0.3
+                rudder = 0.15
+            elif target_heading_change > 5:
+                aileron = 0.15
+                rudder = 0.08
+            elif target_heading_change < -20:
+                aileron = -0.3
+                rudder = -0.15
+            elif target_heading_change < -5:
+                aileron = -0.15
+                rudder = -0.08
+            
+            # 速度控制
+            if target_velocity_change > 30:
+                throttle = min(1.0, throttle + 0.2)
+            elif target_velocity_change < -30:
+                throttle = max(0.3, throttle - 0.2)
+            
+            # 关键：低高度保护（和pure_maneuver_task保持一致）
+            if current_altitude < 1000:
+                elevator = max(elevator, 0.1)
+                throttle = max(throttle, 0.8)
+                logging.debug(f"🛡️ [{agent_id}] 低高度保护激活: {current_altitude:.0f}m")
+                
+            return np.array([aileron, elevator, rudder, throttle])
+            
+        except Exception as e:
+            logging.error(f"直接控制映射错误: {e}")
+            return np.array([0.0, 0.0, 0.0, 0.7])
 
 
 # ==================== 工厂函数 ====================

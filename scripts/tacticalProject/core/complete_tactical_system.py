@@ -4,7 +4,7 @@
 整合：
 - 态势评估（6.2节）
 - 威胁评估（6.3节）
-- 意图识别（6.4节）
+- 意图识别（6.4节）- 集成多算法切换
 - 决策表查询（6.5.6节）
 - 战术选择算法（Algorithm 6-1）
 - 战术适应性评估（Algorithm 6-1.1）
@@ -19,23 +19,38 @@ from .intent_recognizer import IntentRecognizer, EnemyIntent, FriendlyIntent
 from .decision_table import DecisionTable
 from .tactical_selector_algorithm import TacticalSelectorAlgorithm
 
+# 导入新的算法切换器
+from .situation_algorithm_switcher import (
+    get_situation_algorithm_switcher, 
+    SituationAlgorithmConfig,
+    recognize_enemy_intent
+)
+
 
 class CompleteTacticalSystem:
     """完整智能战术选择系统"""
     
-    def __init__(self, my_intent: str = 'CONSERVATIVE_CLEAR'):
+    def __init__(self, my_intent: str = 'CONSERVATIVE_CLEAR', situation_algorithm: str = None):
         """
         初始化完整战术系统
         
         Args:
             my_intent: 我方意图 ('AGGRESSIVE_CLEAR', 'CONSERVATIVE_CLEAR', 'DEFENSIVE')
+            situation_algorithm: 态势识别算法 ('algo1', 'algo2', 'algo3', None=默认)
         """
         # 我方意图
         self.my_intent = my_intent
         
         # 初始化子系统
         self.threat_evaluator = CompleteThreatEvaluator()
-        self.intent_recognizer = IntentRecognizer()
+        
+        # 🔄 集成算法切换器 - 替换原来的单一IntentRecognizer
+        self.situation_algorithm = situation_algorithm or SituationAlgorithmConfig.DEFAULT_ALGORITHM
+        self.algorithm_switcher = get_situation_algorithm_switcher(self.situation_algorithm)
+        
+        # 保持向后兼容性的意图识别器引用
+        self.intent_recognizer = self.algorithm_switcher.algorithm_instance
+        
         self.decision_table = DecisionTable()
         self.tactical_selector = TacticalSelectorAlgorithm(
             self.threat_evaluator,
@@ -46,7 +61,10 @@ class CompleteTacticalSystem:
         self.current_tactic = None
         self.current_roles = {}
         
+        # 记录算法状态
+        algo_status = self.algorithm_switcher.get_algorithm_status()
         logging.info(f"✅ 完整智能战术选择系统初始化完成 (我方意图: {my_intent})")
+        logging.info(f"🔧 态势识别算法: {algo_status['current_algorithm']} - {algo_status['note'][algo_status['current_algorithm']]}")
     
     def select_tactic(self, control_distance, my_aircraft_list, enemy_aircraft_list, env):
         """
@@ -133,7 +151,7 @@ class CompleteTacticalSystem:
     
     def _recognize_enemy_intent(self, my_aircraft_list, enemy_aircraft_list):
         """
-        识别敌方意图
+        识别敌方意图 - 使用集成的算法切换器
         
         Returns:
             str: 'ATTACK', 'NEUTRAL', 'RETREAT'
@@ -142,17 +160,62 @@ class CompleteTacticalSystem:
             if not my_aircraft_list or not enemy_aircraft_list:
                 return 'NEUTRAL'
             
-            # 使用意图识别器
-            my_lead = my_aircraft_list[0] if my_aircraft_list[0].is_alive else my_aircraft_list[1]
-            enemy_lead = enemy_aircraft_list[0] if enemy_aircraft_list[0].is_alive else enemy_aircraft_list[1]
+            # 🔄 使用算法切换器的统一接口
+            # 注：这里需要环境对象和敌方ID，但当前接口只有飞机列表
+            # 作为示例，我们保持原来的逻辑，但添加了切换能力
             
-            intent = self.intent_recognizer.recognize_enemy_intent(my_lead, enemy_lead)
+            # 尝试获取环境对象（如果可用）
+            env = getattr(self, 'current_env', None)
             
-            return intent
+            if env and hasattr(enemy_aircraft_list[0], 'id'):
+                # 如果有环境对象，使用新的算法切换器
+                enemy_id = enemy_aircraft_list[0].id if hasattr(enemy_aircraft_list[0], 'id') else 'B0100'
+                intent = self.algorithm_switcher.recognize_intent(env, enemy_id, my_aircraft_list)
+                return intent
+            else:
+                # 回退到原来的方法（保持兼容性）
+                my_lead = my_aircraft_list[0] if my_aircraft_list[0].is_alive else my_aircraft_list[1]
+                enemy_lead = enemy_aircraft_list[0] if enemy_aircraft_list[0].is_alive else enemy_aircraft_list[1]
+                
+                if hasattr(self.intent_recognizer, 'recognize_enemy_intent'):
+                    intent = self.intent_recognizer.recognize_enemy_intent(my_lead, enemy_lead)
+                else:
+                    # 如果没有老方法，使用默认
+                    intent = 'ATTACK'
+                
+                return intent
             
         except Exception as e:
             logging.error(f"意图识别错误: {e}")
             return 'NEUTRAL'
+    
+    def switch_situation_algorithm(self, new_algorithm: str):
+        """
+        切换态势识别算法
+        
+        Args:
+            new_algorithm: 新算法类型 ('algo1', 'algo2', 'algo3')
+        """
+        try:
+            old_algorithm = self.algorithm_switcher.get_current_algorithm()
+            self.algorithm_switcher.switch_algorithm(new_algorithm)
+            
+            # 更新意图识别器引用
+            self.intent_recognizer = self.algorithm_switcher.algorithm_instance
+            self.situation_algorithm = new_algorithm
+            
+            logging.info(f"🔄 态势识别算法切换完成: {old_algorithm} → {new_algorithm}")
+            
+        except Exception as e:
+            logging.error(f"算法切换失败: {e}")
+    
+    def get_situation_algorithm_status(self) -> Dict:
+        """获取当前态势识别算法状态"""
+        return self.algorithm_switcher.get_algorithm_status()
+    
+    def set_current_env(self, env):
+        """设置当前环境对象（用于新的意图识别接口）"""
+        self.current_env = env
 
     def _assign_roles(self, tactic, my_aircraft_list, enemy_aircraft_list, env):
         """

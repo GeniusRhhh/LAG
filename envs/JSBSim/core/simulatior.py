@@ -743,6 +743,10 @@ class MissileSimulator(BaseSimulator):
         current_altitude = self.get_position()[2]
         if current_altitude < 0:
             self.__status = MissileSimulator.MISS
+            # 添加完成时间记录
+            if not hasattr(self, '_completion_time'):
+                self._completion_time = self._t
+                logging.debug(f"Missile {self.uid} completed at t={self._completion_time:.1f}s")
             print(f"⚠️ {self.model} {self.uid} 撞地销毁: 高度={current_altitude:.1f}m")
             return
 
@@ -765,11 +769,19 @@ class MissileSimulator(BaseSimulator):
                 print(f" {self.model} {self.uid} HIT target at t={self._hit_time:.1f}s, dist={self._hit_distance:.1f}m")
 
             self.__status = MissileSimulator.HIT
+            # 添加完成时间记录
+            if not hasattr(self, '_completion_time'):
+                self._completion_time = self._t
+                logging.debug(f"Missile {self.uid} completed at t={self._completion_time:.1f}s")
             # 只有在目标仍存活时才调用shotdown()，避免重复击落
             if self.target_aircraft.is_alive:
                 self.target_aircraft.shotdown()
         elif self._should_miss():
             self.__status = MissileSimulator.MISS
+            # 添加完成时间记录
+            if not hasattr(self, '_completion_time'):
+                self._completion_time = self._t
+                logging.debug(f"Missile {self.uid} completed at t={self._completion_time:.1f}s")
             miss_reason = self._get_miss_reason()
             if self._t % self.print_interval < self.dt:  # 只在特定间隔打印
                 print(

@@ -135,29 +135,42 @@ class TacticalSelectorAlgorithm:
                 logging.info(f"✅ 战术连续性检查：保持当前战术 {self.current_tactic}")
                 return self.current_tactic
             
-            # ===== 4. 基于态势的战术评分与选择 =====
-            best_score = -np.inf
-            best_tactic = None
+            # ===== 4. 基于态势的战术评分与选择（改进为加权随机选择）=====
+            tactic_scores = []
             
             for tactic in candidates:
                 score = self._compute_tactical_fitness(
                     tactic, situation, my_intent, enemy_intent,
                     my_aircraft, enemy_aircraft, env
                 )
-                
+                tactic_scores.append((tactic, score))
                 logging.info(f"   战术 {tactic}: 适应度 = {score:.3f}")
-                
-                if score > best_score:
-                    best_score = score
-                    best_tactic = tactic
             
-            if best_tactic:
-                logging.info(f"🎯 选定战术: {best_tactic} (适应度: {best_score:.3f})")
+            if tactic_scores:
+                # 按分数排序，选择前3名适应度最高的战术
+                tactic_scores.sort(key=lambda x: x[1], reverse=True)
+                top_tactics = tactic_scores[:min(3, len(tactic_scores))]
+                
+                # 从前3名中加权随机选择（分数越高，被选中概率越大）
+                import random
+                if len(top_tactics) >= 2 and (len(top_tactics) < 2 or top_tactics[0][1] - top_tactics[-1][1] < 0.20):
+                    # 如果前几名分数相近（差距<0.20），增加随机性
+                    weights = [1.0, 0.7, 0.4][:len(top_tactics)]  # 前几名的权重
+                    selected_tactic = random.choices([t[0] for t in top_tactics], 
+                                                    weights=weights)[0]
+                    selected_score = next(score for tactic, score in top_tactics if tactic == selected_tactic)
+                    logging.info(f"🎯 加权随机选定战术: {selected_tactic} (适应度: {selected_score:.3f}) [前{len(top_tactics)}名随机选择]")
+                else:
+                    # 否则选择最佳战术
+                    selected_tactic = top_tactics[0][0]
+                    selected_score = top_tactics[0][1]
+                    logging.info(f"🎯 选定战术: {selected_tactic} (适应度: {selected_score:.3f}) [最佳适应度]")
+                
                 # 记录切换时间
-                if best_tactic != self.current_tactic:
+                if selected_tactic != self.current_tactic:
                     self.last_tactic_change_time = current_time
-                self.current_tactic = best_tactic
-                return best_tactic
+                self.current_tactic = selected_tactic
+                return selected_tactic
             else:
                 logging.warning("未找到最佳战术，使用默认战术")
                 return 'SIDE_BY_SIDE'
@@ -286,23 +299,35 @@ class TacticalSelectorAlgorithm:
                 # 攻击性战术：威胁评估更平衡，避免DRAG_SHOOT过度优势
                 base_fitness = 1.0 - normalized_threat  # 威胁低 → 分数高
                 
-                # 为不同攻击性战术添加特色调整
+                # 为不同攻击性战术添加特色调整（平衡化权重）
                 if tactic == 'DRAG_SHOOT':
                     # 拖曳射击：在中等威胁时表现更佳
                     if 0.3 <= normalized_threat <= 0.7:
-                        adjustment = 0.1  # 中等威胁时小幅加成
+                        adjustment = 0.08  # 中等威胁时小幅加成（降低：0.1→0.08）
                     else:
-                        adjustment = -0.05  # 其他情况小幅减分
+                        adjustment = -0.02  # 其他情况小幅减分（减少：-0.05→-0.02）
                 elif tactic == 'PINCER_ATTACK':
-                    # 钳形攻击：在低威胁时表现更佳
+                    # 钳形攻击：在低威胁时表现更佳（降低权重）
                     if normalized_threat <= 0.4:
-                        adjustment = 0.15  # 低威胁时加成
+                        adjustment = 0.08  # 低威胁时加成（大幅降低：0.15→0.08）
                     else:
-                        adjustment = 0.0
+                        adjustment = -0.05  # 其他情况减分（新增）
                 elif tactic == 'HIGH_LOW_ATTACK':
                     # 高低攻击：在高威胁时表现更佳
                     if normalized_threat >= 0.6:
-                        adjustment = 0.12  # 高威胁时加成
+                        adjustment = 0.10  # 高威胁时加成（轻微降低：0.12→0.10）
+                    else:
+                        adjustment = 0.0
+                elif tactic == 'SEQUENTIAL_ATTACK':
+                    # 序列攻击：在中等威胁时表现好（新增）
+                    if 0.4 <= normalized_threat <= 0.8:
+                        adjustment = 0.09
+                    else:
+                        adjustment = 0.0
+                elif tactic == 'SIDE_BY_SIDE':
+                    # 并排攻击：在低-中等威胁时表现好（新增）
+                    if normalized_threat <= 0.6:
+                        adjustment = 0.07
                     else:
                         adjustment = 0.0
                 else:
@@ -333,13 +358,13 @@ class TacticalSelectorAlgorithm:
             if self.current_tactic == tactic:
                 return 1.0  # 无需切换，适应度最高
 
-            # 定义队形切换代价矩阵（平衡化基础值+随机扰动）
+            # 定义队形切换代价矩阵（进一步平衡化）
             base_costs = {
-                'DRAG_SHOOT': 0.20,  # 提高拖曳射击代价：0.1 → 0.20
-                'PINCER_ATTACK': 0.18,  # 降低钳形攻击代价：0.25 → 0.18 
-                'HIGH_LOW_ATTACK': 0.22,  # 轻微降低：0.3 → 0.22
-                'SEQUENTIAL_ATTACK': 0.19,  # 轻微降低：0.2 → 0.19
-                'SIDE_BY_SIDE': 0.21,  # 提高：0.15 → 0.21
+                'DRAG_SHOOT': 0.18,  # 降低拖曳射击代价：0.20 → 0.18
+                'PINCER_ATTACK': 0.25,  # 提高钳形攻击代价：0.18 → 0.25 
+                'HIGH_LOW_ATTACK': 0.20,  # 降低高低攻击代价：0.22 → 0.20
+                'SEQUENTIAL_ATTACK': 0.17,  # 降低序列攻击代价：0.19 → 0.17
+                'SIDE_BY_SIDE': 0.19,  # 降低并排攻击代价：0.21 → 0.19
             }
 
             base_cost = base_costs.get(tactic, 0.20)
@@ -437,11 +462,15 @@ class TacticalSelectorAlgorithm:
                 else:  # 防御战术
                     match_score -= 0.2
             elif my_intent == 'CONSERVATIVE_CLEAR':
-                # 保守肃清：偏好协同战术
-                if tactic in ['PINCER_ATTACK', 'HIGH_LOW_ATTACK']:
-                    match_score += 0.2
+                # 保守肃清：平衡各协同战术权重
+                if tactic == 'PINCER_ATTACK':
+                    match_score += 0.12  # 降低钳形攻击权重：0.2 → 0.12
+                elif tactic == 'HIGH_LOW_ATTACK':
+                    match_score += 0.15  # 轻微降低：0.2 → 0.15
                 elif tactic in ['SEQUENTIAL_ATTACK', 'SIDE_BY_SIDE']:
-                    match_score += 0.1
+                    match_score += 0.18  # 提高其他战术权重：0.1 → 0.18
+                elif tactic == 'DRAG_SHOOT':
+                    match_score += 0.10  # 为拖曳射击添加权重
                 else:
                     match_score += 0.0
             elif my_intent == 'DEFENSIVE':
