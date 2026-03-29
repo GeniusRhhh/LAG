@@ -7,7 +7,7 @@ import torch
 
 from algorithms.utils.buffer import SharedReplayBuffer
 from .base_runner import Runner
-
+from tools.record_loss_to_csv import record_loss
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -111,7 +111,31 @@ class ShareJSBSimRunner(Runner):
 
                 train_infos["average_episode_rewards"] = self.buffer.rewards.sum() / (self.buffer.masks == False).sum()
                 logging.info("average episode rewards is {}".format(train_infos["average_episode_rewards"]))
-                self.log_info(train_infos, self.total_num_steps)
+
+                rewards = self.buffer.rewards.squeeze(-1)  # shape: [T, E, N]
+                masks = self.buffer.masks.squeeze(-1)  # shape: [T, E, N]
+                num_agents = rewards.shape[-1]
+                rewards_flat = rewards.reshape(-1, num_agents)
+                masks_flat = masks.reshape(-1, num_agents)
+                # 平均奖励 = 总和 / 每个agent episode结束的次数
+                done_counts = (masks_flat == 0).sum(axis=0)  # shape: [N]
+                done_counts = np.maximum(done_counts, 1)  # 防止除以0
+                agent_episode_rewards = rewards_flat.sum(axis=0) / done_counts
+                for agent_id, reward in enumerate(agent_episode_rewards):
+                    logging.info(f"[Agent {agent_id}] average episode reward: {reward:.4f}")
+
+                # #输出雷达
+                # agent_ids = ["A0100", "A0200", "B0100", "B0200"]  # 获取真实 agent ID 列表
+                # for env_id, info_dict in enumerate(infos):
+                #     if isinstance(info_dict, dict):
+                #         for agent_id in agent_ids:
+                #             agent_info = info_dict.get(agent_id, {})
+                #             radar_info = agent_info.get("radar_info", None)
+                #             if radar_info:
+                #                 logging.info(f"[Radar] Env {env_id} Agent {agent_id} radar_info: {radar_info}")
+                #
+                # self.log_info(train_infos, self.total_num_steps)
+                # record_loss(episode, train_infos, self.run_dir)
 
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:
@@ -223,7 +247,7 @@ class ShareJSBSimRunner(Runner):
             # [Selfplay] Load opponent policy
             if self.use_selfplay and total_episodes >= eval_cur_opponent_idx * eval_each_episodes:
                 policy_idx = eval_choose_opponents[eval_cur_opponent_idx]
-                self.eval_opponent_policy.actor.load_state_dict(torch.load(str(self.save_dir) + f'/actor_{policy_idx}.pt'))
+                self.eval_opponent_policy.actor.load_state_dict(torch.load((str(self.save_dir) + f'/actor_{policy_idx}.pt'),weights_only=True))
                 self.eval_opponent_policy.prep_rollout()
                 eval_cur_opponent_idx += 1
                 logging.info(f" Load opponent {policy_idx} for evaluation ({total_episodes+1}/{self.eval_episodes})")
@@ -280,7 +304,7 @@ class ShareJSBSimRunner(Runner):
                     np.zeros(((eval_dones_env == True).sum(), *eval_opponent_rnn_states.shape[1:]), dtype=np.float32)
 
         eval_infos = {}
-        eval_infos['eval_average_episode_rewards'] = np.concatenate(eval_episode_rewards).mean() 
+        eval_infos['eval_average_episode_rewards'] = np.concatenate(eval_episode_rewards).mean()
         logging.info(" eval average episode rewards: " + str(eval_infos['eval_average_episode_rewards']))
         self.log_info(eval_infos, total_num_steps)
 
@@ -318,7 +342,7 @@ class ShareJSBSimRunner(Runner):
                                                                 deterministic=True)
             render_actions = np.expand_dims(_t2n(render_actions), axis=0)
             render_rnn_states = np.expand_dims(_t2n(render_rnn_states), axis=0)
-            
+
             # [Selfplay] get actions of opponent policy
             if self.use_selfplay:
                 render_opponent_actions, render_opponent_rnn_states \

@@ -16,7 +16,6 @@ class BaseSimulator(ABC):
 
     def __init__(self, uid: str, color: TeamColors, dt: float):
         """Constructor. Creates an instance of simulator, initialize all the available properties.
-
         Args:
             uid (str): 5-digits hexadecimal numbers for unique identification.
             color (TeamColors): use different color strings to represent diferent teams
@@ -326,7 +325,6 @@ class AircraftSimulator(BaseSimulator):
 
 
 class MissileSimulator(BaseSimulator):
-
     INACTIVE = -1
     LAUNCHED = 0
     HIT = 1
@@ -361,11 +359,12 @@ class MissileSimulator(BaseSimulator):
         self._Diameter = 0.127
         self._cD = 0.4      # aerodynamic drag factor
         self._m0 = 84       # mass, unit: kg
+        self._ms = 66       # 结构质量（不可燃部分），单位: kg
         self._dm = 6        # mass loss rate, unit: kg/s
-        self._K = 3         # proportionality constant of proportional navigation
+        self._K = 3.5         # proportionality constant of proportional navigation
         self._nyz_max = 30  # max overload
         self._Rc = 300      # radius of explosion, unit: m
-        self._v_min = 150   # minimun velocity, unit: m/s
+        self._v_min = 50   # minimun velocity, unit: m/s
 
     @property
     def is_alive(self):
@@ -385,13 +384,19 @@ class MissileSimulator(BaseSimulator):
 
     @property
     def Isp(self):
-        return self._Isp if self._t < self._t_thrust else 0
+        #return self._Isp if self._t < self._t_thrust else 0
+        # 如果当前质量大于结构质量，说明还有燃料，推力存在
+        if self._m > self._ms:
+            return self._Isp
+        # 否则，燃料耗尽，推力为0
+        else:
+            return 0
 
     @property
     def K(self):
         """Proportional Guidance Coefficient"""
-        # return self._K
-        return max(self._K * (self._t_max - self._t) / self._t_max, 0)
+        return self._K
+        #return max(self._K * (self._t_max - self._t) / self._t_max, 0)
 
     @property
     def S(self):
@@ -452,8 +457,10 @@ class MissileSimulator(BaseSimulator):
         if distance < self._Rc and self.target_aircraft.is_alive:
             self.__status = MissileSimulator.HIT
             self.target_aircraft.shotdown()
-        elif (self._t > self._t_max) or (np.linalg.norm(self.get_velocity()) < self._v_min) \
-                or np.sum(self._distance_increment) >= self._distance_increment.maxlen or not self.target_aircraft.is_alive:
+        #导弹自毁逻辑中去除时间限制，原来多了一个或者self._t > self._t_max的条件
+        elif (np.linalg.norm(self.get_velocity()) < self._v_min) \
+                or not self.target_aircraft.is_alive:
+                #or np.sum(self._distance_increment) >= self._distance_increment.maxlen or not self.target_aircraft.is_alive:
             self.__status = MissileSimulator.MISS
         else:
             self._state_trans(action)
@@ -500,6 +507,7 @@ class MissileSimulator(BaseSimulator):
         return np.clip([ny, nz], -self._nyz_max, self._nyz_max), Rxyz
 
     def _state_trans(self, action):
+        #print("比冲",self.Isp," 当前质量",self._m," 结构质量",self._ms)
         """
         State transition function
         """
@@ -509,11 +517,22 @@ class MissileSimulator(BaseSimulator):
         # update velocity & posture
         v = np.linalg.norm(self.get_velocity())
         theta, phi = self.get_rpy()[1:]
-        T = self._g * self.Isp * self._dm
-        D = 0.5 * self._cD * self.S * self.rho * v**2
-        nx = (T - D) / (self._m * self._g)
         ny, nz = action
+        T = self._g * self.Isp * self._dm
+        #D = 0.5 * self._cD  * self.S * self.rho * v ** 2
 
+        # === 这里按红蓝方区分大过载转向阻力 ===
+        # if self.color == "Red":
+        #     # 红方导弹阻力
+        #     extra_factor = 0
+        # elif self.color == "Blue":
+        #     # 蓝方导弹阻力
+        #     extra_factor = 0.1
+        # else:
+        #     extra_factor = 0.01  # 其他颜色默认值
+        extra_factor = 0.01
+        D = 0.5 * (self._cD + extra_factor*(ny**2+nz**2) )* self.S * self.rho * v**2 #增加侧向阻力
+        nx = (T - D) / (self._m * self._g)
         dv = self._g * (nx - np.sin(theta))
         self._dphi = self._g / v * (ny / np.cos(theta))
         self._dtheta = self._g / v * (nz - np.cos(theta))
@@ -528,5 +547,6 @@ class MissileSimulator(BaseSimulator):
         ])
         self._posture[:] = np.array([0, theta, phi])
         # update mass
-        if self._t < self._t_thrust:
-            self._m = self._m - self.dt * self._dm
+        self._m = self._m - self.dt * self._dm
+        if self._m < self._ms:
+            self._m = self._ms

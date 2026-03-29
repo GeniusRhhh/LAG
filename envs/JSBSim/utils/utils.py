@@ -13,7 +13,14 @@ def parse_config(filename):
     Returns:
         (EnvConfig): a custom class which parsing dict into object.
     """
-    filepath = os.path.join(get_root_dir(), 'configs', f'{filename}.yaml')
+    # ✅ 如果是绝对路径或包含路径，则直接使用
+    if os.path.isabs(filename) or os.path.sep in filename:
+        if not filename.endswith(".yaml"):
+            filename += ".yaml"
+        filepath = filename
+    else:
+        filepath = os.path.join(get_root_dir(), 'configs', f'{filename}.yaml')
+
     assert os.path.exists(filepath), \
         f'config path {filepath} does not exist. Please pass in a string that represents the file path to the config yaml.'
     with open(filepath, 'r', encoding='utf-8') as f:

@@ -6,7 +6,7 @@ sim_freq: 60
 agent_interaction_steps: 12 # step 0.2s
 
 # termination config
-max_steps: 1000             # episode length: 200s
+max_steps: 2048
 altitude_limit: 2500
 acceleration_limit_x: 10.0
 acceleration_limit_y: 10.0
@@ -44,7 +44,7 @@ aircraft_configs: {
     init_state: {
       ic_h_sl_ft: 20000,
       ic_long_gc_deg: 120.0,
-      ic_lat_geod_deg: 60.1,
+      ic_lat_geod_deg: 60.3,
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
     },
@@ -56,15 +56,15 @@ aircraft_configs: {
     init_state: {
       ic_h_sl_ft: 20000,
       ic_long_gc_deg: 120.01,
-      ic_lat_geod_deg: 60.1,
+      ic_lat_geod_deg: 60.3,
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
     },
     missile: 2
   }
 }
-max_attack_angle: 45        # unit: degree
-max_attack_distance: 14000  # unit: m
+max_attack_angle: 90        # unit: degree
+max_attack_distance: 20000  # unit: m
 min_attack_interval: 125     # unit: step
 
 # (lontitude, latitude, altitude)
