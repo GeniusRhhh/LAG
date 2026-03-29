@@ -87,16 +87,29 @@ class MultipleCombatEnv(BaseEnv):
         for agent_id in self.agents.keys():
             reward, info = self.task.get_reward(self, agent_id, info)
             rewards[agent_id] = [reward]
-        ego_reward = np.mean([rewards[ego_id] for ego_id in self.ego_ids])
-        enm_reward = np.mean([rewards[enm_id] for enm_id in self.enm_ids])
-        for ego_id in self.ego_ids:
-            rewards[ego_id] = [ego_reward]
-        for enm_id in self.enm_ids:
-            rewards[enm_id] = [enm_reward]
+
+        # # 打印红方每个代理的奖励
+        # print(f"Red team individual rewards before averaging: ")
+        # for ego_id in self.ego_ids:
+        #     print(f"Agent {ego_id}: {rewards[ego_id]}")
+        #
+        # ego_reward = np.mean([rewards[ego_id] for ego_id in self.ego_ids])
+        # enm_reward = np.mean([rewards[enm_id] for enm_id in self.enm_ids])
+        # for ego_id in self.ego_ids:
+        #     rewards[ego_id] = [ego_reward]
+        # for enm_id in self.enm_ids:
+        #     rewards[enm_id] = [enm_reward]
 
         dones = {}
         for agent_id in self.agents.keys():
             done, info = self.task.get_termination(self, agent_id, info)
             dones[agent_id] = [done]
 
-        return self._pack(obs), self._pack(share_obs), self._pack(rewards), self._pack(dones), info
+        info_n = {}
+        for agent_id, agent in self.agents.items():
+            info_n[agent_id] = {}
+            if hasattr(agent, "latest_radar_info"):
+                info_n[agent_id]["radar_info"] = agent.latest_radar_info
+
+        return self._pack(obs), self._pack(share_obs), self._pack(rewards), self._pack(dones), info_n
+

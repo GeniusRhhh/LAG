@@ -10,7 +10,6 @@ from ..reward_functions import AltitudeReward, PostureReward, EventDrivenReward
 from ..utils.utils import get_AO_TA_R, get2d_AO_TA_R, in_range_rad, LLA2NEU, get_root_dir
 from ..model.baseline_actor import BaselineActor
 
-
 class SingleCombatTask(BaseTask):
     def __init__(self, config):
         super().__init__(config)
@@ -203,8 +202,12 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
 
     def __init__(self, config: str):
         super().__init__(config)
+        #初始化底层策略网络（BaselineActor是一个神经网络模型，负责生成舵面控制指令）
         self.lowlevel_policy = BaselineActor()
+        #加载已经训练好的底层策略模型参数（从指定路径加载.pt文件，包含网络权重）
+        #get_root_dir()是获取项目根目录的函数，拼接路径后得到模型文件位置
         self.lowlevel_policy.load_state_dict(torch.load(get_root_dir() + '/model/baseline_model.pt', map_location=torch.device('cpu')))
+        #将网络设置为“评估模式”，禁用 Dropout、BatchNorm 等训练相关机制，确保推理稳定性
         self.lowlevel_policy.eval()
         self.norm_delta_altitude = np.array([0.1, 0, -0.1])
         self.norm_delta_heading = np.array([-np.pi / 6, -np.pi / 12, 0, np.pi / 12, np.pi / 6])
@@ -240,6 +243,7 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
             norm_act[1] = action[1] / 20 - 1.
             norm_act[2] = action[2] / 20 - 1.
             norm_act[3] = action[3] / 58 + 0.4
+
             return norm_act
 
     def reset(self, env):
@@ -250,7 +254,6 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
 
 
 class StraightFlyAgent:
-
     def normalize_action(self, action):
         norm_act = np.zeros(4)
         norm_act[0] = action[0] / 20 - 1.   # 0~40 => -1~1

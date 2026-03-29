@@ -6,6 +6,8 @@ from .singlecombat_task import SingleCombatTask, HierarchicalSingleCombatTask
 from ..reward_functions import AltitudeReward, PostureReward, MissilePostureReward, EventDrivenReward, ShootPenaltyReward
 from ..core.simulatior import MissileSimulator
 from ..utils.utils import LLA2NEU, get_AO_TA_R
+from envs.JSBSim.core.radar import RadarModel
+from envs.JSBSim.core.catalog import Catalog as c
 
 
 class SingleCombatDodgeMissileTask(SingleCombatTask):
@@ -13,6 +15,8 @@ class SingleCombatDodgeMissileTask(SingleCombatTask):
     """
     def __init__(self, config):
         super().__init__(config)
+
+        self.radar = RadarModel()
 
         self.max_attack_angle = getattr(self.config, 'max_attack_angle', 180)
         self.max_attack_distance = getattr(self.config, 'max_attack_distance', np.inf)
@@ -25,48 +29,88 @@ class SingleCombatDodgeMissileTask(SingleCombatTask):
         ]
 
     def load_observation_space(self):
-        self.observation_space = spaces.Box(low=-10, high=10., shape=(21,))
+        self.observation_space = spaces.Box(low=-10, high=10., shape=(22,))   #原来21维，现在新增雷达标志位，为22维（2025.6.10改）
 
+    # def get_obs(self, env, agent_id):
+    #     """
+    #     Convert simulation states into the format of observation_space
+    #
+    #     ------
+    #     Returns: (np.ndarray)
+    #     - ego info
+    #         - [0] ego altitude           (unit: 5km)
+    #         - [1] ego_roll_sin
+    #         - [2] ego_roll_cos
+    #         - [3] ego_pitch_sin
+    #         - [4] ego_pitch_cos
+    #         - [5] ego v_body_x           (unit: mh)
+    #         - [6] ego v_body_y           (unit: mh)
+    #         - [7] ego v_body_z           (unit: mh)
+    #         - [8] ego_vc                 (unit: mh)
+    #     - relative enm info
+    #         - [9] delta_v_body_x         (unit: mh)
+    #         - [10] delta_altitude        (unit: km)
+    #         - [11] ego_AO                (unit: rad) [0, pi]
+    #         - [12] ego_TA                (unit: rad) [0, pi]
+    #         - [13] relative distance     (unit: 10km)
+    #         - [14] side_flag             1 or 0 or -1
+    #     - relative missile info
+    #         - [15] delta_v_body_x
+    #         - [16] delta altitude
+    #         - [17] ego_AO
+    #         - [18] ego_TA
+    #         - [19] relative distance
+    #         - [20] side flag
+    #     """
+    #     norm_obs = np.zeros(21)
+    #     ego_obs_list = np.array(env.agents[agent_id].get_property_values(self.state_var))
+    #     enm_obs_list = np.array(env.agents[agent_id].enemies[0].get_property_values(self.state_var))
+    #     # (0) extract feature: [north(km), east(km), down(km), v_n(mh), v_e(mh), v_d(mh)]
+    #     ego_cur_ned = LLA2NEU(*ego_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
+    #     enm_cur_ned = LLA2NEU(*enm_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
+    #     ego_feature = np.array([*ego_cur_ned, *ego_obs_list[6:9]])
+    #     enm_feature = np.array([*enm_cur_ned, *enm_obs_list[6:9]])
+    #     # (1) ego info normalization
+    #     norm_obs[0] = ego_obs_list[2] / 5000
+    #     norm_obs[1] = np.sin(ego_obs_list[3])
+    #     norm_obs[2] = np.cos(ego_obs_list[3])
+    #     norm_obs[3] = np.sin(ego_obs_list[4])
+    #     norm_obs[4] = np.cos(ego_obs_list[4])
+    #     norm_obs[5] = ego_obs_list[9] / 340
+    #     norm_obs[6] = ego_obs_list[10] / 340
+    #     norm_obs[7] = ego_obs_list[11] / 340
+    #     norm_obs[8] = ego_obs_list[12] / 340
+    #     # (2) relative enm info
+    #     ego_AO, ego_TA, R, side_flag = get_AO_TA_R(ego_feature, enm_feature, return_side=True)
+    #     norm_obs[9] = (enm_obs_list[9] - ego_obs_list[9]) / 340
+    #     norm_obs[10] = (enm_obs_list[2] - ego_obs_list[2]) / 1000
+    #     norm_obs[11] = ego_AO
+    #     norm_obs[12] = ego_TA
+    #     norm_obs[13] = R / 10000
+    #     norm_obs[14] = side_flag
+    #     # (3) relative missile info
+    #     missile_sim = env.agents[agent_id].check_missile_warning()
+    #     if missile_sim is not None:
+    #         missile_feature = np.concatenate((missile_sim.get_position(), missile_sim.get_velocity()))
+    #         ego_AO, ego_TA, R, side_flag = get_AO_TA_R(ego_feature, missile_feature, return_side=True)
+    #         norm_obs[15] = (np.linalg.norm(missile_sim.get_velocity()) - ego_obs_list[9]) / 340
+    #         norm_obs[16] = (missile_feature[2] - ego_obs_list[2]) / 1000
+    #         norm_obs[17] = ego_AO
+    #         norm_obs[18] = ego_TA
+    #         norm_obs[19] = R / 10000
+    #         norm_obs[20] = side_flag
+    #     return norm_obs
+
+    #新的get_obs函数（2025.6.10改）
     def get_obs(self, env, agent_id):
-        """
-        Convert simulation states into the format of observation_space
+        norm_obs = np.zeros(22)  # 扩展为 22 维
 
-        ------
-        Returns: (np.ndarray)
-        - ego info
-            - [0] ego altitude           (unit: 5km)
-            - [1] ego_roll_sin
-            - [2] ego_roll_cos
-            - [3] ego_pitch_sin
-            - [4] ego_pitch_cos
-            - [5] ego v_body_x           (unit: mh)
-            - [6] ego v_body_y           (unit: mh)
-            - [7] ego v_body_z           (unit: mh)
-            - [8] ego_vc                 (unit: mh)
-        - relative enm info
-            - [9] delta_v_body_x         (unit: mh)
-            - [10] delta_altitude        (unit: km)
-            - [11] ego_AO                (unit: rad) [0, pi]
-            - [12] ego_TA                (unit: rad) [0, pi]
-            - [13] relative distance     (unit: 10km)
-            - [14] side_flag             1 or 0 or -1
-        - relative missile info
-            - [15] delta_v_body_x
-            - [16] delta altitude
-            - [17] ego_AO
-            - [18] ego_TA
-            - [19] relative distance
-            - [20] side flag
-        """
-        norm_obs = np.zeros(21)
+        # === (0) Ego 状态 ===
         ego_obs_list = np.array(env.agents[agent_id].get_property_values(self.state_var))
-        enm_obs_list = np.array(env.agents[agent_id].enemies[0].get_property_values(self.state_var))
-        # (0) extract feature: [north(km), east(km), down(km), v_n(mh), v_e(mh), v_d(mh)]
         ego_cur_ned = LLA2NEU(*ego_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
-        enm_cur_ned = LLA2NEU(*enm_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
         ego_feature = np.array([*ego_cur_ned, *ego_obs_list[6:9]])
-        enm_feature = np.array([*enm_cur_ned, *enm_obs_list[6:9]])
-        # (1) ego info normalization
+
+        # === (1) Ego info 归一化 ===
         norm_obs[0] = ego_obs_list[2] / 5000
         norm_obs[1] = np.sin(ego_obs_list[3])
         norm_obs[2] = np.cos(ego_obs_list[3])
@@ -76,15 +120,36 @@ class SingleCombatDodgeMissileTask(SingleCombatTask):
         norm_obs[6] = ego_obs_list[10] / 340
         norm_obs[7] = ego_obs_list[11] / 340
         norm_obs[8] = ego_obs_list[12] / 340
-        # (2) relative enm info
-        ego_AO, ego_TA, R, side_flag = get_AO_TA_R(ego_feature, enm_feature, return_side=True)
-        norm_obs[9] = (enm_obs_list[9] - ego_obs_list[9]) / 340
-        norm_obs[10] = (enm_obs_list[2] - ego_obs_list[2]) / 1000
-        norm_obs[11] = ego_AO
-        norm_obs[12] = ego_TA
-        norm_obs[13] = R / 10000
-        norm_obs[14] = side_flag
-        # (3) relative missile info
+
+        # === (2) 雷达探测敌人 ===
+        enemy = env.agents[agent_id].enemies[0]
+        is_locked, radar_info = self.radar.detect(
+            ego_pos=env.agents[agent_id].get_position(),
+            ego_vel=env.agents[agent_id].get_velocity(),
+            ego_yaw=env.agents[agent_id].get_property_value(c.attitude_heading_true_rad),
+            ego_pitch=env.agents[agent_id].get_property_value(c.attitude_pitch_rad),
+            tar_pos=enemy.get_position(),
+            tar_vel=enemy.get_velocity()
+        )
+
+        if is_locked:
+            enm_obs_list = np.array(enemy.get_property_values(self.state_var))
+            enm_cur_ned = LLA2NEU(*enm_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
+            enm_feature = np.array([*enm_cur_ned, *enm_obs_list[6:9]])
+            ego_AO, ego_TA, R, side_flag = get_AO_TA_R(ego_feature, enm_feature, return_side=True)
+
+            norm_obs[9] = (enm_obs_list[9] - ego_obs_list[9]) / 340
+            norm_obs[10] = (enm_obs_list[2] - ego_obs_list[2]) / 1000
+            norm_obs[11] = ego_AO
+            norm_obs[12] = ego_TA
+            norm_obs[13] = R / 10000
+            norm_obs[14] = side_flag
+            norm_obs[21] = 1.0  #  新增：雷达锁定标志位
+        else:
+            norm_obs[9:15] = [0.0, 0.0, 0.5, 0.5, 9999, 0.0]
+            norm_obs[21] = 0.0  #  新增：雷达未锁定
+
+        # === (3) 相对导弹信息 ===
         missile_sim = env.agents[agent_id].check_missile_warning()
         if missile_sim is not None:
             missile_feature = np.concatenate((missile_sim.get_position(), missile_sim.get_velocity()))
@@ -95,6 +160,9 @@ class SingleCombatDodgeMissileTask(SingleCombatTask):
             norm_obs[18] = ego_TA
             norm_obs[19] = R / 10000
             norm_obs[20] = side_flag
+        else:
+            norm_obs[15:21] = [0.0, 0.0, 0.5, 0.5, 9999, 0.0]
+
         return norm_obs
 
     def reset(self, env):
@@ -170,7 +238,7 @@ class SingleCombatShootMissileTask(SingleCombatDodgeMissileTask):
         ]
 
     def load_observation_space(self):
-        self.observation_space = spaces.Box(low=-10, high=10., shape=(21,))
+        self.observation_space = spaces.Box(low=-10, high=10., shape=(22,))
 
     def load_action_space(self):
         # aileron, elevator, rudder, throttle, shoot control
@@ -223,6 +291,10 @@ class HierarchicalSingleCombatShootTask(HierarchicalSingleCombatTask, SingleComb
     def normalize_action(self, env, agent_id, action):
         """Convert high-level action into low-level action.
         """
+        action = np.array(action)
+        # print("action:", action)
+        # print("self.norm_delta_velocity:", self.norm_delta_velocity)
+
         self._shoot_action[agent_id] = action[-1]
         return HierarchicalSingleCombatTask.normalize_action(self, env, agent_id, action[:-1].astype(np.int32))
 

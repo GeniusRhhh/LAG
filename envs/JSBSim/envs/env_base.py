@@ -58,6 +58,11 @@ class BaseEnv(gymnasium.Env):
     def load_task(self):
         self.task = BaseTask(self.config)
 
+    #agent 是在 load_simulator() 里构建的；
+    #由 self.config.aircraft_configs.items() 提供顺序；
+    #结果保存在 self._jsbsims 中；
+    #self.agents 是一个属性代理，实际上就是 self._jsbsims：
+
     def load_simulator(self):
         self._jsbsims = {}     # type: Dict[str, AircraftSimulator]
         for uid, config in self.config.aircraft_configs.items():

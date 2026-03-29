@@ -1,3 +1,8 @@
+import os
+import sys
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(project_root)
+
 import numpy as np
 import torch
 from envs.JSBSim.envs import SingleCombatEnv, SingleControlEnv, MultipleCombatEnv
@@ -41,21 +46,32 @@ render = True
 ego_policy_index = 1040
 enm_policy_index = 1040
 episode_rewards = 0
-ego_run_dir = "/home/lqh/jyh/CloseAirCombat/scripts/results/MultipleCombat/2v2/NoWeapon/HierarchySelfplay/mappo/artillery_check/wandb/latest-run/files"
-enm_run_dir = "/home/lqh/jyh/CloseAirCombat/scripts/results/SingleCombat/1v1/NoWeapon/HierarchySelfplay/ppo/artillery_check/wandb/latest-run/files"
+
+
+# ego_run_dir = "/home/lqh/jyh/CloseAirCombat/scripts/results/MultipleCombat/2v2/NoWeapon/HierarchySelfplay/mappo/artillery_check/wandb/latest-run/files"
+# enm_run_dir = "/home/lqh/jyh/CloseAirCombat/scripts/results/SingleCombat/1v1/NoWeapon/HierarchySelfplay/ppo/artillery_check/wandb/latest-run/files"
+# 设置路径
+ego_run_dir = "scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/shoot_test/run36"
+enm_run_dir = "scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/shoot_test/run36"
+
 experiment_name = ego_run_dir.split('/')[-4]
 
-env = MultipleCombatEnv("2v2/NoWeapon/HierarchySelfplay")
+#env = MultipleCombatEnv("2v2/NoWeapon/HierarchySelfplay") #无武器
+env = MultipleCombatEnv("2v2/ShootMissile/HierarchySelfplay")
+
 env.seed(0)
 args = Args()
 
 ego_policy = PPOActor(args, env.observation_space, env.action_space, device=torch.device("cuda"))
-enm_policy = PPOActor(args, spaces.Box(low=-10, high=10., shape=(15,)), env.action_space, device=torch.device("cuda"))
+#enm_policy = PPOActor(args, spaces.Box(low=-10, high=10., shape=(15,)), env.action_space, device=torch.device("cuda"))
+enm_policy = PPOActor(args, env.observation_space, env.action_space, device=torch.device("cuda"))
 ego_policy.eval()
 enm_policy.eval()
-ego_policy.load_state_dict(torch.load(ego_run_dir + f"/actor_{ego_policy_index}.pt"))
-enm_policy.load_state_dict(torch.load(enm_run_dir + f"/actor_{enm_policy_index}.pt"))
-
+# ego_policy.load_state_dict(torch.load(ego_run_dir + f"/actor_{ego_policy_index}.pt"))
+# enm_policy.load_state_dict(torch.load(enm_run_dir + f"/actor_{enm_policy_index}.pt"))
+# 加载 actor_latest.pt
+ego_policy.load_state_dict(torch.load(ego_run_dir + "/actor_latest.pt"))
+enm_policy.load_state_dict(torch.load(enm_run_dir + "/actor_latest.pt"))
 
 print("Start render")
 obs, _ = env.reset()
@@ -74,7 +90,7 @@ while True:
     ego_actions = _t2n(ego_actions)
     ego_rnn_states = _t2n(ego_rnn_states)
     # 2v2 obs converst to 1v1 obs
-    enm_obs = convert(enm_obs)
+    #enm_obs = convert(enm_obs)
     enm_actions, _, enm_rnn_states = enm_policy(enm_obs, enm_rnn_states, masks, deterministic=True)
     enm_actions = _t2n(enm_actions)
     enm_rnn_states = _t2n(enm_rnn_states)
