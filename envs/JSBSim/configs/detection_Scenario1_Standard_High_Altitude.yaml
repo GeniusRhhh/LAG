@@ -1,0 +1,53 @@
+aircraft_configs:
+  A0100:
+    init_state:
+      ic_h_sl_ft: 29527.56
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 1275.88
+    model: su27sk
+  A0200:
+    init_state:
+      ic_h_sl_ft: 29527.56
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 1275.88
+    model: su27sk
+  A0300:
+    init_state:
+      ic_h_sl_ft: 29527.56
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 1275.88
+    model: su27sk
+  A0400:
+    init_state:
+      ic_h_sl_ft: 29527.56
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 1275.88
+    model: su27sk
+  B0100:
+    init_state:
+      ic_h_sl_ft: 32808.4
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 1275.88
+    model: f16
+  B0200:
+    init_state:
+      ic_h_sl_ft: 29527.56
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 1275.88
+    model: f16
+  B0300:
+    init_state:
+      ic_h_sl_ft: 29527.56
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 1275.88
+    model: f16
+  B0400:
+    init_state:
+      ic_h_sl_ft: 31167.980000000003
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 1275.88
+    model: f16
+episode_time_s: 120.0
+num_agents: 8
+num_teams: 2
+task_name: 1v1

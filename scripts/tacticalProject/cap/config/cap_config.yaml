@@ -1,0 +1,185 @@
+# CAP战术任务配置文件
+# 所有位置基于A0100长机动态计算
+
+task: multiplecombat
+
+# ============ 基准参考点 ============
+base_reference:
+  a0100:
+    longitude: 120.6757
+    latitude: 60.0
+    heading: 0.0  # 航向（度，0=北）
+
+# ============ 编队配置 ============
+formation:
+  wingman_y_offset: 100  # 僚机Y偏移(km)
+  lead_x:
+    left: 75
+    right: 125
+  wingman_x:
+    left: 25
+    right: 175
+
+# ============ 敌机配置 ============
+enemy:
+  spawn_y: 400
+  spawn_x: [40, 80, 120, 160]
+
+# ============ FAOR配置 ============
+faor:
+  width: 200
+  length: 300
+
+# ============ 飞机配置（由ConfigManager动态生成） ============
+# 以下配置会被动态覆盖，这里仅作为备份/参考
+aircraft_configs:
+  A0100:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 120.6757
+      ic_lat_geod_deg: 60.0
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  A0200:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 120.2252
+      ic_lat_geod_deg: 60.9009
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  A0300:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 121.1261
+      ic_lat_geod_deg: 60.0
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  A0400:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 121.5766
+      ic_lat_geod_deg: 60.9009
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  B0100:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.3604
+      ic_lat_geod_deg: 63.6036
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  B0200:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.7207
+      ic_lat_geod_deg: 63.6036
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  B0300:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 121.0811
+      ic_lat_geod_deg: 63.6036
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  
+  B0400:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 121.4414
+      ic_lat_geod_deg: 63.6036
+      ic_h_sl_ft: 32800
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+
+# ============ 战术控制距离 ============
+control_ranges:
+  PR: 280.0      # 态势距离 (进入Intercept)
+  NLT: 180.0     # 初始距离 (进入Engage)
+  MELD: 150.0    # 目标跟踪距离
+  MTR: 120.0     # 最小跟踪距离
+  LR: 100.0       # 发射距离
+  TR: 80.0       # 转换距离
+  DOR: 60.0      # 期望脱离距离
+  DR: 50.0       # 决断距离
+  MTR_PRIME: 45.0  # 第二轮跟踪距离
+  LR_PRIME: 42.0   # 第二轮发射距离
+  TR_PRIME: 38.0   # 第二轮转换距离
+  MAR: 35.0      # 最小脱离距离
+
+# ============ 预警机配置 ============
+awacs:
+  detection_range: 400.0    # 探测距离(km)
+  position_error: 2.5       # 位置误差(km)
+  altitude_error: 0.5       # 高度误差(km)
+  heading_error: 10.0       # 航向误差(度)
+  max_lost_duration: 20.0   # 最大丢失时长(秒)
+  lost_probability: 0.02    # 每次更新丢失概率
+  position: [100.0, -50.0, 10.0]  # 预警机位置(km)
+
+# ============ 雷达配置 ============
+radar:
+  max_detection_range: 200.0  # 最大探测距离(km)
+  max_track_range: 160.0      # 最大跟踪距离(km)
+  max_lock_range: 120.0       # 最大锁定距离(km)
+  max_tracks: 6               # 最大高精度跟踪数
+  track_expire_time: 30.0     # 航迹过期时间(秒)
+  notch_velocity: 50.0        # 多普勒盲区速度阈值(m/s)
+  base_detection_prob: 0.85   # 基础探测概率
+  track_loss_prob: 0.02       # 航迹丢失概率
+  # 扫描时间表 {俯仰条数: {方位角范围: 扫描时间}}
+  scan_params:
+    bars_1: {az_10: 2.0, az_30: 5.0, az_60: 10.0}
+    bars_2: {az_10: 4.0, az_30: 10.0, az_60: 20.0}
+    bars_4: {az_10: 8.0, az_30: 20.0, az_60: 40.0}
+
+# ============ 协同探测配置 ============
+cooperative_detection:
+  target_lost_timeout: 20.0   # 目标丢失超时(秒)
+  sweep_total_angle: 120.0    # 推磨扫描总角度(度)
+  directed_spread: 5.0        # 定向扫描分散角度(度)
+
+# ============ 协同交战配置 ============
+cooperative_engagement:
+  cooperative_track_time: 10.0    # 发射前协同跟踪时间(秒)
+  track_quality_threshold: 0.6   # 跟踪质量告警阈值
+  assignment_sticky_time: 5.0    # 分配粘性时间(秒)
+  cooperative_track_distance: 20.0  # 启动协同跟踪的距发射距离(km)
+
+# ============ 状态机配置 ============
+state_machine:
+  hysteresis: 30.0           # 滞后距离(km)
+  min_state_duration: 10.0   # 最小状态保持时间(秒)
+
+# ============ 环境配置 ============
+max_steps: 10000
+time_interval: 0.2

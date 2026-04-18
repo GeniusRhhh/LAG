@@ -1,13 +1,13 @@
 import logging
 import time
 import gymnasium
+import torch
 from gymnasium.utils import seeding
 import numpy as np
 from typing import Dict, Any, Tuple
 from ..core.simulatior import AircraftSimulator, BaseSimulator
 from ..tasks.task_base import BaseTask
 from ..utils.utils import parse_config
-
 
 class BaseEnv(gymnasium.Env):
     """
@@ -17,7 +17,7 @@ class BaseEnv(gymnasium.Env):
 
     An BaseEnv is instantiated with a Task that implements a specific
     aircraft control task with its own specific observation/action space and
-    variables and agent_reward calculation.
+    reward calculation.
     """
     metadata = {"render.modes": ["human", "txt"]}
 
@@ -27,10 +27,12 @@ class BaseEnv(gymnasium.Env):
         self.max_steps = getattr(self.config, 'max_steps', 100)  # type: int
         self.sim_freq = getattr(self.config, 'sim_freq', 60)  # type: int
         self.agent_interaction_steps = getattr(self.config, 'agent_interaction_steps', 12)  # type: int
+        self.n_rollout_threads = getattr(self.config, 'n_rollout_threads', 1)  # 添加 n_rollout_threads，默认值为 1
         self.center_lon, self.center_lat, self.center_alt = \
             getattr(self.config, 'battle_field_center', (120.0, 60.0, 0.0))
         self._create_records = False
         self.load()
+        print(f"Initialized BaseEnv with num_agents={self.num_agents}")
 
     @property
     def num_agents(self) -> int:
@@ -61,13 +63,29 @@ class BaseEnv(gymnasium.Env):
         self.task = BaseTask(self.config)
 
     def load_simulator(self):
-        self._jsbsims = {}     # type: Dict[str, AircraftSimulator]
+        self._jsbsims = {}  # type: Dict[str, AircraftSimulator]
         for uid, config in self.config.aircraft_configs.items():
+            init_state = config.get("init_state")
+            # Normalize init_state and ensure target_* properties are initialized.
+            # SingleControlEnv.reset_simulators injects these on reset; multi-agent envs
+            # typically don't, which can leave target properties unset.
+            if init_state is None:
+                init_state = {}
+            else:
+                init_state = dict(init_state)
+
+            if "target_heading_deg" not in init_state and "ic_psi_true_deg" in init_state:
+                init_state["target_heading_deg"] = float(init_state["ic_psi_true_deg"])
+            if "target_altitude_ft" not in init_state and "ic_h_sl_ft" in init_state:
+                init_state["target_altitude_ft"] = float(init_state["ic_h_sl_ft"])
+            if "target_velocities_u_mps" not in init_state and "ic_u_fps" in init_state:
+                init_state["target_velocities_u_mps"] = float(init_state["ic_u_fps"]) * 0.3048
+
             self._jsbsims[uid] = AircraftSimulator(
                 uid=uid,
                 color=config.get("color", "Red"),
                 model=config.get("model", "f16"),
-                init_state=config.get("init_state"),
+                init_state=init_state,
                 origin=getattr(self.config, 'battle_field_center', (120.0, 60.0, 0.0)),
                 sim_freq=self.sim_freq,
                 num_missiles=config.get("missile", 0))
@@ -86,7 +104,8 @@ class BaseEnv(gymnasium.Env):
                 else:
                     sim.enemies.append(s)
 
-        self._tempsims = {}    # type: Dict[str, BaseSimulator]
+        self._tempsims = {}  # type: Dict[str, BaseSimulator]
+        self._finished_missiles = {}  # type: Dict[str, BaseSimulator] - 保存已结束的导弹
 
     def add_temp_simulator(self, sim: BaseSimulator):
         self._tempsims[sim.uid] = sim
@@ -102,6 +121,7 @@ class BaseEnv(gymnasium.Env):
         for sim in self._jsbsims.values():
             sim.reload()
         self._tempsims.clear()
+        self._finished_missiles.clear()
         # reset task
         self.task.reset(self)
         obs = self.get_obs()
@@ -111,7 +131,7 @@ class BaseEnv(gymnasium.Env):
         """Run one timestep of the environment's dynamics. When end of
         episode is reached, you are responsible for calling `reset()`
         to reset this environment's observation. Accepts an action and
-        returns a tuple (observation, reward_visualize, done, info).
+        returns a tuple (observation, rewards, dones, info).
 
         Args:
             action (np.ndarray): the agents' actions, allow opponent's action input
@@ -134,15 +154,36 @@ class BaseEnv(gymnasium.Env):
         for _ in range(self.agent_interaction_steps):
             for sim in self._jsbsims.values():
                 sim.run()
-            for sim in self._tempsims.values():
+
+            # 运行导弹并处理已结束的导弹
+            finished_missiles = []
+            for missile_id, sim in list(self._tempsims.items()):
                 sim.run()
+                # 检查导弹是否已结束（击中或未击中）
+                if not sim.is_alive:
+                    finished_missiles.append((missile_id, sim))
+
+            # 将已结束的导弹移动到finished_missiles中
+            for missile_id, sim in finished_missiles:
+                if missile_id not in self._finished_missiles:
+                    self._finished_missiles[missile_id] = sim
+                    # 从活跃导弹中移除
+                    if missile_id in self._tempsims:
+                        del self._tempsims[missile_id]
+
         self.task.step(self)
 
         obs = self.get_obs()
 
         dones = {}
         for agent_id in self.agents.keys():
-            done, info = self.task.get_termination(self, agent_id, info)
+            termination_result = self.task.get_termination(self, agent_id, info)
+            if len(termination_result) == 2:
+                done, info = termination_result
+            elif len(termination_result) >= 2:
+                done, info = termination_result[0], {**info, **termination_result[1]}
+            else:
+                raise ValueError(f"get_termination returned {len(termination_result)} values, expected at least 2")
             dones[agent_id] = [done]
 
         rewards = {}
@@ -226,7 +267,7 @@ class BaseEnv(gymnasium.Env):
                 log_msg = sim.log()
                 if log_msg is not None:
                     data.append(log_msg + "\n")
-        
+
             for sim in self._tempsims.values():
                 log_msg = sim.log()
                 if log_msg is not None:
@@ -256,7 +297,7 @@ class BaseEnv(gymnasium.Env):
         return [seed]
 
     def _pack(self, data: Dict[str, Any]) -> np.ndarray:
-        """Pack seperated key-value dict into grouped np.ndarray"""
+        """Pack separated key-value dict into grouped np.ndarray"""
         ego_data = np.array([data[uid] for uid in self.ego_ids])
         enm_data = np.array([data[uid] for uid in self.enm_ids])
         if enm_data.shape[0] > 0:
@@ -268,15 +309,38 @@ class BaseEnv(gymnasium.Env):
         except AssertionError:
             import pdb
             pdb.set_trace()
-        # only return data that belongs to RL agents
-        return data[:self.num_agents, ...]
+        # 使用实际智能体数量（支持2v2和4v4）
+        actual_num_agents = len(self._jsbsims)
+        return data[:actual_num_agents, ...]
 
     def _unpack(self, data: np.ndarray) -> Dict[str, Any]:
-        """Unpack grouped np.ndarray into seperated key-value dict"""
-        assert isinstance(data, (np.ndarray, list, tuple)) and len(data) == self.num_agents
+        """Unpack grouped np.ndarray into separated key-value dict"""
+        if isinstance(data, torch.Tensor):
+            data = data.cpu().numpy()
+        # 使用实际智能体数量（支持2v2和4v4）
+        actual_num_agents = len(self._jsbsims) if hasattr(self, '_jsbsims') else self.num_agents
+        if isinstance(data, np.ndarray):
+            if data.ndim == 3 and data.shape[1] == actual_num_agents:  # (n_env, num_agents, act_dim)
+                pass
+            elif data.ndim == 3 and data.shape[1] == self.num_agents and actual_num_agents != self.num_agents:
+                # 如果任务定义的num_agents和实际不匹配，使用实际的
+                logging.warning(f"_unpack: task.num_agents={self.num_agents}, actual={actual_num_agents}, adjusting...")
+                # 这里可能需要调整数据形状，但通常应该已经匹配
+                pass
+            elif data.ndim == 2 and data.shape[0] == self.n_rollout_threads and data.shape[1] == self.action_space.shape[0]:  # (n_env, act_dim)
+                data = data[:, np.newaxis, :]  # 转换为 (n_env, 1, act_dim)
+            elif data.ndim == 1 and data.shape[0] == self.action_space.shape[0]:  # (act_dim,)，兼容降维情况
+                data = data[np.newaxis, np.newaxis, :]  # 转换为 (1, 1, act_dim)
+            else:
+                raise ValueError(f"Unsupported action shape: {data.shape}, expected (n_rollout_threads, {actual_num_agents}, act_dim)")
+        assert isinstance(data, (np.ndarray, list, tuple)) and data.shape[0] == self.n_rollout_threads
+        assert data.shape[1] == actual_num_agents, f"Action shape mismatch: data.shape[1]={data.shape[1]}, actual_num_agents={actual_num_agents}"
         # unpack data in the same order to packing process
-        unpack_data = dict(zip((self.ego_ids + self.enm_ids)[:self.num_agents], data))
-        # fill in None for other not-RL agents
-        for agent_id in (self.ego_ids + self.enm_ids)[self.num_agents:]:
+        unpack_data = {}
+        all_agent_ids = self.ego_ids + self.enm_ids
+        for i, agent_id in enumerate(all_agent_ids[:actual_num_agents]):
+            unpack_data[agent_id] = data[:, i, :] if data.ndim == 3 else data
+        # fill in None for other not-RL agents (if any)
+        for agent_id in all_agent_ids[actual_num_agents:]:
             unpack_data[agent_id] = None
         return unpack_data

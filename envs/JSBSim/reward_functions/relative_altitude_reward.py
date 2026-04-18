@@ -17,16 +17,21 @@ class RelativeAltitudeReward(BaseRewardFunction):
 
     def get_reward(self, task, env, agent_id):
         """
-        Reward is the sum of all the punishments.
+        根据智能体与敌机的相对高度计算奖励。
 
         Args:
-            task: task instance
-            env: environment instance
+            task: 当前任务实例
+            env: 环境实例，提供智能体和敌机的状态信息
+            agent_id: 智能体的唯一标识符
 
         Returns:
-            (float): reward
+            (float): 奖励值
         """
-        ego_z = env.agents[agent_id].get_position()[-1] / 1000    # unit: km
-        enm_z = env.agents[agent_id].enemies[0].get_position()[-1] / 1000    # unit: km
+        # 获取智能体的高度（单位：千米）
+        ego_z = env.agents[agent_id].get_position()[-1] / 1000
+        # 获取敌机的高度（单位：千米）
+        enm_z = env.agents[agent_id].enemies[0].get_position()[-1] / 1000
+        # 计算相对高度惩罚
         new_reward = min(self.KH - np.abs(ego_z - enm_z), 0)
+        # 返回处理后的奖励值
         return self._process(new_reward, agent_id)

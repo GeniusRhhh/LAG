@@ -16,46 +16,58 @@ acceleration_limit_z: 10.0
 aircraft_configs: {
   A0100: {
     color: Red,
-    model: f16,
+    model: su27sk,
     init_state: {
       ic_long_gc_deg: 120.0,
       ic_lat_geod_deg: 60.0,
       ic_h_sl_ft: 20000,
       ic_psi_true_deg: 0.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   },
   A0200: {
     color: Red,
-    model: f16,
+    model: su27sk,
     init_state: {
       ic_long_gc_deg: 120.01,
       ic_lat_geod_deg: 60.0,
       ic_h_sl_ft: 20000,
       ic_psi_true_deg: 0.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   },
   B0100: {
     color: Blue,
-    model: f16,
+    model: su27sk,
     init_state: {
       ic_h_sl_ft: 20000,
       ic_long_gc_deg: 120.0,
       ic_lat_geod_deg: 60.1,
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   },
   B0200: {
     color: Blue,
-    model: f16,
+    model: su27sk,
     init_state: {
       ic_h_sl_ft: 20000,
       ic_long_gc_deg: 120.01,
       ic_lat_geod_deg: 60.1,
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
+      ic_alpha_deg: 2.0,
+      ic_theta_deg: 2.0,
+      ic_beta_deg: 0.0,
     },
   }
 }

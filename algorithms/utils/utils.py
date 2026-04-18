@@ -36,11 +36,31 @@ def get_gard_norm(it):
     return math.sqrt(sum_grad)
 
 
-def init(module: nn.Module, weight_init, bias_init, gain=1):
-    weight_init(module.weight.data, gain=gain)
+# def init(module: nn.Module, weight_init, bias_init, gain=1):
+#     weight_init(module.weight.data, gain=gain)
+#     bias_init(module.bias.data)
+#     return module
+def init(module, weight_init, bias_init, gain=1.0):
+    """
+    Initialize module's weights and biases.
+
+    Args:
+        module: PyTorch module (e.g., nn.Linear)
+        weight_init: Weight initialization function (e.g., nn.init.uniform_, nn.init.orthogonal_)
+        bias_init: Bias initialization function
+        gain: Gain for weight initialization (used as range for uniform_, scaling for orthogonal_)
+
+    Returns:
+        Initialized module
+    """
+    if weight_init == nn.init.uniform_:
+        # For uniform_, use gain as the range [-gain, gain]
+        weight_init(module.weight.data, a=-gain, b=gain)
+    else:
+        # For other initializations (e.g., orthogonal_), pass gain directly
+        weight_init(module.weight.data, gain=gain)
     bias_init(module.bias.data)
     return module
-
 
 def get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])

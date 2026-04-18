@@ -1,0 +1,150 @@
+# 战术系统BVR配置文件（aggressive_clear 初始态势）
+# 约束：敌我双方初始x,y不变，仅调整高度/速度，使我方更高更快。
+# conservative_clear 请使用 tactical_bvr.yaml
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 3300           # episode length: 660s (11分钟)
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# 飞机配置 - 使用经纬度设置初始距离
+# 距离计算公式：1度纬度 ≈ 111.32 km
+# 当前配置：我方纬度60.0，敌方纬度61.08，纬度差1.08度 ≈ 120km
+# 如需修改距离，调整敌方纬度即可：
+#   - 150km: 敌方纬度 = 60.0 + (150/111.32) = 61.35
+#   - 180km: 敌方纬度 = 60.0 + (180/111.32) = 61.62
+#   - 200km: 敌方纬度 = 60.0 + (200/111.32) = 61.80
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,
+      ic_lat_geod_deg: 60.0,      # 我方基准纬度
+      ic_h_sl_ft: 22000,          # 我方更高（约7315m）
+      ic_psi_true_deg: 0.0,
+      ic_u_fps: 900.0,            # 我方更快
+    },
+    missile: 4
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.05,
+      ic_lat_geod_deg: 60.0,
+      ic_h_sl_ft: 22000,
+      ic_psi_true_deg: 0.0,
+      ic_u_fps: 900.0,
+    },
+    missile: 4
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,
+      ic_lat_geod_deg: 61.17,     # 敌方纬度（120km距离：60.0 + 1.08 = 61.08）
+      ic_h_sl_ft: 20000,          # 敌方保持基准高度（约6096m）
+      ic_psi_true_deg: 180.0,
+      ic_u_fps: 800.0,
+    },
+    missile: 4
+  },
+  B0200: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,
+      ic_lat_geod_deg: 61.17,     # 敌方纬度（与B0100相同）
+      ic_h_sl_ft: 20000,
+      ic_psi_true_deg: 180.0,
+      ic_u_fps: 800.0,
+    },
+    missile: 4
+  }
+}
+
+# 武器系统配置
+max_attack_angle: 60
+max_attack_distance: 80000    # 80km最大攻击距离
+min_attack_interval: 30
+
+# 战场中心 (longitude, latitude, altitude)
+battle_field_center: [120.0, 60.54, 0.0]  # 中点位置
+
+# 战术距离配置 - 完整的8个阶段
+# 注意：如果修改了初始距离，需要按比例调整这些距离参数
+# 例如：初始距离从120km改为150km（1.25倍），则所有距离参数应乘以1.25
+tactical_distances: {
+  # 战术阶段控制距离 (米)
+  NLT: 120000,        # 120km - 初始战术选择距离（应与初始距离匹配）
+  MELD: 100000,       # 100km
+  MTR: 80000,         # 80km
+  LR: 78000,          # 78km - 导弹最大发射距离
+  TR: 75000,          # 75km - 中制导结束
+  DOR: 70000,         # 70km - 规避机动
+  DR: 65000,          # 65km
+  MAR: 40000,         # 40km - 最小规避距离
+
+  # MultipleCombatEnv必需的标准距离
+  detection_range: 120000,      # 探测距离（应与NLT匹配）
+  engagement_range: 100000,      # 交战距离（应与MELD匹配）
+  launch_range: 78000,          # 发射距离（应与LR匹配）
+  mar_range: 40000,             # 最小规避距离（应与MAR匹配）
+  wez_range: 78000,            # 武器交战区
+  rmax: 80000,                  # 最大射程
+  rmin: 5000,                   # 最小射程
+
+  # 雷达控制距离
+  track_range: 100000,          # 跟踪距离
+  lock_range: 80000,            # 锁定距离
+  return_search_range: 40000,   # 返航解锁距离
+}
+
+# 战术参数配置
+tactical_params: {
+  crank_angle: 30.0,
+  turn_rate: 8.0,
+  short_skate_crank_angle: 30.0,
+  short_skate_turn_cold_angle: 90.0,
+  short_skate_crank_duration: 6.0,
+  short_skate_turn_cold_duration: 15.0,
+
+  altitude_separation: 500.0,
+  climb_rate: 10.0,
+  descent_rate: 10.0,
+
+  acceleration: 50.0,
+  deceleration: 50.0,
+}
+
+# reward config
+PostureReward_scale: 5.0
+PostureReward_potential: true
+PostureReward_orientation_version: v2
+PostureReward_range_version: v3
+
+AltitudeReward_safe_altitude: 4.0
+AltitudeReward_danger_altitude: 3.5
+AltitudeReward_Kv: 0.2
+
+# 数据记录配置
+data_recording: {
+  enabled: true,
+  output_dir: "tactical_simulation_results",
+  record_interval: 0.2,
+  save_trajectory: true,
+  save_radar_status: true,
+  save_missile_status: true,
+  save_acmi: true
+}

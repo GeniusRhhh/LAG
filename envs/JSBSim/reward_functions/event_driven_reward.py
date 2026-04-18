@@ -1,5 +1,5 @@
 from .reward_function_base import BaseRewardFunction
-
+from ..utils.RadarModel import RadarModel
 
 class EventDrivenReward(BaseRewardFunction):
     """
@@ -13,22 +13,14 @@ class EventDrivenReward(BaseRewardFunction):
         super().__init__(config)
 
     def get_reward(self, task, env, agent_id):
-        """
-        Reward is the sum of all the events.
-
-        Args:
-            task: task instance
-            env: environment instance
-
-        Returns:
-            (float): reward
-        """
         reward = 0
         if env.agents[agent_id].is_shotdown:
-            reward -= 200
+            reward -= 50
         elif env.agents[agent_id].is_crash:
-            reward -= 200
+            reward -= 50
         for missile in env.agents[agent_id].launch_missiles:
             if missile.is_success:
-                reward += 200
+                reward += 50
+            elif missile.is_alive:
+                reward += 10
         return self._process(reward, agent_id)

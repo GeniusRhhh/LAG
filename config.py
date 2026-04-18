@@ -20,6 +20,7 @@ def get_config():
     parser = _get_log_config(parser)
     parser = _get_eval_config(parser)
     parser = _get_render_config(parser)
+    parser = _get_sac_config(parser)  # 添加 SAC 参数组
     return parser
 
 
@@ -56,7 +57,7 @@ def _get_prepare_config(parser: argparse.ArgumentParser):
     group = parser.add_argument_group("Prepare parameters")
     group.add_argument("--env-name", type=str, default='JSBSim',
                        help="specify the name of environment")
-    group.add_argument("--algorithm-name", type=str, default='ppo', choices=["ppo", "mappo"],
+    group.add_argument("--algorithm-name", type=str, default='ppo', choices=["ppo", "mappo","sac","none"],
                        help="Specifiy the algorithm (default ppo)")
     group.add_argument("--experiment-name", type=str, default="check",
                        help="An identifier to distinguish different experiment.")
@@ -78,6 +79,10 @@ def _get_prepare_config(parser: argparse.ArgumentParser):
                        help="for setprobtitle use")
     group.add_argument("--wandb-name", type=str, default='liuqh',
                        help="[for wandb usage], to specify user's name for simply collecting training data.")
+    group.add_argument("--max-episodes", type=int, default=2000,
+                       help='Number of environment steps to train (default: 1e7)')
+    group.add_argument("--max_steps", type=int, default=10000,  # 添加 max_steps 参数
+                       help="Maximum steps per episode (default: 10000)")
     return parser
 
 
@@ -106,6 +111,8 @@ def _get_replaybuffer_config(parser: argparse.ArgumentParser):
                        help='Whether to use generalized advantage estimation')
     group.add_argument("--gae-lambda", type=float, default=0.95,
                        help='gae lambda parameter (default: 0.95)')
+    group.add_argument("--normalize-reward", action='store_true', default=False,
+                       help='Whether to normalize rewards in the reward function')
     return parser
 
 
@@ -230,7 +237,7 @@ def _get_selfplay_config(parser: argparse.ArgumentParser):
     group = parser.add_argument_group("Selfplay parameters")
     group.add_argument("--use-selfplay", action='store_true', default=False,
                        help="By default false. If set, use selfplay algorithms.")
-    group.add_argument("--selfplay-algorithm", type=str, default='sp', choices=["sp", "fsp", "pfsp"],
+    group.add_argument("--selfplay-algorithm", type=str, default='sp', choices=["sp", "fsp", "pfsp","none"],
                        help="Specifiy the selfplay algorithm (default 'sp')")
     group.add_argument('--n-choose-opponents', type=int, default=1,
                        help="number of different opponents chosen for rollout. (default 1)")
@@ -299,7 +306,40 @@ def _get_render_config(parser: argparse.ArgumentParser):
     group.add_argument("--render-index", type=str, default='latest', help="the index of ego policy. by default latest")
     return parser
 
-
+def _get_sac_config(parser: argparse.ArgumentParser):
+    """
+    SAC parameters:
+        --actor-lr <float>
+            learning rate for actor network (default: 3e-4)
+        --critic-lr <float>
+            learning rate for critic network (default: 1e-4)
+        --alpha-lr <float>
+            learning rate for temperature parameter alpha (default: 3e-4)
+        --init-alpha <float>
+            initial value for temperature parameter alpha (default: 1.0)
+        --target_entropy <float>
+            target entropy for SAC (default: -1.0)
+        --batch-size <int>
+            batch size for training (default: 512)
+        --tau <float>
+            soft update coefficient for target network (default: 0.005)
+    """
+    group = parser.add_argument_group("SAC parameters")
+    group.add_argument("--actor-lr", type=float, default=3e-4,
+                       help="learning rate for actor network (default: 3e-4)")
+    group.add_argument("--critic-lr", type=float, default=1e-4,
+                       help="learning rate for critic network (default: 1e-4)")
+    group.add_argument("--alpha-lr", type=float, default=3e-4,
+                       help="learning rate for temperature parameter alpha (default: 3e-4)")
+    group.add_argument("--init-alpha", type=float, default=1.0,
+                       help="initial value for temperature parameter alpha (default: 1.0)")
+    group.add_argument("--target_entropy", type=float, default=-1.0,
+                       help="target entropy for SAC (default: -1.0)")
+    group.add_argument("--batch-size", type=int, default=512,
+                       help="batch size for training (default: 512)")
+    group.add_argument("--tau", type=float, default=0.005,
+                       help="soft update coefficient for target network (default: 0.005)")
+    return parser
 if __name__ == "__main__":
     parser = get_config()
     all_args = parser.parse_args()

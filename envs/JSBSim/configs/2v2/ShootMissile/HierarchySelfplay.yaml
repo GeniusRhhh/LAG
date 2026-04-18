@@ -1,6 +1,5 @@
 # task config
 task: hierarchical_multiplecombat_shoot
-
 # simulation config
 sim_freq: 60
 agent_interaction_steps: 12 # step 0.2s
@@ -12,7 +11,6 @@ acceleration_limit_x: 10.0
 acceleration_limit_y: 10.0
 acceleration_limit_z: 10.0
 
-# aircraft config
 aircraft_configs: {
   A0100: {
     color: Red,
@@ -30,7 +28,7 @@ aircraft_configs: {
     color: Red,
     model: f16,
     init_state: {
-      ic_long_gc_deg: 120.01,
+      ic_long_gc_deg: 120.01,  # 稍偏移 0.01 度，约 1 公里
       ic_lat_geod_deg: 60.0,
       ic_h_sl_ft: 20000,
       ic_psi_true_deg: 0.0,
@@ -44,7 +42,7 @@ aircraft_configs: {
     init_state: {
       ic_h_sl_ft: 20000,
       ic_long_gc_deg: 120.0,
-      ic_lat_geod_deg: 60.1,
+      ic_lat_geod_deg: 60.8,  # 改为 60.5
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
     },
@@ -56,22 +54,22 @@ aircraft_configs: {
     init_state: {
       ic_h_sl_ft: 20000,
       ic_long_gc_deg: 120.01,
-      ic_lat_geod_deg: 60.1,
+      ic_lat_geod_deg: 60.8,  # 改为 60.5
       ic_psi_true_deg: 180.0,
       ic_u_fps: 800.0,
     },
     missile: 2
   }
 }
-max_attack_angle: 45        # unit: degree
-max_attack_distance: 14000  # unit: m
-min_attack_interval: 125     # unit: step
+max_attack_angle: 60
+max_attack_distance: 35000
+min_attack_interval: 30
 
 # (lontitude, latitude, altitude)
 battle_field_center: [120.0, 60.0, 0.0]
 
 # reward config
-PostureReward_scale: 15.0
+PostureReward_scale: 5.0
 PostureReward_potential: true
 PostureReward_orientation_version: v2
 PostureReward_range_version: v3

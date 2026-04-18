@@ -1,0 +1,193 @@
+# 2v2拖曳射击战术配置文件
+# 基于现有的HierarchySelfplay.yaml格式
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 1100           # episode length: 500s - 增加时间确保完整战术执行
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# 飞机配置 - 使用正确的经纬度设置90km距离
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 己方长机
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
+      ic_u_fps: 1200.0,            # 800英尺/秒
+    },
+    missile: 2
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,     # 己方僚机，右侧1km偏移
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
+      ic_u_fps: 1200.0,            # 800英尺/秒
+    },
+    missile: 2
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 敌方长机
+      ic_lat_geod_deg: 60.8,      # 90km距离 (0.8度纬度差约90km)
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
+      ic_u_fps: 1200.0,            # 800英尺/秒
+    },
+    missile: 2
+  },
+  B0200: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,     # 敌方僚机，右侧1km偏移
+      ic_lat_geod_deg: 60.8,      # 90km距离
+      ic_h_sl_ft: 20000,          # 20,000英尺
+      ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
+      ic_u_fps: 1200.0,            # 800英尺/秒
+    },
+    missile: 2
+  }
+}
+
+# 武器系统配置
+max_attack_angle: 60
+max_attack_distance: 70000    # 70km最大攻击距离
+min_attack_interval: 30
+
+# 战场中心 (longitude, latitude, altitude)
+battle_field_center: [120.0, 60.4, 0.0]  # 中点位置
+
+# 拖曳射击战术距离配置
+tactical_distances: {
+  # 战术阶段控制距离 (米)
+  NLT_MELD_max: 90000,        # 90km
+  NLT_MELD_min: 81000,        # 81km
+  MELD_MTR_max: 81000,        # 81km
+  MELD_MTR_min: 45000,        # 45km
+  MTR_TR_max: 45000,          # 45km
+  MTR_TR_min: 41000,          # 41km
+  TR_DOR_max: 41000,          # 41km
+  TR_DOR_min: 19600,          # 19.6km
+  DOR_DR_max: 19600,          # 19.6km
+  DOR_DR_min: 14500,          # 14.5km
+  
+  # 导弹发射距离
+  leader_launch_range: 45000,   # 长机45km发射
+  wingman_launch_range: 41000,  # 僚机41km发射
+  enemy_launch_ranges: [45000, 41000, 19600],  # 敌方发射距离
+  
+  # MultipleCombatEnv必需的标准距离
+  detection_range: 100000,      # 探测距离100km
+  engagement_range: 90000,      # 交战距离90km (必需)
+  launch_range: 45000,          # 发射距离45km (必需)
+  mar_range: 19600,             # 最小规避距离19.6km (必需)
+  wez_range: 45000,             # 武器交战区45km
+  rmax: 60000,                  # 最大射程60km
+  rmin: 5000,                   # 最小射程5km
+
+  # 雷达控制距离
+  track_range: 81000,           # 跟踪距离81km
+  lock_range: 45000,            # 锁定距离45km
+  return_search_range: 19600,   # 返航解锁距离19.6km
+}
+
+# 拖曳射击战术参数
+drag_shoot_tactics: {
+  # 机动参数
+  crank_angle: 30.0,            # crank角度30度
+  turn_rate: 8.0,               # 转弯率8度/秒
+  short_skate_angle: 45.0,      # short_skate角度45度
+  short_skate_duration: 5.0,    # short_skate持续时间5秒
+  return_heading: 0.0,          # 返航航向0度
+  
+  # 己方战术行为定义
+  friendly_tactics: {
+    NLT_MELD: {
+      leader_action: "level_flight",
+      wingman_action: "right_crank",
+      wingman_params: {
+        turn_angle: 30.0,
+        turn_rate: 8.0
+      }
+    },
+    MELD_MTR: {
+      leader_action: "level_flight", 
+      wingman_action: "left_crank",
+      wingman_params: {
+        turn_angle: -30.0,
+        turn_rate: 8.0
+      }
+    },
+    MTR_TR: {
+      leader_action: "level_flight",
+      wingman_action: "level_flight",
+      launch_enabled: true
+    },
+    TR_DOR: {
+      leader_action: "short_skate",
+      leader_params: {
+        turn_angle: -45.0,
+        turn_rate: 8.0,
+        return_heading: 0.0
+      },
+      wingman_action: "level_flight"
+    },
+    DOR_DR: {
+      leader_action: "return_flight",
+      leader_params: {
+        heading: 0.0
+      },
+      wingman_action: "short_skate",
+      wingman_params: {
+        turn_angle: -45.0,
+        turn_rate: 8.0,
+        return_heading: 0.0
+      }
+    }
+  },
+  
+  # 敌方战术行为
+  enemy_tactics: {
+    default_action: "level_flight",
+    launch_enabled: true
+  }
+}
+
+# reward config (继承现有配置)
+PostureReward_scale: 5.0
+PostureReward_potential: true
+PostureReward_orientation_version: v2
+PostureReward_range_version: v3
+
+AltitudeReward_safe_altitude: 4.0
+AltitudeReward_danger_altitude: 3.5
+AltitudeReward_Kv: 0.2
+
+# 数据记录配置
+data_recording: {
+  enabled: true,
+  output_dir: "air_combat_results",
+  record_interval: 0.2,
+  save_trajectory: true,
+  save_radar_status: true,
+  save_missile_status: true,
+  save_acmi: true
+}

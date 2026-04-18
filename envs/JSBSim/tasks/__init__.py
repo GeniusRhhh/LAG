@@ -1,3 +1,7 @@
 from .heading_task import HeadingTask
 from .singlecombat_task import SingleCombatTask, HierarchicalSingleCombatTask
-from .singlecombat_with_missle_task import SingleCombatDodgeMissileTask, HierarchicalSingleCombatDodgeMissileTask, HierarchicalSingleCombatShootTask, SingleCombatShootMissileTask
+from .singlecombat_with_missle_task import SingleCombatDodgeMissileTask, HierarchicalSingleCombatDodgeMissileTask, \
+    HierarchicalSingleCombatShootTask, SingleCombatShootMissileTask
+from .tactical_template_test_task import TacticalTemplateTestTask
+from .TacticalTemplate import TacticalTemplate
+from .pure_maneuver_task import PureManeuverTask

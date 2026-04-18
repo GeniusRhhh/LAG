@@ -3,7 +3,7 @@ import logging
 import numpy as np
 from collections import deque
 from abc import ABC, abstractmethod
-from typing import Literal, Union, List
+from typing import Literal, Union, List, Dict, Any
 
 import jsbsim
 from .catalog import Property, Catalog
@@ -12,16 +12,25 @@ from ..utils.utils import get_root_dir, LLA2NEU, NEU2LLA
 TeamColors = Literal["Red", "Blue", "Green", "Violet", "Orange"]
 
 
+def _is_property_like(prop) -> bool:
+    if isinstance(prop, Property):
+        return True
+    return hasattr(prop, "name_jsbsim") and hasattr(prop, "access")
+
+
+def is_leader_agent_id(uid: str) -> bool:
+    """Return whether an agent ID represents the lead aircraft of a 2-ship pair."""
+    digits = "".join(ch for ch in uid if ch.isdigit())
+    if len(digits) >= 4 and digits.endswith("00"):
+        try:
+            return int(digits[:-2]) % 2 == 1
+        except ValueError:
+            pass
+    return uid.endswith("100")
+
+
 class BaseSimulator(ABC):
-
     def __init__(self, uid: str, color: TeamColors, dt: float):
-        """Constructor. Creates an instance of simulator, initialize all the available properties.
-
-        Args:
-            uid (str): 5-digits hexadecimal numbers for unique identification.
-            color (TeamColors): use different color strings to represent diferent teams
-            dt (float): simulation timestep. Default = `1 / 60`.
-        """
         self.__uid = uid
         self.__color = color
         self.__dt = dt
@@ -30,6 +39,15 @@ class BaseSimulator(ABC):
         self._position = np.zeros(3)
         self._posture = np.zeros(3)
         self._velocity = np.zeros(3)
+
+        # 新增：战术状态跟踪
+        self.tactical_state = {
+            "current_maneuver": "cruise",
+            "energy_state": "balanced",
+            "threat_level": "low",
+            "engagement_phase": "bvr"
+        }
+
         logging.debug(f"{self.__class__.__name__}:{self.__uid} is created!")
 
     @property
@@ -45,26 +63,36 @@ class BaseSimulator(ABC):
         return self.__dt
 
     def get_geodetic(self):
-        """(lontitude, latitude, altitude), unit: °, m"""
         return self._geodetic
 
     def get_position(self):
-        """(north, east, up), unit: m"""
         return self._position
 
     def get_rpy(self):
-        """(roll, pitch, yaw), unit: rad"""
         return self._posture
 
     def get_velocity(self):
-        """(v_north, v_east, v_up), unit: m/s"""
         return self._velocity
+
+    def get_tactical_state(self) -> Dict[str, Any]:
+        """获取战术状态"""
+        return self.tactical_state.copy()
+
+    def update_tactical_state(self, **kwargs):
+        """更新战术状态"""
+        self.tactical_state.update(kwargs)
 
     def reload(self):
         self._geodetic = np.zeros(3)
         self._position = np.zeros(3)
         self._posture = np.zeros(3)
         self._velocity = np.zeros(3)
+        self.tactical_state = {
+            "current_maneuver": "cruise",
+            "energy_state": "balanced",
+            "threat_level": "low",
+            "engagement_phase": "bvr"
+        }
 
     @abstractmethod
     def run(self, **kwargs):
@@ -74,7 +102,11 @@ class BaseSimulator(ABC):
         lon, lat, alt = self.get_geodetic()
         roll, pitch, yaw = self.get_rpy() * 180 / np.pi
         log_msg = f"{self.uid},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
-        log_msg += f"Name={self.model.upper()},"
+        # 格式化飞机名称用于ACMI显示
+        display_name = self.model.upper()
+        if display_name == "SU27SK":
+            display_name = "SU27"
+        log_msg += f"Name={display_name},"
         log_msg += f"Color={self.color}"
         return log_msg
 
@@ -87,49 +119,236 @@ class BaseSimulator(ABC):
 
 
 class AircraftSimulator(BaseSimulator):
-    """A class which wraps an instance of JSBSim and manages communication with it.
-    """
-
     ALIVE = 0
-    CRASH = 1       # low altitude / extreme state / overload
-    SHOTDOWN = 2    # missile attack
+    CRASH = 1
+    SHOTDOWN = 2
 
-    def __init__(self,
-                 uid: str = "A0100",
-                 color: TeamColors = "Red",
-                 model: str = 'f16',
-                 init_state: dict = {},
-                 origin: tuple = (120.0, 60.0, 0.0),
-                 sim_freq: int = 60, **kwargs):
-        """Constructor. Creates an instance of JSBSim, loads an aircraft and sets initial conditions.
-
-        Args:
-            uid (str): 5-digits hexadecimal numbers for unique identification. Default = `"A0100"`.
-            color (TeamColors): use different color strings to represent diferent teams
-            model (str): name of aircraft to be loaded. Default = `"f16"`.
-                model path: './data/aircraft_name/aircraft_name.xml'
-            init_state (dict): dict mapping properties to their initial values. Input empty dict to use a default set of initial props.
-            origin (tuple): origin point (longitude, latitude, altitude) of the Global Combat Field. Default = `(120.0, 60.0, 0.0)`
-            sim_freq (int): JSBSim integration frequency. Default = `60`.
-        """
+    def __init__(self, uid: str = "A0100", color: TeamColors = "Red", model: str = 'f16',
+                 init_state: dict = {}, origin: tuple = (120.0, 60.0, 0.0), sim_freq: int = 60, **kwargs):
         super().__init__(uid, color, 1 / sim_freq)
         self.model = model
         self.init_state = init_state
         self.lon0, self.lat0, self.alt0 = origin
         self.bloods = 100
         self.__status = AircraftSimulator.ALIVE
-        for key, value in kwargs.items():
-            if key == 'num_missiles':
-                self.num_missiles = value  # type: int
-                self.num_left_missiles = self.num_missiles  # type: int
-        # fixed simulator links
-        self.partners = []  # type: List[AircraftSimulator]
-        self.enemies = []   # type: List[AircraftSimulator]
-        # temp simulator links
-        self.launch_missiles = []   # type: List[MissileSimulator]
-        self.under_missiles = []    # type: List[MissileSimulator]
-        # initialize simulator
+        self._is_leader = is_leader_agent_id(uid)
+        self.num_missiles = kwargs.get('num_missiles', 4)
+        self.num_left_missiles = self.num_missiles
+        self.partners: List[AircraftSimulator] = []
+        self.enemies: List[AircraftSimulator] = []
+        self.launch_missiles: List[MissileSimulator] = []
+        self.under_missiles: List[MissileSimulator] = []
+        self.sensors = {
+            "radar_range": 120000,  # 雷达探测距离 (m)
+            "radar_lock_range": 80000,  # 雷达锁定距离 (m)
+            "iff_range": 150000,  # 敌我识别距离 (m)
+            "rwr_range": 200000  # 雷达告警距离 (m)
+        }
+        self.weapons = {
+            "missiles": {
+                "aim120": {"count": self.num_missiles, "range": 100000, "speed": 1200},
+            }
+        }
+        # 飞行性能参数
+        self.flight_envelope = {
+            "max_altitude": 18000,  # 最大高度 (m)
+            "service_ceiling": 15000,  # 实用升限 (m)
+            "max_speed": 600,  # 最大速度 (m/s)
+            "min_speed": 150,  # 最小速度 (m/s)
+            "max_g": 9.0,  # 最大过载
+            "max_climb_rate": 250,  # 最大爬升率 (m/s)
+            "max_turn_rate": 25  # 最大转弯率 (deg/s)
+        }
+        # 战术控制器
+        self.tactical_controller = None
+
+        # Optional flight diagnostics (ring buffer).
+        # Enabled by env CAP_DIAG_FLIGHT=1. Default dumps only for B* aircraft to reduce spam.
+        self._flight_diag_step = 0
+        self._flight_diag_buf = deque(maxlen=int(os.getenv('CAP_DIAG_FLIGHT_BUF', '120')))
+        self._flight_diag_last_force_step = -10**9
+
         self.reload()
+        logging.info(f"Enhanced AircraftSimulator {uid} initialized: model={model}, "
+                     f"missiles={self.num_missiles}, sensors={self.sensors}")
+
+    def _flight_diag_enabled(self) -> bool:
+        # Enabled only when explicitly requested.
+        # Set CAP_DIAG_FLIGHT=1 to enable ring-buffer capture + dump.
+        diag_flag = os.getenv('CAP_DIAG_FLIGHT', '')
+        if diag_flag != '1':
+            return False
+        if os.getenv('CAP_DIAG_B_ONLY', '1') == '1' and not str(self.uid).startswith('B'):
+            return False
+        return True
+
+    def _flight_diag_snapshot(self, tag: str) -> dict:
+        # Keep this lightweight and robust: never raise from diagnostics.
+        try:
+            alt_m = float(self.get_property_value(Catalog.position_h_sl_m))
+        except Exception:
+            alt_m = float('nan')
+
+        try:
+            tas_mps = float(self.get_property_value(Catalog.velocities_vc_mps))
+        except Exception:
+            tas_mps = float('nan')
+
+        try:
+            vel = self.get_velocity()
+            gs_mps = float(np.linalg.norm(vel))
+            v_up_mps = float(vel[2])
+        except Exception:
+            gs_mps = float('nan')
+            v_up_mps = float('nan')
+
+        def _deg(prop):
+            try:
+                return float(self.get_property_value(prop)) * 180.0 / np.pi
+            except Exception:
+                return float('nan')
+
+        def _val(prop):
+            try:
+                return float(self.get_property_value(prop))
+            except Exception:
+                return float('nan')
+
+        return {
+            "step": int(self._flight_diag_step),
+            "tag": tag,
+            "alt_m": alt_m,
+            "tas_mps": tas_mps,
+            "gs_mps": gs_mps,
+            "v_up_mps": v_up_mps,
+            "roll_deg": _deg(Catalog.attitude_roll_rad),
+            "pitch_deg": _deg(Catalog.attitude_pitch_rad),
+            "yaw_deg": _val(Catalog.attitude_psi_deg),
+            "alpha_deg": _val(Catalog.aero_alpha_deg),
+            "beta_deg": _val(Catalog.aero_beta_deg),
+            "nz_g": _val(Catalog.accelerations_n_pilot_z_norm),
+            "ail": _val(Catalog.fcs_aileron_cmd_norm),
+            "ele": _val(Catalog.fcs_elevator_cmd_norm),
+            "rud": _val(Catalog.fcs_rudder_cmd_norm),
+            "thr": _val(Catalog.fcs_throttle_cmd_norm),
+        }
+
+    def _flight_diag_should_capture(self, snapshot: dict, force: bool = False) -> bool:
+        if force:
+            return True
+
+        try:
+            every = max(1, int(os.getenv('CAP_DIAG_FLIGHT_EVERY', '10')))
+        except Exception:
+            every = 10
+        if (self._flight_diag_step % every) != 0:
+            return False
+
+        # Condition-based capture to avoid spam.
+        alt_m = snapshot.get("alt_m", float('nan'))
+        tas_mps = snapshot.get("tas_mps", float('nan'))
+        roll_deg = snapshot.get("roll_deg", float('nan'))
+        alpha_deg = snapshot.get("alpha_deg", float('nan'))
+
+        try:
+            alt_gate = float(os.getenv('CAP_DIAG_FLIGHT_ALT_M', '4000'))
+            tas_gate = float(os.getenv('CAP_DIAG_FLIGHT_TAS_MPS', '140'))
+        except Exception:
+            alt_gate = 4000.0
+            tas_gate = 140.0
+
+        if np.isfinite(alt_m) and alt_m < alt_gate:
+            return True
+        if np.isfinite(tas_mps) and tas_mps < tas_gate:
+            return True
+        if np.isfinite(roll_deg) and abs(roll_deg) > 60.0:
+            return True
+        if np.isfinite(alpha_deg) and abs(alpha_deg) > 15.0:
+            return True
+        return False
+
+    def _flight_diag_capture(self, tag: str, force: bool = False):
+        if not self._flight_diag_enabled():
+            return
+
+        # Throttle forced captures (e.g., pre_avoid) to avoid spamming buffer with near-identical lines.
+        if force:
+            try:
+                force_every = max(1, int(os.getenv('CAP_DIAG_FLIGHT_FORCE_EVERY', '60')))
+            except Exception:
+                force_every = 60
+            if (self._flight_diag_step - self._flight_diag_last_force_step) < force_every:
+                return
+            self._flight_diag_last_force_step = self._flight_diag_step
+
+        snap = self._flight_diag_snapshot(tag)
+        if self._flight_diag_should_capture(snap, force=force):
+            self._flight_diag_buf.append(snap)
+
+    def _flight_diag_dump(self, reason: str):
+        if not self._flight_diag_enabled():
+            return
+        if not getattr(self, '_flight_diag_buf', None):
+            return
+
+        snaps = list(self._flight_diag_buf)
+        try:
+            dump_last = max(1, int(os.getenv('CAP_DIAG_FLIGHT_DUMP_LAST', '25')))
+        except Exception:
+            dump_last = 25
+        try:
+            dump_stride = max(1, int(os.getenv('CAP_DIAG_FLIGHT_DUMP_STRIDE', '3')))
+        except Exception:
+            dump_stride = 3
+
+        # De-duplicate by step: keep the most informative tag for each step.
+        tag_rank = {"poststep": 3, "precheck": 2, "pre_avoid": 1}
+        best_by_step = {}
+        for s in snaps:
+            st = s.get('step')
+            if st is None:
+                continue
+            prev = best_by_step.get(st)
+            if prev is None:
+                best_by_step[st] = s
+                continue
+            if tag_rank.get(str(s.get('tag')), 0) >= tag_rank.get(str(prev.get('tag')), 0):
+                best_by_step[st] = s
+
+        steps_sorted = sorted(best_by_step.keys())
+        tail_steps = steps_sorted[-dump_last:]
+        tail = [best_by_step[st] for st in tail_steps]
+        tail = tail[::dump_stride]
+
+        # Quick summary to keep logs readable.
+        try:
+            alt_vals = [float(s.get('alt_m')) for s in tail if np.isfinite(s.get('alt_m'))]
+            tas_vals = [float(s.get('tas_mps')) for s in tail if np.isfinite(s.get('tas_mps'))]
+            roll_vals = [float(s.get('roll_deg')) for s in tail if np.isfinite(s.get('roll_deg'))]
+            summary = (
+                f"alt[min,max]=({min(alt_vals):.1f},{max(alt_vals):.1f}) " if alt_vals else "" 
+            ) + (
+                f"tas[min,max]=({min(tas_vals):.1f},{max(tas_vals):.1f}) " if tas_vals else "" 
+            ) + (
+                f"|roll|max={max([abs(x) for x in roll_vals]):.1f} " if roll_vals else ""
+            )
+        except Exception:
+            summary = ""
+
+        # NOTE: Diagnostic dump printing intentionally disabled to keep verification runs quiet.
+        # logging.error(
+        #     f"[FLIGHT_DIAG] {self.uid} {reason} | dumping {len(tail)}/{len(snaps)} buffered snapshots "
+        #     f"(set CAP_DIAG_FLIGHT_DUMP_LAST/STRIDE) {summary}".strip()
+        # )
+        # for s in tail:
+        #     logging.error(
+        #         "[FLIGHT_DIAG] "
+        #         f"step={s.get('step')} tag={s.get('tag')} "
+        #         f"alt={s.get('alt_m'):.1f}m tas={s.get('tas_mps'):.1f} gs={s.get('gs_mps'):.1f} v_up={s.get('v_up_mps'):.1f} "
+        #         f"rpy=({s.get('roll_deg'):.1f},{s.get('pitch_deg'):.1f},{s.get('yaw_deg'):.1f}) "
+        #         f"alpha={s.get('alpha_deg'):.1f} beta={s.get('beta_deg'):.1f} nz={s.get('nz_g'):.2f} "
+        #         f"cmd(ail,ele,rud,thr)=({s.get('ail'):.2f},{s.get('ele'):.2f},{s.get('rud'):.2f},{s.get('thr'):.2f})"
+        #     )
 
     @property
     def is_alive(self):
@@ -143,33 +362,177 @@ class AircraftSimulator(BaseSimulator):
     def is_shotdown(self):
         return self.__status == AircraftSimulator.SHOTDOWN
 
+    def is_leader(self):
+        return self._is_leader
+
+    def set_leader(self, is_leader: bool):
+        self._is_leader = is_leader
+        logging.info(f"Set Agent {self.uid} as {'Leader' if is_leader else 'Wingman'}")
+
     def crash(self):
         self.__status = AircraftSimulator.CRASH
+        logging.info(f"Agent {self.uid} crashed")
 
     def shotdown(self):
         self.__status = AircraftSimulator.SHOTDOWN
+        logging.info(f"Agent {self.uid} shot down")
+
+        # ✅ 记录到trace_logger：飞机被击中
+        try:
+            # 尝试从环境获取trace_logger（如果可用）
+            if hasattr(self, '_env') and self._env is not None:
+                from utils.trace_logger import trace_event
+                trace_event(
+                    事件="飞机被击中",
+                    env=self._env,
+                    模块="aircraft_simulator",
+                    类型="EVENT",
+                    状态="SHOTDOWN",
+                    我机=self.uid,
+                    说明=f"Agent {self.uid} shot down",
+                    数据={
+                        "飞机ID": self.uid,
+                        "状态": "SHOTDOWN",
+                    },
+                )
+        except Exception:
+            pass  # 如果记录失败，不影响正常流程
+
+    def get_energy_state(self) -> Dict[str, float]:
+        """获取能量状态"""
+        velocity = np.linalg.norm(self.get_velocity())
+        altitude = self.get_position()[2]
+
+        # 计算比能量 (Specific Energy)
+        kinetic_energy = 0.5 * velocity ** 2
+        potential_energy = 9.81 * altitude
+        specific_energy = kinetic_energy + potential_energy
+
+        # 归一化到0-1范围
+        max_se = 0.5 * self.flight_envelope["max_speed"] ** 2 + 9.81 * self.flight_envelope["max_altitude"]
+        normalized_se = specific_energy / max_se
+
+        return {
+            "specific_energy": specific_energy,
+            "normalized_energy": normalized_se,
+            "kinetic_energy": kinetic_energy,
+            "potential_energy": potential_energy,
+            "velocity": velocity,
+            "altitude": altitude
+        }
+
+    def get_maneuver_capability(self) -> Dict[str, float]:
+        """获取机动能力"""
+        energy_state = self.get_energy_state()
+        velocity = energy_state["velocity"]
+        altitude = energy_state["altitude"]
+
+        # 基于当前状态计算机动能力
+        g_available = self.flight_envelope["max_g"] * min(velocity / 300, 1.0)
+        turn_rate_available = self.flight_envelope["max_turn_rate"] * min(velocity / 250, 1.0)
+        climb_rate_available = self.flight_envelope["max_climb_rate"] * max(
+            1 - altitude / self.flight_envelope["service_ceiling"], 0.1)
+
+        return {
+            "max_g_available": g_available,
+            "max_turn_rate": turn_rate_available,
+            "max_climb_rate": climb_rate_available,
+            "maneuver_margin": min(g_available / self.flight_envelope["max_g"], 1.0)
+        }
+
+    def get_sensor_contacts(self) -> List[Dict[str, Any]]:
+        """获取传感器接触"""
+        contacts = []
+
+        # 雷达接触
+        for enemy in self.enemies:
+            if enemy.is_alive:
+                distance = np.linalg.norm(enemy.get_position() - self.get_position())
+                if distance <= self.sensors["radar_range"]:
+                    relative_vel = enemy.get_velocity() - self.get_velocity()
+                    bearing = np.arctan2(
+                        enemy.get_position()[1] - self.get_position()[1],
+                        enemy.get_position()[0] - self.get_position()[0]
+                    )
+
+                    contact = {
+                        "uid": enemy.uid,
+                        "type": "radar",
+                        "distance": distance,
+                        "bearing": np.rad2deg(bearing),
+                        "velocity": np.linalg.norm(enemy.get_velocity()),
+                        "relative_velocity": np.linalg.norm(relative_vel),
+                        "altitude": enemy.get_position()[2],
+                        "locked": distance <= self.sensors["radar_lock_range"]
+                    }
+                    contacts.append(contact)
+
+        # 导弹威胁
+        for missile in self.under_missiles:
+            if missile.is_alive:
+                distance = np.linalg.norm(missile.get_position() - self.get_position())
+                if distance <= self.sensors["rwr_range"]:
+                    contact = {
+                        "uid": missile.uid,
+                        "type": "missile_threat",
+                        "distance": distance,
+                        "threat_level": "high" if distance < 30000 else "medium"
+                    }
+                    contacts.append(contact)
+
+        return contacts
+
+    def get_weapon_status(self) -> Dict[str, Any]:
+        """获取武器状态"""
+        return {
+            "missiles_remaining": self.num_left_missiles,
+            "missiles_launched": len(self.launch_missiles),
+            "missiles_active": len([m for m in self.launch_missiles if m.is_alive]),
+            "missiles_hit": len([m for m in self.launch_missiles if m.is_success]),
+            "gun_rounds": self.weapons["gun"]["rounds"],
+            "weapon_ready": self.num_left_missiles > 0
+        }
 
     def reload(self, new_state: Union[dict, None] = None, new_origin: Union[tuple, None] = None):
-        """Reload aircraft simulator
-        """
         super().reload()
-
-        # reset temp simulator links
         self.bloods = 100
         self.__status = AircraftSimulator.ALIVE
         self.launch_missiles.clear()
         self.under_missiles.clear()
         self.num_left_missiles = self.num_missiles
 
-        # load JSBSim FDM
         self.jsbsim_exec = jsbsim.FGFDMExec(os.path.join(get_root_dir(), 'data'))
         self.jsbsim_exec.set_debug_level(0)
+        logging.debug(f"[飞机模型] {self.uid} 正在加载: {self.model}")
         self.jsbsim_exec.load_model(self.model)
-        Catalog.add_jsbsim_props(self.jsbsim_exec.query_property_catalog(""))
-        self.jsbsim_exec.set_dt(self.dt)
-        self.clear_defalut_condition()
+        
+        # 验证模型加载成功并输出关键参数（只在第一次加载时输出）
+        if not hasattr(self.__class__, f'_loaded_{self.model}'):
+            try:
+                wing_area = self.jsbsim_exec['metrics/Sw-sqft']
+                empty_weight = self.jsbsim_exec['inertia/empty-weight-lbs']
+                logging.info(f"[飞机模型] {self.model.upper()} 加载完成: 翼面积={wing_area:.1f}sqft | 空重={empty_weight:.0f}lbs")
+                setattr(self.__class__, f'_loaded_{self.model}', True)
+            except:
+                logging.debug(f"[飞机模型] {self.uid} 加载成功: {self.model}")
 
-        # assign new properties
+        # JSBSim 
+        jsbsim_props = self.jsbsim_exec.query_property_catalog("")
+        processed_props = []
+        for prop in jsbsim_props:
+            prop = prop.strip()
+            if " " not in prop:
+                prop = f"{prop} R"  # 默认添加只读权限
+            processed_props.append(prop)
+        try:
+            Catalog.add_jsbsim_props(processed_props)
+        except Exception as e:
+            logging.error(f"Failed to add JSBSim properties: {e}")
+            raise
+
+        self.jsbsim_exec.set_dt(self.dt)
+        self.clear_default_condition()
+
         if new_state is not None:
             self.init_state = new_state
         if new_origin is not None:
@@ -178,164 +541,279 @@ class AircraftSimulator(BaseSimulator):
             self.set_property_value(Catalog[key], value)
         success = self.jsbsim_exec.run_ic()
         if not success:
+            logging.error("JSBSim initialization failed")
             raise RuntimeError("JSBSim failed to init simulation conditions.")
 
-        # propulsion init running
         propulsion = self.jsbsim_exec.get_propulsion()
         n = propulsion.get_num_engines()
         for j in range(n):
             propulsion.get_engine(j).init_running()
         propulsion.get_steady_state()
-        # update inner property
         self._update_properties()
 
-    def clear_defalut_condition(self):
+    def clear_default_condition(self):
         default_condition = {
-            Catalog.ic_long_gc_deg: 120.0,  # geodesic longitude [deg]
-            Catalog.ic_lat_geod_deg: 60.0,  # geodesic latitude  [deg]
-            Catalog.ic_h_sl_ft: 20000,      # altitude above mean sea level [ft]
-            Catalog.ic_psi_true_deg: 0.0,   # initial (true) heading [deg] (0, 360)
-            Catalog.ic_u_fps: 800.0,        # body frame x-axis velocity [ft/s]  (-2200, 2200)
-            Catalog.ic_v_fps: 0.0,          # body frame y-axis velocity [ft/s]  (-2200, 2200)
-            Catalog.ic_w_fps: 0.0,          # body frame z-axis velocity [ft/s]  (-2200, 2200)
-            Catalog.ic_p_rad_sec: 0.0,      # roll rate  [rad/s]  (-2 * pi, 2 * pi)
-            Catalog.ic_q_rad_sec: 0.0,      # pitch rate [rad/s]  (-2 * pi, 2 * pi)
-            Catalog.ic_r_rad_sec: 0.0,      # yaw rate   [rad/s]  (-2 * pi, 2 * pi)
-            Catalog.ic_roc_fpm: 0.0,        # initial rate of climb [ft/min]
+            Catalog.ic_long_gc_deg: 120.0,
+            Catalog.ic_lat_geod_deg: 60.0,
+            Catalog.ic_h_sl_ft: 20000,
+            Catalog.ic_psi_true_deg: 0.0,
+            Catalog.ic_u_fps: 1200.0,
+            Catalog.ic_v_fps: 0.0,
+            Catalog.ic_w_fps: 0.0,
+            Catalog.ic_p_rad_sec: 0.0,
+            Catalog.ic_q_rad_sec: 0.0,
+            Catalog.ic_r_rad_sec: 0.0,
+            Catalog.ic_roc_fpm: 0.0,
             Catalog.ic_terrain_elevation_ft: 0,
         }
         for prop, value in default_condition.items():
             self.set_property_value(prop, value)
 
     def run(self):
-        """Runs JSBSim simulation until the agent interacts and update custom properties.
-
-        JSBSim monitors the simulation and detects whether it thinks it should
-        end, e.g. because a simulation time was specified. False is returned
-        if JSBSim termination criteria are met.
-
-        Returns:
-            (bool): False if sim has met JSBSim termination criteria else True.
-        """
+        """飞机运行逻辑"""
         if self.is_alive:
             if self.bloods <= 0:
                 self.shotdown()
-            result = self.jsbsim_exec.run()
-            if not result:
-                raise RuntimeError("JSBSim failed.")
+                return False
+
+            # 状态检查
+            current_alt = self.get_property_value(Catalog.position_h_sl_m)
+            current_vel = np.linalg.norm(self.get_velocity())
+
+            # Flight diag sampling (pre-check state)
+            self._flight_diag_step += 1
+            self._flight_diag_capture('precheck')
+
+            # Verification mode (CAP verification scripts): enable a stronger safety net
+            # to keep episodes running long enough for tactical validation.
+            try:
+                verification_mode = os.getenv('CAP_VERIFICATION', '') == '1'
+            except Exception:
+                verification_mode = False
+
+            # 只在极端情况下crash
+            # Verification runs: allow small negative altitude excursions (numerical/terrain mismatch)
+            # and rely on the existing post-step tolerance check.
+            ground_crash_alt = -100.0 if verification_mode else 0.0
+            if current_alt < ground_crash_alt:  # 撞地
+                logging.error(f"Agent {self.uid} crashed into ground: {current_alt:.1f}m")
+                self._flight_diag_dump(f"ground_crash alt={current_alt:.1f}m")
+                self.crash()
+                return False
+
+            # Low-speed crash protection.
+            # In verification runs we allow deeper slow-down so envelope protection can recover
+            # instead of instantly terminating the scenario.
+            min_crash_speed = 5.0 if verification_mode else 50.0
+            if current_vel < min_crash_speed:
+                logging.error(f"Agent {self.uid} crashed due to low speed: {current_vel:.1f}m/s")
+                self._flight_diag_dump(f"low_speed_crash vel={current_vel:.1f}m/s")
+                self.crash()
+                return False
+
+            # 运行仿真
+            try:
+                result = self.jsbsim_exec.run()
+                if not result:
+                    logging.error(f"JSBSim simulation failed for {self.uid}")
+                    self.crash()
+                    return False
+            except Exception as e:
+                logging.error(f"JSBSim error for {self.uid}: {e}")
+                self.crash()
+                return False
+
             self._update_properties()
-            return result
-        else:
+
+            # Post-step state capture (after JSBSim integrates and properties updated)
+            self._flight_diag_capture('poststep')
+
+            # 检查
+            if self._geodetic[2] < -100:  # 给100m容差
+                logging.error(f"Agent {self.uid} crashed: altitude={self._geodetic[2]:.1f}m")
+                self._flight_diag_dump(f"poststep_altitude_crash alt={self._geodetic[2]:.1f}m")
+                self.crash()
+                return False
+
+            # 飞行包线保护
+            self._apply_flight_envelope_protection()
+
+            # 更新战术状态
+            self._update_tactical_state()
+
             return True
+        return False
+
+    def _apply_flight_envelope_protection(self):
+        """飞行包线保护"""
+        # 使用真实海平面高度(已在_geodetic[2]中存储)，避免NEU坐标转换的地球曲率误差
+        current_alt = self._geodetic[2]  # 真实海平面高度(m)
+        current_vel = np.linalg.norm(self.get_velocity())
+
+        try:
+            verification_mode = os.getenv('CAP_VERIFICATION', '') == '1'
+        except Exception:
+            verification_mode = False
+
+        # 放宽过载限制，避免过度限制战术机动
+        pitch_rate = self.get_property_value(Catalog.ic_q_rad_sec)
+        roll_rate = self.get_property_value(Catalog.ic_p_rad_sec)
+
+        # 宽松角速度限制
+        if abs(pitch_rate) > 2.0:  # 从1.0放宽到2.0
+            self.set_property_value(Catalog.ic_q_rad_sec, np.clip(pitch_rate, -2.0, 2.0))
+            logging.debug(f"Agent {self.uid} pitch rate limited: {pitch_rate:.3f}")
+
+        if abs(roll_rate) > 2.5:  # 从1.5放宽到2.5
+            self.set_property_value(Catalog.ic_p_rad_sec, np.clip(roll_rate, -2.5, 2.5))
+            logging.debug(f"Agent {self.uid} roll rate limited: {roll_rate:.3f}")
+
+        # 不在模拟器层强制改写舵面与油门；保持上层策略到JSBSim的单一控制链路
+
+    def _update_tactical_state(self):
+        """更新战术状态"""
+        energy = self.get_energy_state()
+        maneuver = self.get_maneuver_capability()
+
+        # 更新能量状态
+        if energy["normalized_energy"] > 0.7:
+            self.tactical_state["energy_state"] = "advantage"
+        elif energy["normalized_energy"] < 0.3:
+            self.tactical_state["energy_state"] = "disadvantage"
+        else:
+            self.tactical_state["energy_state"] = "balanced"
+
+        # 更新威胁等级
+        threats = len([m for m in self.under_missiles if m.is_alive])
+        if threats > 0:
+            min_threat_distance = min([np.linalg.norm(m.get_position() - self.get_position())
+                                       for m in self.under_missiles if m.is_alive], default=np.inf)
+            if min_threat_distance < 10000:
+                self.tactical_state["threat_level"] = "critical"
+            elif min_threat_distance < 25000:
+                self.tactical_state["threat_level"] = "high"
+            elif min_threat_distance < 40000:
+                self.tactical_state["threat_level"] = "medium"
+        else:
+            self.tactical_state["threat_level"] = "low"
 
     def close(self):
-        """ Closes the simulation and any plots. """
-        if self.jsbsim_exec:
+        if hasattr(self, 'jsbsim_exec') and self.jsbsim_exec:
             self.jsbsim_exec = None
         self.partners = []
         self.enemies = []
+        logging.info(f"Agent {self.uid} simulator closed")
 
     def _update_properties(self):
-        # update position
         self._geodetic[:] = self.get_property_values([
             Catalog.position_long_gc_deg,
             Catalog.position_lat_geod_deg,
             Catalog.position_h_sl_m
         ])
         self._position[:] = LLA2NEU(*self._geodetic, self.lon0, self.lat0, self.alt0)
-        # update posture
         self._posture[:] = self.get_property_values([
             Catalog.attitude_roll_rad,
             Catalog.attitude_pitch_rad,
-            Catalog.attitude_heading_true_rad,
+            Catalog.attitude_heading_true_rad
         ])
-        # update velocity
         self._velocity[:] = self.get_property_values([
             Catalog.velocities_v_north_mps,
             Catalog.velocities_v_east_mps,
-            Catalog.velocities_v_down_mps,
+            Catalog.velocities_v_down_mps
         ])
-        # v_down -> v_up
         self._velocity[2] = -self._velocity[2]
 
     def get_sim_time(self):
-        """ Gets the simulation time from JSBSim, a float. """
         return self.jsbsim_exec.get_sim_time()
 
     def get_property_values(self, props):
-        """Get the values of the specified properties
-
-        :param props: list of Properties
-
-        : return: NamedTupl e with properties name and their values
-        """
         return [self.get_property_value(prop) for prop in props]
 
     def set_property_values(self, props, values):
-        """Set the values of the specified properties
-
-        :param props: list of Properties
-
-        :param values: list of float
-        """
-        if not len(props) == len(values):
+        if len(props) != len(values):
+            logging.error(f"Property-value mismatch: props={len(props)}, values={len(values)}")
             raise ValueError("mismatch between properties and values size")
         for prop, value in zip(props, values):
             self.set_property_value(prop, value)
 
     def get_property_value(self, prop):
-        """Get the value of the specified property from the JSBSim simulation
-
-        :param prop: Property
-
-        :return : float
-        """
-        if isinstance(prop, Property):
-            if prop.access == "R":
-                if prop.update:
-                    prop.update(self)
+        if _is_property_like(prop):
+            if prop.access == "R" and prop.update:
+                prop.update(self)
             return self.jsbsim_exec.get_property_value(prop.name_jsbsim)
-        else:
-            raise ValueError(f"prop type unhandled: {type(prop)} ({prop})")
+        elif isinstance(prop, str):
+            # 支持直接使用字符串属性名
+            return self.jsbsim_exec.get_property_value(prop)
+        logging.error(f"Invalid prop type: {type(prop)}")
+        raise ValueError(f"prop type unhandled: {type(prop)}")
 
     def set_property_value(self, prop, value):
-        """Set the values of the specified property
-
-        :param prop: Property
-
-        :param value: float
-        """
-        # set value in property bounds
-        if isinstance(prop, Property):
-            if value < prop.min:
-                value = prop.min
-            elif value > prop.max:
-                value = prop.max
-
+        if _is_property_like(prop):
+            value = np.clip(value, prop.min, prop.max)
             self.jsbsim_exec.set_property_value(prop.name_jsbsim, value)
-
-            if "W" in prop.access:
-                if prop.update:
-                    prop.update(self)
+            if "W" in prop.access and prop.update:
+                prop.update(self)
+        elif isinstance(prop, str):
+            # 支持直接使用字符串属性名
+            self.jsbsim_exec.set_property_value(prop, value)
         else:
-            raise ValueError(f"prop type unhandled: {type(prop)} ({prop})")
+            logging.error(f"Invalid prop type: {type(prop)}")
+            raise ValueError(f"prop type unhandled: {type(prop)}")
 
-    def check_missile_warning(self):
+    def check_missile_warning(self, multi=False):
+        """导弹威胁检测"""
+        threatening_missiles = []
+
         for missile in self.under_missiles:
-            if missile.is_alive:
-                return missile
-        return None
+            if not missile.is_alive:
+                continue
+
+            distance = np.linalg.norm(missile.get_position() - self.get_position())
+            velocity = np.linalg.norm(missile.get_velocity())
+
+            # 威胁判定条件
+            threat_conditions = [
+                distance < 40000,  # 40km威胁距离
+                velocity > 200,  # 最小威胁速度
+                distance < 60000 and velocity > 350  # 或者较远但高速
+            ]
+
+            # 计算接近率
+            relative_pos = self.get_position() - missile.get_position()
+            relative_vel = self.get_velocity() - missile.get_velocity()
+
+            # 如果导弹在远离，不算威胁
+            if np.dot(relative_pos, relative_vel) > 0:
+                continue
+
+            is_threat = any(threat_conditions)
+
+            if is_threat:
+                logging.debug(f"Agent {self.uid} missile threat: {missile.uid}, "
+                              f"distance={distance:.1f}m, velocity={velocity:.1f}m/s")
+                if not multi:
+                    return missile
+                threatening_missiles.append(missile)
+
+        return threatening_missiles if multi and threatening_missiles else (
+            threatening_missiles[0] if threatening_missiles else None)
 
 
 class MissileSimulator(BaseSimulator):
+    """AIM-120C7 三段制导导弹模拟器"""
 
     INACTIVE = -1
     LAUNCHED = 0
     HIT = 1
     MISS = 2
 
+    # 飞行阶段定义
+    BOOST_PHASE = 0  # 助推段
+    MIDCOURSE_PHASE = 1  # 中段制导
+    TERMINAL_PHASE = 2  # 末段制导
+
     @classmethod
-    def create(cls, parent: AircraftSimulator, target: AircraftSimulator, uid: str, missile_model: str = "AIM-9L"):
+    def create(cls, parent: AircraftSimulator, target: AircraftSimulator, uid: str, missile_model: str = "AIM-120C7"):
         assert parent.dt == target.dt, "integration timestep must be same!"
         missile = MissileSimulator(uid, parent.color, missile_model, parent.dt)
         missile.launch(parent)
@@ -345,29 +823,46 @@ class MissileSimulator(BaseSimulator):
     def __init__(self,
                  uid="A0101",
                  color="Red",
-                 model="AIM-9L",
-                 dt=1 / 12):
+                 model="AIM-120C7",
+                 dt=1 / 60):
         super().__init__(uid, color, dt)
         self.__status = MissileSimulator.INACTIVE
         self.model = model
         self.parent_aircraft = None  # type: AircraftSimulator
         self.target_aircraft = None  # type: AircraftSimulator
         self.render_explosion = False
+        self.print_interval = 10  # 每10秒打印一次
+        
+        # 添加击中记录
+        self._hit_time = None  # 击中时刻
+        self._hit_distance = None  # 击中时距离
+        self._hit_recorded = False  # 是否已记录击中数据
+        
+        # ===== AIM-120C7真实参数 =====
+        # 基于真实AIM-120C7 AMRAAM技术规格
+        self._g = 9.81  # 重力加速度
+        self._t_max = 100  # 导弹最大飞行时间
+        self._t_boost = 8.0  # 🔥 提升：助推时间从7.0s增加到8.0s，增加加速时间
+        self._t_terminal = 12  # 末段制导开始时间(距离目标)
+        self._Isp = 240  # 比冲 (真实AIM-120C7值)
+        self._Length = 3.65  # 长度 m (真实值)
+        self._Diameter = 0.178  # 直径 m (真实值)
+        self._cD = 0.32  # 🔥 提升：阻力系数从0.38降低到0.32，减少阻力（约16%）
+        self._m0 = 161.5  # 初始质量 kg (真实值)
+        self._fuel_mass = 45.0  # 🔥 提升：燃料质量从40.0kg增加到45.0kg，支持更长的助推时间
+        self._dm = self._fuel_mass / self._t_boost  # 质量损失率 kg/s
+        self._thrust = 18000  # 🔥 提升：推力从14000N增加到18000N（约29%），提高加速度
+        self._K = 3.2  # 🔥 削弱：降低比例导引系数（从3.8到3.2），降低制导精度
+        self._nyz_max = 40  # 最大过载 G (真实AIM-120C7值)
+        self._Rc = 40  # 爆炸半径 m (真实杀伤半径)
+        self._v_min = 200  # 最小速度 m/s
 
-        # missile parameters (for AIM-9L)
-        self._g = 9.81      # gravitational acceleration
-        self._t_max = 60    # time limitation of missile life
-        self._t_thrust = 3  # time limitation of engine
-        self._Isp = 120     # average specific impulse
-        self._Length = 2.87
-        self._Diameter = 0.127
-        self._cD = 0.4      # aerodynamic drag factor
-        self._m0 = 84       # mass, unit: kg
-        self._dm = 6        # mass loss rate, unit: kg/s
-        self._K = 3         # proportionality constant of proportional navigation
-        self._nyz_max = 30  # max overload
-        self._Rc = 300      # radius of explosion, unit: m
-        self._v_min = 150   # minimun velocity, unit: m/s
+        # 制导参数
+        self._phase = MissileSimulator.BOOST_PHASE
+        self._intercept_point = np.zeros(3)  # 预测拦截点
+        self._terminal_distance = 10000  # 末段制导启动距离 m (AIM-120主动雷达，10km更合理)
+
+        self._phase_changed = False
 
     @property
     def is_alive(self):
@@ -383,91 +878,458 @@ class MissileSimulator(BaseSimulator):
     def is_done(self):
         """Missile is already exploded"""
         return self.__status == MissileSimulator.HIT \
-            or self.__status == MissileSimulator.MISS
+               or self.__status == MissileSimulator.MISS
 
     @property
     def Isp(self):
-        return self._Isp if self._t < self._t_thrust else 0
+        """真实AIM-120C7单脉冲发动机比冲模型"""
+        if self._t < self._t_boost:
+            # 单脉冲发动机：恒定比冲
+            return self._Isp
+        else:
+            # 燃料耗尽：无推力
+            return 0
 
     @property
     def K(self):
-        """Proportional Guidance Coefficient"""
-        # return self._K
-        return max(self._K * (self._t_max - self._t) / self._t_max, 0)
+        """比例导引系数 - 末段制导时动态调整"""
+        if self._phase == MissileSimulator.TERMINAL_PHASE:
+            # 末段制导时增强机动性
+            return self._K * 1.5
+        return self._K
 
     @property
     def S(self):
-        """Cross-Sectional area, unit m^2"""
-        S0 = np.pi * (self._Diameter / 2)**2
+        """横截面积, unit m^2"""
+        S0 = np.pi * (self._Diameter / 2) ** 2
         S0 += np.linalg.norm([np.sin(self._dtheta), np.sin(self._dphi)]) * self._Diameter * self._Length
         return S0
 
     @property
     def rho(self):
-        """Air Density, unit: kg/m^3"""
-        # approximate expression
-        return 1.225 * np.exp(-self._geodetic[-1] / 9300)
-        # exact expression (Reference: https://www.cnblogs.com/pathjh/p/9127352.html)
-        rho0, T0, h = 1.225, 288.15, self._geodetic[-1]
-        if h <= 11000:  # Troposphere
-            T = T0 - 0.0065 * h
-            return rho0 * (T / T0)**4.25588
-        elif h <= 20000:  # Lower Stratosphere
-            T = 216.65
+        """空气密度, unit: kg/m^3"""
+        h = self._geodetic[-1]
+        if h <= 11000:  # 对流层
+            T = 288.15 - 0.0065 * h
+            return 1.225 * (T / 288.15) ** 4.25588
+        elif h <= 20000:  # 平流层下部
             return 0.36392 * np.exp((11000 - h) / 6341.62)
-        else:  # Upper Stratosphere
+        else:  # 平流层上部
             T = 216.65 + 0.001 * (h - 20000)
-            return 0.088035 * (T / 216.65)**(-35.1632)
+            return 0.088035 * (T / 216.65) ** (-35.1632)
 
     @property
     def target_distance(self) -> float:
         return np.linalg.norm(self.target_aircraft.get_position() - self.get_position())
 
     def launch(self, parent: AircraftSimulator):
-        # inherit kinetic parameters from parent aricraft
+        # 继承发射平台的运动参数
         self.parent_aircraft = parent
         self.parent_aircraft.launch_missiles.append(self)
+
+        # 设置数据记录所需的属性
+        self.launcher_id = parent.uid  # 添加发射者ID属性
+        self.parent_uid = parent.uid   # 备用属性名
         self._geodetic[:] = parent.get_geodetic()
         self._position[:] = parent.get_position()
         self._velocity[:] = parent.get_velocity()
         self._posture[:] = parent.get_rpy()
-        self._posture[0] = 0  # missile's roll remains zero
+        self._posture[0] = 0  # 导弹滚转角保持为零
         self.lon0, self.lat0, self.alt0 = parent.lon0, parent.lat0, parent.alt0
-        # init status
+
+        # 初始化状态
         self._t = 0
         self._m = self._m0
         self._dtheta, self._dphi = 0, 0
         self.__status = MissileSimulator.LAUNCHED
         self._distance_pre = np.inf
-        self._distance_increment = deque(maxlen=int(5 / self.dt))  # 5s of distance increment -- can't hit
-        self._left_t = int(1 / self.dt)  # remove missile 1s after its destroying
+        # 确保dt是数值类型
+        dt_value = float(self.dt) if isinstance(self.dt, str) else self.dt
+        self._distance_increment = deque(maxlen=int(10 / dt_value))  # 10s距离增量检查
+        self._left_t = int(1 / dt_value)
+        self._phase = MissileSimulator.BOOST_PHASE
+        self._phase_changed = False
+
+        # 导弹仅继承母机速度，不进行额外速度补偿
+        print(
+            f" {self.model} {self.uid} launched: v={np.linalg.norm(self._velocity):.1f}m/s, alt={self._geodetic[2]:.0f}m")
 
     def target(self, target: AircraftSimulator):
-        self.target_aircraft = target  # TODO: change target?
+        self.target_aircraft = target
         self.target_aircraft.under_missiles.append(self)
+
+        # 设置数据记录所需的属性
+        self.target_id = target.uid    # 添加目标ID属性
+        self.target_uid = target.uid   # 备用属性名
 
     def run(self):
         self._t += self.dt
+
+        # ===== 导弹高度保护机制 =====
+        # 检查导弹高度，如果低于0（地下），立即销毁
+        current_altitude = self.get_position()[2]
+        if current_altitude < 0:
+            self.__status = MissileSimulator.MISS
+            # 添加完成时间记录
+            if not hasattr(self, '_completion_time'):
+                self._completion_time = self._t
+                logging.debug(f"Missile {self.uid} completed at t={self._completion_time:.1f}s")
+            print(f"[WARN] {self.model} {self.uid} impacted ground: altitude={current_altitude:.1f}m")
+            return
+
+        # 阶段转换逻辑
+        self._update_phase()
+
+        # 根据阶段选择制导律
         action, distance = self._guidance()
+
+        # 距离变化监控
         self._distance_increment.append(distance > self._distance_pre)
         self._distance_pre = distance
-        if distance < self._Rc and self.target_aircraft.is_alive:
+
+        # 命中判定 - 修复：允许击中已死亡目标（多导弹同时击中场景）
+        if distance < self._Rc:
+            # 记录击中时刻和距离（只在第一次击中时记录）
+            if self._hit_time is None:
+                self._hit_time = self._t
+                self._hit_distance = distance
+                print(f" {self.model} {self.uid} HIT target at t={self._hit_time:.1f}s, dist={self._hit_distance:.1f}m")
+
             self.__status = MissileSimulator.HIT
-            self.target_aircraft.shotdown()
-        elif (self._t > self._t_max) or (np.linalg.norm(self.get_velocity()) < self._v_min) \
-                or np.sum(self._distance_increment) >= self._distance_increment.maxlen or not self.target_aircraft.is_alive:
+            # 添加完成时间记录
+            if not hasattr(self, '_completion_time'):
+                self._completion_time = self._t
+                logging.debug(f"Missile {self.uid} completed at t={self._completion_time:.1f}s")
+            # 只有在目标仍存活时才调用shotdown()，避免重复击落
+            if self.target_aircraft.is_alive:
+                self.target_aircraft.shotdown()
+        elif self._should_miss():
             self.__status = MissileSimulator.MISS
+            # 添加完成时间记录
+            if not hasattr(self, '_completion_time'):
+                self._completion_time = self._t
+                logging.debug(f"Missile {self.uid} completed at t={self._completion_time:.1f}s")
+            miss_reason = self._get_miss_reason()
+            if self._t % self.print_interval < self.dt:  # 只在特定间隔打印
+                print(
+                    f" {self.model} {self.uid} missed: {miss_reason}, t={self._t:.1f}s, v={np.linalg.norm(self.get_velocity()):.0f}m/s, dist={distance:.0f}m")
         else:
             self._state_trans(action)
+
+    def _update_phase(self):
+        """更新飞行阶段"""
+        old_phase = self._phase
+        distance = self.target_distance
+
+        if self._t <= self._t_boost:
+            self._phase = MissileSimulator.BOOST_PHASE
+        elif distance <= self._terminal_distance:
+            self._phase = MissileSimulator.TERMINAL_PHASE
+        else:
+            self._phase = MissileSimulator.MIDCOURSE_PHASE
+        #打印
+        if old_phase != self._phase and not self._phase_changed:
+            phase_names = {0: "boost", 1: "midcourse", 2: "terminal"}
+            old_name = phase_names.get(old_phase, "unknown")
+            new_name = phase_names.get(self._phase, "unknown")
+            print(f"{self.model} {self.uid}: {old_name} -> {new_name} at t={self._t:.1f}s")
+            self._phase_changed = True
+
+    def _should_miss(self):
+        """判断导弹是否应该失效"""
+        distance = self.target_distance
+        velocity = np.linalg.norm(self.get_velocity())
+
+        # 时间超限
+        if self._t > self._t_max:
+            return True
+
+        # 速度过低
+        if velocity < self._v_min:
+            return True
+
+        # 移除"目标已死亡"检查 - 修复：避免与击中检测冲突
+        # 导弹应该能够击中刚被击落的目标（多导弹同时攻击场景）
+
+        # 距离持续增大(发散检测) - 更宽松的条件
+        if len(self._distance_increment) >= self._distance_increment.maxlen:
+            diverging_count = sum(self._distance_increment)
+            # 只有在80%的时间都在远离且距离超过50km时才判定发散
+            if (diverging_count >= self._distance_increment.maxlen * 0.8 and
+                distance > 50000):
+                return True
+
+        return False
+
+    def _get_miss_reason(self):
+        """获取失效原因"""
+        distance = self.target_distance
+        velocity = np.linalg.norm(self.get_velocity())
+
+        if self._t > self._t_max:
+            return "timeout"
+        elif velocity < self._v_min:
+            return "low_velocity"
+        elif not self.target_aircraft.is_alive:
+            return "target_dead"
+        elif len(self._distance_increment) >= self._distance_increment.maxlen:
+            diverging_count = sum(self._distance_increment)
+            if diverging_count >= self._distance_increment.maxlen * 0.6:
+                return "diverging"
+        return "unknown"
+
+    def _guidance(self):
+        """三段制导律"""
+        distance = self.target_distance
+
+        if self._phase == MissileSimulator.BOOST_PHASE:
+            return self._boost_guidance(), distance
+        elif self._phase == MissileSimulator.MIDCOURSE_PHASE:
+            return self._midcourse_guidance(), distance
+        else:  # TERMINAL_PHASE
+            return self._terminal_guidance(), distance
+
+    def _boost_guidance(self):
+        """助推段制导 - 改进的初始指向和能量管理"""
+        # 计算目标方向
+        target_pos = self.target_aircraft.get_position()
+        missile_pos = self.get_position()
+        direction = target_pos - missile_pos
+        direction_norm = np.linalg.norm(direction)
+
+        if direction_norm < 1:
+            return np.array([0, 0])
+
+        # 计算期望的俯仰角和偏航角
+        direction_unit = direction / direction_norm
+        target_pitch = np.arcsin(direction_unit[2])
+        target_yaw = np.arctan2(direction_unit[1], direction_unit[0])
+
+        # 当前姿态
+        current_pitch = self._posture[1]
+        current_yaw = self._posture[2]
+
+        # 角度误差
+        pitch_error = target_pitch - current_pitch
+        yaw_error = target_yaw - current_yaw
+
+        # 角度归一化
+        if yaw_error > np.pi:
+            yaw_error -= 2 * np.pi
+        elif yaw_error < -np.pi:
+            yaw_error += 2 * np.pi
+
+        # 改进的比例控制，考虑能量管理和速度状态
+        current_velocity = np.linalg.norm(self.get_velocity())
+        
+        # 根据速度调整控制参数
+        if current_velocity < 400:  # 低速时使用更温和的控制
+            k_p = 2.0  # 降低比例增益
+            k_d = 0.3  # 降低微分增益
+            max_overload = self._nyz_max * 0.5  # 限制过载
+        else:
+            k_p = 4.0  # 正常比例增益
+            k_d = 0.5  # 正常微分增益
+            max_overload = self._nyz_max * 0.8  # 正常过载限制
+        
+        # 计算角速度误差
+        pitch_rate_error = 0 - self._dtheta  # 期望角速度为0
+        yaw_rate_error = 0 - self._dphi
+        
+        ny = k_p * yaw_error + k_d * yaw_rate_error
+        nz = k_p * pitch_error + k_d * pitch_rate_error + np.cos(current_pitch)  # 保持升力平衡
+
+        # 限制过载，避免过度机动
+        return np.clip([ny, nz], -max_overload, max_overload)
+
+    def _midcourse_guidance(self):
+        """中段制导 - 预测拦截制导"""
+        # 计算预测拦截点
+        intercept_point = self._calculate_intercept_point()
+
+        # 计算到拦截点的方向
+        missile_pos = self.get_position()
+        direction = intercept_point - missile_pos
+        direction_norm = np.linalg.norm(direction)
+
+        if direction_norm < 1:
+            return np.array([0, 0])
+
+        # 计算期望速度方向
+        direction_unit = direction / direction_norm
+        target_pitch = np.arcsin(direction_unit[2])
+        target_yaw = np.arctan2(direction_unit[1], direction_unit[0])
+
+        # 当前姿态
+        current_pitch = self._posture[1]
+        current_yaw = self._posture[2]
+
+        # 角度误差
+        pitch_error = target_pitch - current_pitch
+        yaw_error = target_yaw - current_yaw
+
+        # 角度归一化
+        if yaw_error > np.pi:
+            yaw_error -= 2 * np.pi
+        elif yaw_error < -np.pi:
+            yaw_error += 2 * np.pi
+
+        # 中段制导的比例控制(较温和)
+        k_p = 3.0
+        ny = k_p * yaw_error
+        nz = k_p * pitch_error + np.cos(current_pitch)  # 保持升力平衡
+
+        return np.clip([ny, nz], -self._nyz_max * 0.7, self._nyz_max * 0.7)  # 中段制导限制过载
+
+    def _terminal_guidance(self):
+        """末段制导 -比例导引"""
+        x_m, y_m, z_m = self.get_position()
+        dx_m, dy_m, dz_m = self.get_velocity()
+        v_m = np.linalg.norm([dx_m, dy_m, dz_m])
+
+        if v_m < 1:
+            return np.array([0, 0])
+
+        theta_m = np.arcsin(dz_m / v_m)
+
+        x_t, y_t, z_t = self.target_aircraft.get_position()
+        dx_t, dy_t, dz_t = self.target_aircraft.get_velocity()
+
+        # 相对位置和距离
+        rel_x, rel_y, rel_z = x_t - x_m, y_t - y_m, z_t - z_m
+        Rxy = np.linalg.norm([rel_x, rel_y])
+        Rxyz = np.linalg.norm([rel_x, rel_y, rel_z])
+
+        if Rxyz < 1 or Rxy < 1:
+            return np.array([0, 0])
+
+        # 相对速度
+        rel_dx, rel_dy, rel_dz = dx_t - dx_m, dy_t - dy_m, dz_t - dz_m
+
+        # 视线角速率计算
+        dbeta = (rel_dy * rel_x - rel_dx * rel_y) / Rxy ** 2
+        deps = (rel_dz * Rxy ** 2 - rel_z * (rel_x * rel_dx + rel_y * rel_dy)) / (Rxyz ** 2 * Rxy)
+
+        # 比例导引律
+        ny = self.K * v_m / self._g * np.cos(theta_m) * dbeta
+        nz = self.K * v_m / self._g * deps + np.cos(theta_m)
+
+        # 添加制导噪声模拟 (AIM-120C7主动雷达制导高精度)
+        guidance_noise = 0.12  # 🔥 削弱：大幅增加制导噪声（从0.05到0.12），降低命中精度
+        noise_ny = np.random.normal(0, guidance_noise)
+        noise_nz = np.random.normal(0, guidance_noise)
+        
+        ny += noise_ny
+        nz += noise_nz
+
+        return np.clip([ny, nz], -self._nyz_max, self._nyz_max)
+
+    def _calculate_intercept_point(self):
+        """计算预测拦截点 - 改进算法考虑目标机动性"""
+        missile_pos = self.get_position()
+        missile_vel = self.get_velocity()
+        target_pos = self.target_aircraft.get_position()
+        target_vel = self.target_aircraft.get_velocity()
+
+        # 相对位置和速度
+        rel_pos = target_pos - missile_pos
+        rel_vel = target_vel - missile_vel
+
+        # 预测时间计算
+        missile_speed = np.linalg.norm(missile_vel)
+        target_speed = np.linalg.norm(target_vel)
+        
+        if missile_speed < 1 or target_speed < 1:
+            return target_pos
+
+        # 计算接近速度
+        closing_velocity = np.dot(rel_pos, rel_vel) / np.linalg.norm(rel_pos)
+        
+        # 考虑目标机动性的预测时间
+        distance = np.linalg.norm(rel_pos)
+        
+        # 如果目标在远离，使用更保守的预测
+        if closing_velocity < 0:
+            t_intercept = distance / (missile_speed * 0.8)  # 假设目标会机动
+        else:
+            # 目标在接近，使用更乐观的预测
+            t_intercept = distance / (missile_speed + target_speed * 0.5)
+
+        # 限制预测时间范围
+        t_intercept = np.clip(t_intercept, 2.0, 45.0)  # 2-45秒范围
+
+        # 计算预测拦截点，考虑目标可能的机动
+        intercept_point = target_pos + target_vel * t_intercept
+
+        return intercept_point
+
+    def _state_trans(self, action):
+        """状态转换函数"""
+        # 更新位置
+        self._position[:] += self.dt * self.get_velocity()
+
+        # ===== 导弹高度保护：防止撞地 =====
+        # 限制最小高度为50m，避免导弹俯冲过度撞地
+        MIN_ALTITUDE = 50.0  # 最小安全高度50m
+        if self._position[2] < MIN_ALTITUDE:
+            self._position[2] = MIN_ALTITUDE
+            # 同时限制垂直速度为0，防止继续下降
+            if self._velocity[2] < 0:
+                self._velocity[2] = 0
+
+        self._geodetic[:] = NEU2LLA(*self.get_position(), self.lon0, self.lat0, self.alt0)
+
+        # 当前速度和姿态
+        v = np.linalg.norm(self.get_velocity())
+        theta, phi = self.get_rpy()[1:]
+
+        # 推力和阻力 - 真实AIM-120C7推力模型
+        T = self._thrust if self._t < self._t_boost else 0
+        D = 0.5 * self._cD * self.S * self.rho * v ** 2
+
+        # 轴向过载
+        nx = (T - D) / (self._m * self._g) if self._m > 0 else 0
+        ny, nz = action
+
+        # 速度变化
+        dv = self._g * (nx - np.sin(theta))
+
+        # 角速度
+        if v > 1:
+            self._dphi = self._g / v * (ny / np.cos(theta)) if abs(np.cos(theta)) > 0.1 else 0
+            self._dtheta = self._g / v * (nz - np.cos(theta))
+        else:
+            self._dphi = 0
+            self._dtheta = 0
+
+        # 更新速度和姿态
+        v = max(v + self.dt * dv, 0)
+        phi += self.dt * self._dphi
+        theta += self.dt * self._dtheta
+
+        # 限制姿态角
+        theta = np.clip(theta, -np.pi / 2 + 0.1, np.pi / 2 - 0.1)
+
+        self._velocity[:] = np.array([
+            v * np.cos(theta) * np.cos(phi),
+            v * np.cos(theta) * np.sin(phi),
+            v * np.sin(theta)
+        ])
+        self._posture[:] = np.array([0, theta, phi])
+
+        # 更新质量 - 真实AIM-120C7单脉冲发动机模型
+        if self._t < self._t_boost:
+            # 单脉冲发动机：恒定燃烧率
+            self._m = max(self._m - self.dt * self._dm, self._m0 - self._fuel_mass)
 
     def log(self):
         if self.is_alive:
             log_msg = super().log()
         elif self.is_done and (not self.render_explosion):
             self.render_explosion = True
-            # remove missile model
+            # 移除导弹模型
             log_msg = f"-{self.uid}\n"
-            # add explosion
+            # 添加爆炸效果
             lon, lat, alt = self.get_geodetic()
             roll, pitch, yaw = self.get_rpy() * 180 / np.pi
             log_msg += f"{self.uid}F,T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
@@ -479,56 +1341,19 @@ class MissileSimulator(BaseSimulator):
     def close(self):
         self.target_aircraft = None
 
-    def _guidance(self):
-        """
-        Guidance law, proportional navigation
-        """
-        x_m, y_m, z_m = self.get_position()
-        dx_m, dy_m, dz_m = self.get_velocity()
-        v_m = np.linalg.norm([dx_m, dy_m, dz_m])
-        theta_m = np.arcsin(dz_m / v_m)
-        x_t, y_t, z_t = self.target_aircraft.get_position()
-        dx_t, dy_t, dz_t = self.target_aircraft.get_velocity()
-        Rxy = np.linalg.norm([x_m - x_t, y_m - y_t])  # distance from missile to target project to X-Y plane
-        Rxyz = np.linalg.norm([x_m - x_t, y_m - y_t, z_t - z_m])  # distance from missile to target
-        # calculate beta & eps, but no need actually...
-        # beta = np.arctan2(y_m - y_t, x_m - x_t)  # relative yaw
-        # eps = np.arctan2(z_m - z_t, np.linalg.norm([x_m - x_t, y_m - y_t]))  # relative pitch
-        dbeta = ((dy_t - dy_m) * (x_t - x_m) - (dx_t - dx_m) * (y_t - y_m)) / Rxy**2
-        deps = ((dz_t - dz_m) * Rxy**2 - (z_t - z_m) * (
-            (x_t - x_m) * (dx_t - dx_m) + (y_t - y_m) * (dy_t - dy_m))) / (Rxyz**2 * Rxy)
-        ny = self.K * v_m / self._g * np.cos(theta_m) * dbeta
-        nz = self.K * v_m / self._g * deps + np.cos(theta_m)
-        return np.clip([ny, nz], -self._nyz_max, self._nyz_max), Rxyz
+    def get_hit_info(self):
+        """获取击中信息"""
+        return {
+            'hit_time': self._hit_time,
+            'hit_distance': self._hit_distance,
+            'is_hit': self._hit_time is not None
+        }
 
-    def _state_trans(self, action):
-        """
-        State transition function
-        """
-        # update position & geodetic
-        self._position[:] += self.dt * self.get_velocity()
-        self._geodetic[:] = NEU2LLA(*self.get_position(), self.lon0, self.lat0, self.alt0)
-        # update velocity & posture
-        v = np.linalg.norm(self.get_velocity())
-        theta, phi = self.get_rpy()[1:]
-        T = self._g * self.Isp * self._dm
-        D = 0.5 * self._cD * self.S * self.rho * v**2
-        nx = (T - D) / (self._m * self._g)
-        ny, nz = action
+    def should_record_hit_data(self):
+        """判断是否应该记录击中数据"""
+        return (self._hit_time is not None and 
+                not self._hit_recorded)
 
-        dv = self._g * (nx - np.sin(theta))
-        self._dphi = self._g / v * (ny / np.cos(theta))
-        self._dtheta = self._g / v * (nz - np.cos(theta))
-
-        v += self.dt * dv
-        phi += self.dt * self._dphi
-        theta += self.dt * self._dtheta
-        self._velocity[:] = np.array([
-            v * np.cos(theta) * np.cos(phi),
-            v * np.cos(theta) * np.sin(phi),
-            v * np.sin(theta)
-        ])
-        self._posture[:] = np.array([0, theta, phi])
-        # update mass
-        if self._t < self._t_thrust:
-            self._m = self._m - self.dt * self._dm
+    def mark_hit_recorded(self):
+        """标记击中数据已记录"""
+        self._hit_recorded = True

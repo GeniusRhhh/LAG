@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -87,14 +89,14 @@ class PPOTrainer():
 
         for _ in range(self.ppo_epoch):
             if self.use_recurrent_policy:
-                data_generator = buffer.recurrent_generator(buffer.advantages, self.num_mini_batch, self.data_chunk_length)
+                data_generator = buffer.recurrent_generator(buffer.advantages, self.num_mini_batch,
+                                                            self.data_chunk_length)
             else:
                 raise NotImplementedError
 
             for sample in data_generator:
-
                 policy_loss, value_loss, policy_entropy_loss, ratio, \
-                    actor_grad_norm, critic_grad_norm = self.ppo_update(policy, sample)
+                actor_grad_norm, critic_grad_norm = self.ppo_update(policy, sample)
 
                 train_info['value_loss'] += value_loss.item()
                 train_info['policy_loss'] += policy_loss.item()
@@ -108,4 +110,13 @@ class PPOTrainer():
         for k in train_info.keys():
             train_info[k] /= num_updates
 
+        # 新增日志：训练信息
+        logging.info(
+            f"PPO Training: Value Loss={train_info['value_loss']:.3f}, "
+            f"Policy Loss={train_info['policy_loss']:.3f}, "
+            f"Entropy Loss={train_info['policy_entropy_loss']:.3f}, "
+            f"Actor Grad Norm={train_info['actor_grad_norm']:.3f}, "
+            f"Critic Grad Norm={train_info['critic_grad_norm']:.3f}, "
+            f"Ratio={train_info['ratio']:.3f}"
+        )
         return train_info

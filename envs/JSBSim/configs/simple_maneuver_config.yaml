@@ -1,0 +1,37 @@
+AltitudeReward_Kv: 0.2
+AltitudeReward_danger_altitude: 3.5
+AltitudeReward_safe_altitude: 4.0
+PostureReward_orientation_version: v2
+PostureReward_potential: true
+PostureReward_range_version: v3
+PostureReward_scale: 15.0
+RelativeAltitudeReward_KH: 1.0
+agent_interaction_steps: 12
+aircraft_configs:
+  A0100:
+    color: Red
+    init_state:
+      ic_h_sl_ft: 32808.4
+      ic_lat_geod_deg: 60.0
+      ic_long_gc_deg: 120.0
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 820.0
+    missile: 0
+    model: f16
+  B0100:
+    color: Blue
+    init_state:
+      ic_h_sl_ft: 32808.4
+      ic_lat_geod_deg: 60.8
+      ic_long_gc_deg: 120.0
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 820.0
+    missile: 0
+    model: f16
+battle_field_center:
+- 120.0
+- 60.4
+- 0.0
+max_steps: 3000
+sim_freq: 60
+task: pure_maneuver

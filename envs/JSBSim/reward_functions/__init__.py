@@ -5,3 +5,9 @@ from .relative_altitude_reward import RelativeAltitudeReward
 from .heading_reward import HeadingReward
 from .missile_posture_reward import MissilePostureReward
 from .shoot_penalty_reward import ShootPenaltyReward
+from .TacticalReward import TacticalReward
+from .TemplateReward import TemplateReward
+from .RadarLockReward import RadarLockReward
+from .MissileHitReward import MissileHitReward
+from .relative_altitude_reward_new import TacticalRewardNew,TemplateRewardNew,AltitudeRewardNew,PostureRewardNew,MissilePostureRewardNew,MissileHitRewardNew,RadarLockRewardNew,EventDrivenRewardNew,BasicFlightReward
+from .RewardScaler import RewardScaler

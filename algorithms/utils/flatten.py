@@ -5,15 +5,17 @@ from collections import OrderedDict
 
 
 def build_flattener(space):
+    # print(f"[DEBUG] build_flattener received space of type: {type(space)}, value: {space}")
     if isinstance(space, gymnasium.spaces.Dict):
         return DictFlattener(space)
-    elif isinstance(space, gymnasium.spaces.Box) \
-            or isinstance(space, gymnasium.spaces.MultiDiscrete):
+    elif isinstance(space, gymnasium.spaces.Box) or isinstance(space, gymnasium.spaces.MultiDiscrete):
         return BoxFlattener(space)
     elif isinstance(space, gymnasium.spaces.Discrete):
         return DiscreteFlattener(space)
+    elif isinstance(space, int):
+        return space  # 直接返回 int
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"Unsupported space type: {type(space)}, value: {space}")
 
 
 class DictFlattener():
@@ -81,7 +83,7 @@ class BoxFlattener():
         self.space = ori_space
         assert isinstance(ori_space, gym.spaces.Box) \
             or isinstance(ori_space, gym.spaces.MultiDiscrete)
-        self.size = np.product(ori_space.shape)
+        self.size = np.prod(ori_space.shape)
 
     def __call__(self, observation):
         array = np.array(observation, copy=False)

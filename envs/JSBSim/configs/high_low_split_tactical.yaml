@@ -1,0 +1,218 @@
+# 2v2上下夹击战术配置文件
+# 基于drag_shoot_tactical.yaml，针对上下夹击战术优化
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 1500           # episode length: 300s (增加时间以观察高度机动)
+altitude_limit: 1000      # 降低高度限制以允许更大的高度差
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# 飞机配置 - 上下夹击专用初始位置
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 己方长机
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 26247,          # 8000米 (26247英尺)
+      ic_psi_true_deg: 0.0,       # 朝北
+      ic_u_fps: 1200.0,           # 初始速度
+    },
+    missile: 2
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,     # 己方僚机，右侧1km偏移
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 26247,          # 8000米起始高度（将爬升到9200米）
+      ic_psi_true_deg: 0.0,       # 朝北
+      ic_u_fps: 1200.0,           # 初始速度
+    },
+    missile: 2
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 敌方长机
+      ic_lat_geod_deg: 60.8,      # 90km距离 (0.8度纬度差约90km)
+      ic_h_sl_ft: 26247,          # 8000米
+      ic_psi_true_deg: 180.0,     # 朝南（面向我方）
+      ic_u_fps: 1200.0,           # 初始速度
+    },
+    missile: 2
+  },
+  B0200: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,     # 敌方僚机，右侧1km偏移
+      ic_lat_geod_deg: 60.8,      # 90km距离
+      ic_h_sl_ft: 26247,          # 8000米
+      ic_psi_true_deg: 180.0,     # 朝南（面向我方）
+      ic_u_fps: 1200.0,           # 初始速度
+    },
+    missile: 2
+  }
+}
+
+# 环境配置
+env_config: {
+  # 地形配置
+  terrain: {
+    type: "flat",
+    elevation: 0
+  },
+  
+  # 天气配置
+  weather: {
+    wind_speed: 0,
+    wind_direction: 0,
+    visibility: 50000  # 50km能见度
+  },
+  
+  # 雷达配置
+  radar: {
+    detection_range: 120000,  # 120km探测距离
+    lock_range: 80000,        # 80km锁定距离
+    track_capacity: 8         # 最多跟踪8个目标
+  },
+  
+  # 导弹配置
+  missile: {
+    type: "R27ER",
+    max_range: 80000,         # 80km最大射程
+    min_range: 3000,          # 3km最小射程
+    speed: 1200,              # 导弹速度
+    maneuverability: 35       # 机动性（G）
+  }
+}
+
+# 奖励配置
+reward_config: {
+  # 基础奖励
+  alive_reward: 1.0,
+  kill_reward: 100.0,
+  death_penalty: -100.0,
+  
+  # 战术奖励
+  altitude_advantage_reward: 5.0,     # 高度优势奖励
+  formation_reward: 2.0,              # 编队保持奖励
+  tactical_position_reward: 3.0,      # 战术位置奖励
+  
+  # 机动奖励
+  climb_reward: 1.0,                  # 爬升奖励
+  dive_attack_reward: 5.0,            # 俯冲攻击奖励
+  separation_reward: 2.0,             # 分离机动奖励
+  
+  # 导弹奖励
+  missile_launch_reward: 10.0,
+  missile_hit_reward: 50.0,
+  missile_avoid_reward: 20.0,
+  
+  # 距离相关奖励
+  approach_reward: 0.1,
+  retreat_reward: 0.1,
+  optimal_range_reward: 2.0
+}
+
+# 观测配置
+observation_config: {
+  # 自身状态
+  self_state: {
+    position: true,
+    velocity: true,
+    attitude: true,
+    altitude: true,
+    fuel: true,
+    weapons: true
+  },
+  
+  # 友机状态
+  ally_state: {
+    relative_position: true,
+    relative_velocity: true,
+    altitude_difference: true,    # 上下夹击重要参数
+    formation_status: true
+  },
+  
+  # 敌机状态
+  enemy_state: {
+    detected_position: true,
+    estimated_velocity: true,
+    threat_level: true,
+    lock_status: true
+  },
+  
+  # 导弹状态
+  missile_state: {
+    own_missiles: true,
+    incoming_missiles: true,
+    missile_warnings: true
+  },
+  
+  # 战术状态
+  tactical_state: {
+    current_phase: true,
+    altitude_advantage: true,     # 上下夹击关键状态
+    tactical_position: true,
+    formation_integrity: true
+  }
+}
+
+# 动作配置
+action_config: {
+  # 飞行控制
+  flight_control: {
+    altitude_control: {
+      enabled: true,
+      range: [-1500, 1500],      # 高度变化范围（米）
+      precision: 50              # 高度控制精度（米）
+    },
+    heading_control: {
+      enabled: true,
+      range: [-180, 180],        # 航向变化范围（度）
+      precision: 5               # 航向控制精度（度）
+    },
+    speed_control: {
+      enabled: true,
+      range: [-150, 150],        # 速度变化范围（m/s）
+      precision: 10              # 速度控制精度（m/s）
+    }
+  },
+  
+  # 武器控制
+  weapon_control: {
+    missile_launch: {
+      enabled: true,
+      auto_target: true,
+      launch_conditions: {
+        min_range: 15000,        # 最小发射距离
+        max_range: 70000,        # 最大发射距离
+        lock_required: true      # 需要雷达锁定
+      }
+    }
+  }
+}
+
+# 日志配置
+logging_config: {
+  level: "INFO",
+  file_output: true,
+  console_output: true,
+  tactical_events: true,
+  altitude_tracking: true,       # 上下夹击专用：高度跟踪
+  formation_tracking: true,      # 编队跟踪
+  missile_tracking: true
+}

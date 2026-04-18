@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import numpy as np
 from gymnasium import spaces
@@ -6,23 +8,32 @@ from .task_base import BaseTask
 from ..core.simulatior import AircraftSimulator
 from ..core.catalog import Catalog as c
 from ..termination_conditions import ExtremeState, LowAltitude, Overload, Timeout, SafeReturn
-from ..reward_functions import AltitudeReward, PostureReward, EventDrivenReward
+from ..reward_functions import AltitudeReward, PostureReward, EventDrivenReward,RelativeAltitudeReward
 from ..utils.utils import get_AO_TA_R, get2d_AO_TA_R, in_range_rad, LLA2NEU, get_root_dir
 from ..model.baseline_actor import BaselineActor
 
-
 class SingleCombatTask(BaseTask):
+    """
+    单一战斗任务类，继承自基础任务类 BaseTask。
+    此类专门用于处理与单一战斗相关的配置和动态行为。
+    """
     def __init__(self, config):
         super().__init__(config)
+        logging.info(f"Config loaded: {self.config}")  # 打印完整的 config
+
         self.use_baseline = getattr(self.config, 'use_baseline', False)
+        logging.info(f"Using baseline: {self.use_baseline}")  # Debug log
+
         self.use_artillery = getattr(self.config, 'use_artillery', False)
         if self.use_baseline:
             self.baseline_agent = self.load_agent(self.config.baseline_type)
+        self.agent_ids = []  # 保存实际 Agent ID
 
         self.reward_functions = [
             AltitudeReward(self.config),
             PostureReward(self.config),
-            EventDrivenReward(self.config)
+            EventDrivenReward(self.config),
+            RelativeAltitudeReward(self.config)
         ]
 
         self.termination_conditions = [
@@ -33,34 +44,37 @@ class SingleCombatTask(BaseTask):
             Timeout(self.config),
         ]
 
+
     @property
     def num_agents(self) -> int:
         return 2 if not self.use_baseline else 1
-
     def load_variables(self):
+        """
+        加载与任务相关的状态变量和动作变量。
+        """
         self.state_var = [
-            c.position_long_gc_deg,             # 0. lontitude  (unit: °)
-            c.position_lat_geod_deg,            # 1. latitude   (unit: °)
-            c.position_h_sl_m,                  # 2. altitude   (unit: m)
-            c.attitude_roll_rad,                # 3. roll       (unit: rad)
-            c.attitude_pitch_rad,               # 4. pitch      (unit: rad)
-            c.attitude_heading_true_rad,        # 5. yaw        (unit: rad)
-            c.velocities_v_north_mps,           # 6. v_north    (unit: m/s)
-            c.velocities_v_east_mps,            # 7. v_east     (unit: m/s)
-            c.velocities_v_down_mps,            # 8. v_down     (unit: m/s)
-            c.velocities_u_mps,                 # 9. v_body_x   (unit: m/s)
-            c.velocities_v_mps,                 # 10. v_body_y  (unit: m/s)
-            c.velocities_w_mps,                 # 11. v_body_z  (unit: m/s)
-            c.velocities_vc_mps,                # 12. vc        (unit: m/s)
-            c.accelerations_n_pilot_x_norm,     # 13. a_north   (unit: G)
-            c.accelerations_n_pilot_y_norm,     # 14. a_east    (unit: G)
-            c.accelerations_n_pilot_z_norm,     # 15. a_down    (unit: G)
+        c.position_long_gc_deg,             # 经度
+        c.position_lat_geod_deg,            # 纬度
+        c.position_h_sl_m,                  # 海拔高度
+        c.attitude_roll_rad,                # 滚转角
+        c.attitude_pitch_rad,               # 俯仰角
+        c.attitude_heading_true_rad,        # 真航向
+            c.velocities_v_north_mps,           # 北向速度
+            c.velocities_v_east_mps,            # 东向速度
+            c.velocities_v_down_mps,            # 下降速度
+        c.velocities_u_mps,                 # 机体x轴速度
+        c.velocities_v_mps,                 # 机体y轴速度
+        c.velocities_w_mps,                 # 机体z轴速度
+            c.velocities_vc_mps,                # 真空速
+            c.accelerations_n_pilot_x_norm,     # 北向加速度
+            c.accelerations_n_pilot_y_norm,     # 东向加速度
+            c.accelerations_n_pilot_z_norm,     # 下降加速度
         ]
         self.action_var = [
-            c.fcs_aileron_cmd_norm,             # [-1., 1.]
-            c.fcs_elevator_cmd_norm,            # [-1., 1.]
-            c.fcs_rudder_cmd_norm,              # [-1., 1.]
-            c.fcs_throttle_cmd_norm,            # [0.4, 0.9]
+            c.fcs_aileron_cmd_norm,             # 副翼控制
+            c.fcs_elevator_cmd_norm,            # 升降舵控制
+            c.fcs_rudder_cmd_norm,              # 方向舵控制
+            c.fcs_throttle_cmd_norm,            # 油门控制
         ]
         self.render_var = [
             c.position_long_gc_deg,
@@ -72,55 +86,44 @@ class SingleCombatTask(BaseTask):
         ]
 
     def load_observation_space(self):
+        """
+        定义观察空间，使用高低限制定义状态变量的范围。
+        """
         self.observation_space = spaces.Box(low=-10, high=10., shape=(15,))
 
     def load_action_space(self):
-        # aileron, elevator, rudder, throttle
+        """
+        定义动作空间，这里使用多离散动作空间。
+        """
         self.action_space = spaces.MultiDiscrete([41, 41, 41, 30])
+
 
     def get_obs(self, env, agent_id):
         """
-        Convert simulation states into the format of observation_space
+        从环境中获取观察值，转换模拟状态为观察空间格式。
 
-        ------
-        Returns: (np.ndarray)
-        - ego info
-            - [0] ego altitude           (unit: 5km)
-            - [1] ego_roll_sin
-            - [2] ego_roll_cos
-            - [3] ego_pitch_sin
-            - [4] ego_pitch_cos
-            - [5] ego v_body_x           (unit: mh)
-            - [6] ego v_body_y           (unit: mh)
-            - [7] ego v_body_z           (unit: mh)
-            - [8] ego_vc                 (unit: mh)
-        - relative enm info
-            - [9] delta_v_body_x         (unit: mh)
-            - [10] delta_altitude        (unit: km)
-            - [11] ego_AO                (unit: rad) [0, pi]
-            - [12] ego_TA                (unit: rad) [0, pi]
-            - [13] relative distance     (unit: 10km)
-            - [14] side_flag             1 or 0 or -1
+        返回:
+        - (np.ndarray) 观察值数组
         """
         norm_obs = np.zeros(15)
         ego_obs_list = np.array(env.agents[agent_id].get_property_values(self.state_var))
         enm_obs_list = np.array(env.agents[agent_id].enemies[0].get_property_values(self.state_var))
-        # (0) extract feature: [north(km), east(km), down(km), v_n(mh), v_e(mh), v_d(mh)]
+        # 提取特征：北向、东向、下降、北向速度、东向速度、下降速度
         ego_cur_ned = LLA2NEU(*ego_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
         enm_cur_ned = LLA2NEU(*enm_obs_list[:3], env.center_lon, env.center_lat, env.center_alt)
         ego_feature = np.array([*ego_cur_ned, *(ego_obs_list[6:9])])
         enm_feature = np.array([*enm_cur_ned, *(enm_obs_list[6:9])])
-        # (1) ego info normalization
-        norm_obs[0] = ego_obs_list[2] / 5000            # 0. ego altitude   (unit: 5km)
-        norm_obs[1] = np.sin(ego_obs_list[3])           # 1. ego_roll_sin
-        norm_obs[2] = np.cos(ego_obs_list[3])           # 2. ego_roll_cos
-        norm_obs[3] = np.sin(ego_obs_list[4])           # 3. ego_pitch_sin
-        norm_obs[4] = np.cos(ego_obs_list[4])           # 4. ego_pitch_cos
-        norm_obs[5] = ego_obs_list[9] / 340             # 5. ego v_body_x   (unit: mh)
-        norm_obs[6] = ego_obs_list[10] / 340            # 6. ego v_body_y   (unit: mh)
-        norm_obs[7] = ego_obs_list[11] / 340            # 7. ego v_body_z   (unit: mh)
-        norm_obs[8] = ego_obs_list[12] / 340            # 8. ego vc   (unit: mh)
-        # (2) relative info w.r.t enm state
+        # 规范化ego信息
+        norm_obs[0] = ego_obs_list[2] / 5000            # 海拔高度（单位：5公里）
+        norm_obs[1] = np.sin(ego_obs_list[3])           # 滚转角正弦值
+        norm_obs[2] = np.cos(ego_obs_list[3])           # 滚转角余弦值
+        norm_obs[3] = np.sin(ego_obs_list[4])           # 俯仰角正弦值
+        norm_obs[4] = np.cos(ego_obs_list[4])           # 俯仰角余弦值
+        norm_obs[5] = ego_obs_list[9] / 340             # 机体x轴速度（单位：音速）
+        norm_obs[6] = ego_obs_list[10] / 340            # 机体y轴速度（单位：音速）
+        norm_obs[7] = ego_obs_list[11] / 340            # 机体z轴速度（单位：音速）
+        norm_obs[8] = ego_obs_list[12] / 340            # 真空速（单位：音速）
+        # 与敌机的相对信息
         ego_AO, ego_TA, R, side_flag = get2d_AO_TA_R(ego_feature, enm_feature, return_side=True)
         norm_obs[9] = (enm_obs_list[9] - ego_obs_list[9]) / 340
         norm_obs[10] = (enm_obs_list[2] - ego_obs_list[2]) / 1000
@@ -131,29 +134,68 @@ class SingleCombatTask(BaseTask):
         norm_obs = np.clip(norm_obs, self.observation_space.low, self.observation_space.high)
         return norm_obs
 
+    # 在你的 singlecombat_task.py 文件中，替换 normalize_action 方法：
+
     def normalize_action(self, env, agent_id, action):
-        """Convert discrete action index into continuous value.
+        """
+        将离散动作索引转换为连续值。
         """
         if self.use_baseline and agent_id in env.enm_ids:
             action = self.baseline_agent.get_action(env.agents[agent_id])
             return action
         else:
-            norm_act = np.zeros(4)
-            norm_act[0] = action[0] / 20  - 1.
-            norm_act[1] = action[1] / 20 - 1.
-            norm_act[2] = action[2] / 20 - 1.
-            norm_act[3] = action[3] / 58 + 0.4
-            return norm_act
+            # 确保action是一维数组
+            if isinstance(action, (list, tuple)):
+                action = np.array(action)
 
+            # 如果action是多维的，展平它
+            if hasattr(action, 'ndim') and action.ndim > 1:
+                action = action.flatten()
+
+            # 确保action有正确的长度
+            if len(action) != 4:
+                logging.error(f"Action length {len(action)} != 4 for agent {agent_id}")
+                if len(action) < 4:
+                    # 填充到4维
+                    action = np.pad(action, (0, 4 - len(action)), mode='constant', constant_values=20)
+                else:
+                    # 截取前4维
+                    action = action[:4]
+
+            norm_act = np.zeros(4)
+
+            # 确保每个元素都是标量
+            try:
+                norm_act[0] = float(action[0]) / 20 - 1.
+                norm_act[1] = float(action[1]) / 20 - 1.
+                norm_act[2] = float(action[2]) / 20 - 1.
+                norm_act[3] = float(action[3]) / 58 + 0.4
+            except (ValueError, TypeError) as e:
+                logging.error(f"Error normalizing action {action} for agent {agent_id}: {e}")
+                # 使用默认值
+                norm_act = np.array([0.0, 0.0, 0.0, 0.7])
+
+            # 限制范围
+            norm_act[0] = np.clip(norm_act[0], -1.0, 1.0)  # aileron
+            norm_act[1] = np.clip(norm_act[1], -1.0, 1.0)  # elevator
+            norm_act[2] = np.clip(norm_act[2], -1.0, 1.0)  # rudder
+            norm_act[3] = np.clip(norm_act[3], 0.4, 0.9)  # throttle
+
+            return norm_act
     def reset(self, env):
-        """Task-specific reset, include reward function reset.
+        """
+        任务特定的重置方法，包括奖励函数的重置。
         """
         self._agent_die_flag = {}
         if self.use_baseline:
             self.baseline_agent.reset()
+        self.agent_ids = list(env.agents.keys())  # 获取环境中的 Agent ID (如 ['agent_0100', 'agent_0200'])
         return super().reset(env)
 
     def step(self, env):
+        """
+        环境的单步执行方法，处理导弹避免和其他战斗动态。
+        """
         def _orientation_fn(AO):
             if AO >= 0 and AO <= 0.5236:  # [0, pi/6]
                 return 1 - AO / 0.5236
@@ -181,6 +223,9 @@ class SingleCombatTask(BaseTask):
                         #     print(f"AO: {AO * 180 / np.pi}, {_orientation_fn(AO)}, dis:{R/1000}, {_distance_fn(R/1000)}")
 
     def get_reward(self, env, agent_id, info=...):
+        """
+        获取环境中指定代理的奖励。
+        """
         if self._agent_die_flag.get(agent_id, False):
             return 0.0, info
         else:
@@ -188,10 +233,13 @@ class SingleCombatTask(BaseTask):
             return super().get_reward(env, agent_id, info=info)
 
     def load_agent(self, name):
+        """
+        根据指定名称加载代理模型。
+        """
         if name == 'pursue':
             return PursueAgent()
         elif name == 'maneuver':
-            return ManeuverAgent(maneuver='n')
+            return ManeuverAgent(maneuver='r')
         elif name == 'dodge':
             return DodgeMissileAgent()
         elif name == 'straight':
@@ -200,7 +248,9 @@ class SingleCombatTask(BaseTask):
             raise NotImplementedError
 
 class HierarchicalSingleCombatTask(SingleCombatTask):
-
+    """
+    分层单一战斗任务，扩展自单一战斗任务，增加了更复杂的动作和策略处理。
+    """
     def __init__(self, config: str):
         super().__init__(config)
         self.lowlevel_policy = BaselineActor()
@@ -211,16 +261,20 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
         self.norm_delta_velocity = np.array([0.05, 0, -0.05])
 
     def load_action_space(self):
+        """
+        为分层任务加载动作空间，这里使用多离散动作空间。
+        """
         self.action_space = spaces.MultiDiscrete([3, 5, 3])
 
     def normalize_action(self, env, agent_id, action):
-        """Convert high-level action into low-level action.
+        """
+        将高级动作转换为低级动作。
         """
         if self.use_baseline and agent_id in env.enm_ids:
             action = self.baseline_agent.get_action(env.agents[agent_id])
             return action
         else:
-            # generate low-level input_obs
+            # 生成低级输入观察值
             raw_obs = self.get_obs(env, agent_id)
             input_obs = np.zeros(12)
             # (1) delta altitude/heading/velocity
@@ -229,12 +283,12 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
             input_obs[2] = self.norm_delta_velocity[action[2]]
             # (2) ego info
             input_obs[3:12] = raw_obs[:9]
-            input_obs = np.expand_dims(input_obs, axis=0)
-            # output low-level action
-            _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])
-            action = _action.detach().cpu().numpy().squeeze(0)
-            self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()
-            # normalize low-level action
+            input_obs = np.expand_dims(input_obs, axis=0)#为了匹配网络输入格式，增加一个新的批处理维度。
+            # 输出低级动作
+            _action, _rnn_states = self.lowlevel_policy(input_obs, self._inner_rnn_states[agent_id])#使用低级策略网络 (lowlevel_policy) 处理输入观察值，并传入当前的RNN状态，获取动作和新的RNN状态。
+            action = _action.detach().cpu().numpy().squeeze(0)#将动作从张量转换为numpy数组，并移除批处理维度。
+            self._inner_rnn_states[agent_id] = _rnn_states.detach().cpu().numpy()#更新RNN状态。
+            # 规范化低级动作
             norm_act = np.zeros(4)
             norm_act[0] = action[0] / 20 - 1.
             norm_act[1] = action[1] / 20 - 1.
@@ -243,15 +297,21 @@ class HierarchicalSingleCombatTask(SingleCombatTask):
             return norm_act
 
     def reset(self, env):
-        """Task-specific reset, include reward function reset.
+        """
+        任务特定的重置方法，包括奖励函数的重置以及内部RNN状态的初始化。
         """
         self._inner_rnn_states = {agent_id: np.zeros((1, 1, 128)) for agent_id in env.agents.keys()}
         return super().reset(env)
 
 
 class StraightFlyAgent:
-
+    """
+    直线飞行代理类，简单控制飞行器直线飞行。
+    """
     def normalize_action(self, action):
+        """
+        规范化动作值，将离散动作转换为连续动作值。
+        """
         norm_act = np.zeros(4)
         norm_act[0] = action[0] / 20 - 1.   # 0~40 => -1~1
         norm_act[1] = action[1] / 20 - 1.   # 0~40 => -1~1
@@ -260,34 +320,46 @@ class StraightFlyAgent:
         return norm_act
 
     def get_action(self, sim: AircraftSimulator):
+        """
+        获取直线飞行的动作。
+        """
         action = np.array([20, 18.6, 20, 0])
         return self.normalize_action(action)
 
     def reset(self):
+        """
+        重置代理状态。
+        """
         pass
 
 
 class BaselineAgent:
+    """
+    基线代理类，定义了基础的飞行行为。
+    """
     def __init__(self) -> None:
         self.model_path = get_root_dir() + '/model/baseline_model.pt'
         self.actor = BaselineActor()
         self.actor.load_state_dict(torch.load(self.model_path, map_location=torch.device('cpu'), weights_only=True))
         self.actor.eval()
         self.state_var = [
-            c.delta_altitude,                   #  0. delta_h   (unit: m)
-            c.delta_heading,                    #  1. delta_heading  (unit: °)
-            c.delta_velocities_u,               #  2. delta_v   (unit: m/s)
-            c.attitude_roll_rad,                #  3. roll      (unit: rad)
-            c.attitude_pitch_rad,               #  4. pitch     (unit: rad)
-            c.velocities_u_mps,                 #  5. v_body_x   (unit: m/s)
-            c.velocities_v_mps,                 #  6. v_body_y   (unit: m/s)
-            c.velocities_w_mps,                 #  7. v_body_z   (unit: m/s)
-            c.velocities_vc_mps,                #  8. vc        (unit: m/s)
-            c.position_h_sl_m                   #  9. altitude  (unit: m)
+            c.delta_altitude,                   # 高度差
+            c.delta_heading,                    # 航向差
+            c.delta_velocities_u,               # 速度差
+            c.attitude_roll_rad,                # 滚转角
+            c.attitude_pitch_rad,               # 俯仰角
+            c.velocities_u_mps,                 # 机体x轴速度
+            c.velocities_v_mps,                 # 机体y轴速度
+            c.velocities_w_mps,                 # 机体z轴速度
+            c.velocities_vc_mps,                # 真空速
+            c.position_h_sl_m                   # 海拔高度
         ]
         self.reset()
 
     def normalize_action(self, action):
+        """
+        规范化动作值，将离散动作转换为连续动作值。
+        """
         norm_act = np.zeros(4)
         norm_act[0] = action[0] / 20 - 1.   # 0~40 => -1~1
         norm_act[1] = action[1] / 20 - 1.   # 0~40 => -1~1
@@ -296,30 +368,42 @@ class BaselineAgent:
         return norm_act
 
     def reset(self):
+        """
+        重置代理状态，初始化RNN状态。
+        """
         self.rnn_states = np.zeros((1, 1, 128))
 
     def set_delta_value(self, sim: AircraftSimulator):
+        """
+        设置与目标敌机的相对位置和速度。
+        """
         raise NotImplementedError
 
     def get_observation(self, sim: AircraftSimulator, delta_value):
+        """
+        获取当前模拟状态的观察值。
+        """
         obs = sim.get_property_values(self.state_var)
         norm_obs = np.zeros(12)
-        norm_obs[0] = delta_value[0] / 1000          #  0. ego delta altitude  (unit: 1km)
-        norm_obs[1] = in_range_rad(delta_value[1])   #  1. ego delta heading   (unit rad)
-        norm_obs[2] = delta_value[2] / 340           #  2. ego delta velocities_u  (unit: mh)
-        norm_obs[3] = obs[9] / 5000                  #  3. ego_altitude (unit: km)
-        norm_obs[4] = np.sin(obs[3])                 #  4. ego_roll_sin
-        norm_obs[5] = np.cos(obs[3])                 #  5. ego_roll_cos
-        norm_obs[6] = np.sin(obs[4])                 #  6. ego_pitch_sin
-        norm_obs[7] = np.cos(obs[4])                 #  7. ego_pitch_cos
-        norm_obs[8] = obs[5] / 340                   #  8. ego_v_x   (unit: mh)
-        norm_obs[9] = obs[6] / 340                   #  9. ego_v_y    (unit: mh)
-        norm_obs[10] = obs[7] / 340                  #  10. ego_v_z    (unit: mh)
-        norm_obs[11] = obs[8] / 340                  #  11. ego_vc        (unit: mh)
-        norm_obs = np.expand_dims(norm_obs, axis=0)  # dim: (1,12)
+        norm_obs[0] = delta_value[0] / 1000          # 高度差（单位：公里）
+        norm_obs[1] = in_range_rad(delta_value[1])   # 航向差（单位：弧度）
+        norm_obs[2] = delta_value[2] / 340           # 速度差（单位：音速）
+        norm_obs[3] = obs[9] / 5000                  # 海拔高度（单位：5公里）
+        norm_obs[4] = np.sin(obs[3])                 # 滚转角正弦值
+        norm_obs[5] = np.cos(obs[3])                 # 滚转角余弦值
+        norm_obs[6] = np.sin(obs[4])                 # 俯仰角正弦值
+        norm_obs[7] = np.cos(obs[4])                 # 俯仰角余弦值
+        norm_obs[8] = obs[5] / 340                   # 机体x轴速度（单位：音速）
+        norm_obs[9] = obs[6] / 340                   # 机体y轴速度（单位：音速）
+        norm_obs[10] = obs[7] / 340                  # 机体z轴速度（单位：音速）
+        norm_obs[11] = obs[8] / 340                  # 真空速（单位：音速）
+        norm_obs = np.expand_dims(norm_obs, axis=0)  # 维度：(1,12)
         return norm_obs
 
     def get_action(self, sim: AircraftSimulator):
+        """
+        根据当前模拟状态和目标值获取代理动作。
+        """
         delta_value = self.set_delta_value(sim)
         observation = self.get_observation(sim, delta_value)
         _action, self.rnn_states = self.actor(observation, self.rnn_states)
@@ -328,17 +412,23 @@ class BaselineAgent:
 
 
 class PursueAgent(BaselineAgent):
+    """
+    追击代理类，继承自基线代理，专注于追踪敌机。
+    """
     def __init__(self) -> None:
         super().__init__()
 
     def set_delta_value(self, sim: AircraftSimulator):
-        # NOTE: only adapt for 1v1
+        """
+        计算与目标敌机的相对位置和速度差。
+        """
+        # NOTE: 仅适用于1对1场景
         ego_x, ego_y, ego_z = sim.get_position()
         ego_vx, ego_vy, ego_vz = sim.get_velocity()
         enm_x, enm_y, enm_z = sim.enemies[0].get_position()
-        # delta altitude
+        # 高度差
         delta_altitude = enm_z - ego_z
-        # delta heading
+        # 航向差
         ego_v = np.linalg.norm([ego_vx, ego_vy])
         delta_x, delta_y = enm_x - ego_x, enm_y - ego_y
         R = np.linalg.norm([delta_x, delta_y])
@@ -346,34 +436,41 @@ class PursueAgent(BaselineAgent):
         ego_AO = np.arccos(np.clip(proj_dist / (R * ego_v + 1e-8), -1, 1))
         side_flag = np.sign(np.cross([ego_vx, ego_vy], [delta_x, delta_y]))
         delta_heading = ego_AO * side_flag
-        # delta velocity
+        # 速度差
         delta_velocity = sim.enemies[0].get_property_value(c.velocities_u_mps) - \
                          sim.get_property_value(c.velocities_u_mps)
         return np.array([delta_altitude, delta_heading, delta_velocity])
 
 
 class ManeuverAgent(BaselineAgent):
+    """
+    机动代理类，继承自基线代理，可以进行特定的机动动作。
+    """
     def __init__(self, maneuver: Literal['l', 'r', 'n']) -> None:
         super().__init__()
         self.turn_interval = 30
-        self.dodge_missile = True # if set true, start turn when missile is detected
+        self.dodge_missile = True  # 如果设置为真，当检测到导弹时开始转向
         if maneuver == 'l':
             self.target_heading_list = [0]
         elif maneuver == 'r':
             self.target_heading_list = [np.pi/2, np.pi/2, np.pi/2, np.pi/2]
         elif maneuver == 'n':
             self.target_heading_list = [np.pi, np.pi, np.pi, np.pi]
-        # self.target_altitude_list = [8000, 7000, 7500, 5500, 6000, 6000]
-        # self.target_velocity_list = [340, 340, 340, 340, 243, 243]
         self.target_altitude_list = [6096] * 4
         self.target_velocity_list = [243] * 4
 
     def reset(self):
+        """
+        重置代理状态，初始化步骤和RNN状态。
+        """
         self.step = 0
         self.rnn_states = np.zeros((1, 1, 128))
         self.init_heading = None
 
     def set_delta_value(self, sim: AircraftSimulator):
+        """
+        根据设定的目标值和当前状态计算动作所需的改变值。
+        """
         step_list = np.arange(1, len(self.target_heading_list)+1) * self.turn_interval / 0.2
         cur_heading = sim.get_property_value(c.attitude_heading_true_rad)
         if self.init_heading is None:
@@ -395,47 +492,53 @@ class ManeuverAgent(BaselineAgent):
 
 
 class DodgeMissileAgent:
+    """
+    躲避导弹代理类，使用特定的模型处理导弹躲避行为。
+    """
     def __init__(self) -> None:
         self.model_path = get_root_dir() + '/model/dodge_missile_model.pt'
         self.actor = BaselineActor(input_dim=21, use_mlp_actlayer=True)
         self.actor.load_state_dict(torch.load(self.model_path, map_location=torch.device('cpu'), weights_only=True))
         self.state_var = [
-            c.position_long_gc_deg,             # 0. lontitude  (unit: °)
-            c.position_lat_geod_deg,            # 1. latitude   (unit: °)
-            c.position_h_sl_m,                  # 2. altitude   (unit: m)
-            c.attitude_roll_rad,                # 3. roll       (unit: rad)
-            c.attitude_pitch_rad,               # 4. pitch      (unit: rad)
-            c.attitude_heading_true_rad,        # 5. yaw        (unit: rad)
-            c.velocities_v_north_mps,           # 6. v_north    (unit: m/s)
-            c.velocities_v_east_mps,            # 7. v_east     (unit: m/s)
-            c.velocities_v_down_mps,            # 8. v_down     (unit: m/s)
-            c.velocities_u_mps,                 # 9. v_body_x   (unit: m/s)
-            c.velocities_v_mps,                 # 10. v_body_y  (unit: m/s)
-            c.velocities_w_mps,                 # 11. v_body_z  (unit: m/s)
-            c.velocities_vc_mps,                # 12. vc        (unit: m/s)
+            c.position_long_gc_deg,             # 经度
+            c.position_lat_geod_deg,            # 纬度
+            c.position_h_sl_m,                  # 海拔高度
+            c.attitude_roll_rad,                # 滚转角
+            c.attitude_pitch_rad,               # 俯仰角
+            c.attitude_heading_true_rad,        # 真航向
+            c.velocities_v_north_mps,           # 北向速度
+            c.velocities_v_east_mps,            # 东向速度
+            c.velocities_v_down_mps,            # 下降速度
+            c.velocities_u_mps,                 # 机体x轴速度
+            c.velocities_v_mps,                 # 机体y轴速度
+            c.velocities_w_mps,                 # 机体z轴速度
+            c.velocities_vc_mps,                # 真空速
         ]
         self.reset()
 
     def get_observation(self, sim: AircraftSimulator):
+        """
+        获取当前模拟状态的观察值。
+        """
         norm_obs = np.zeros(21)
         ego_obs_list = np.array(sim.get_property_values(self.state_var))
         enm_obs_list = np.array(sim.enemies[0].get_property_values(self.state_var))
-        # (0) extract feature: [north(km), east(km), down(km), v_n(mh), v_e(mh), v_d(mh)]
+        # 提取特征：北向、东向、下降、北向速度、东向速度、下降速度
         ego_cur_ned = LLA2NEU(*ego_obs_list[:3], 120.0, 60.0, 0.0)
         enm_cur_ned = LLA2NEU(*enm_obs_list[:3], 120.0, 60.0, 0.0)
         ego_feature = np.array([*ego_cur_ned, *(ego_obs_list[6:9])])
         enm_feature = np.array([*enm_cur_ned, *(enm_obs_list[6:9])])
-        # (1) ego info normalization
-        norm_obs[0] = ego_obs_list[2] / 5000            # 0. ego altitude   (unit: 5km)
-        norm_obs[1] = np.sin(ego_obs_list[3])           # 1. ego_roll_sin
-        norm_obs[2] = np.cos(ego_obs_list[3])           # 2. ego_roll_cos
-        norm_obs[3] = np.sin(ego_obs_list[4])           # 3. ego_pitch_sin
-        norm_obs[4] = np.cos(ego_obs_list[4])           # 4. ego_pitch_cos
-        norm_obs[5] = ego_obs_list[9] / 340             # 5. ego v_body_x   (unit: mh)
-        norm_obs[6] = ego_obs_list[10] / 340            # 6. ego v_body_y   (unit: mh)
-        norm_obs[7] = ego_obs_list[11] / 340            # 7. ego v_body_z   (unit: mh)
-        norm_obs[8] = ego_obs_list[12] / 340            # 8. ego vc   (unit: mh)
-        # (2) relative info w.r.t enm state
+        # 规范化ego信息
+        norm_obs[0] = ego_obs_list[2] / 5000            # 海拔高度（单位：5公里）
+        norm_obs[1] = np.sin(ego_obs_list[3])           # 滚转角正弦值
+        norm_obs[2] = np.cos(ego_obs_list[3])           # 滚转角余弦值
+        norm_obs[3] = np.sin(ego_obs_list[4])           # 俯仰角正弦值
+        norm_obs[4] = np.cos(ego_obs_list[4])           # 俯仰角余弦值
+        norm_obs[5] = ego_obs_list[9] / 340             # 机体x轴速度（单位：音速）
+        norm_obs[6] = ego_obs_list[10] / 340            # 机体y轴速度（单位：音速）
+        norm_obs[7] = ego_obs_list[11] / 340            # 机体z轴速度（单位：音速）
+        norm_obs[8] = ego_obs_list[12] / 340            # 真空速（单位：音速）
+        # 与敌机的相对信息
         ego_AO, ego_TA, R, side_flag = get2d_AO_TA_R(ego_feature, enm_feature, return_side=True)
         norm_obs[9] = (enm_obs_list[9] - ego_obs_list[9]) / 340
         norm_obs[10] = (enm_obs_list[2] - ego_obs_list[2]) / 1000
@@ -443,7 +546,7 @@ class DodgeMissileAgent:
         norm_obs[12] = ego_TA
         norm_obs[13] = R / 10000
         norm_obs[14] = side_flag
-        # (3) relative missile info
+        # 与导弹的相对信息
         if len(sim.under_missiles) != 0 and sim.under_missiles[0].is_alive:
             missile_sim = sim.under_missiles[0]
         else:
@@ -461,10 +564,16 @@ class DodgeMissileAgent:
         return norm_obs
 
     def get_action(self, sim: AircraftSimulator):
+        """
+        根据当前观察值获取导弹躲避动作。
+        """
         obs = self.get_observation(sim)
         _action, self.rnn_states = self.actor(obs, self.rnn_states)
         action = _action.squeeze().detach().cpu().numpy().squeeze()
         return action
 
     def reset(self):
+        """
+        重置代理状态，初始化RNN状态。
+        """
         self.rnn_states = np.zeros((1, 1, 128))
