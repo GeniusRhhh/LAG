@@ -1,0 +1,23 @@
+meta: {name: T1_LAL, version: 0.1}
+params:
+  R_fire_min: {low: 12000, high: 32000, default: 18000}
+  R_fire_max: {low: 18000, high: 40000, default: 28000}
+  cold_angle: {low: 130,   high: 170,   default: 150}
+  DOR:        {low: 20000, high: 60000, default: 30000}
+  MAR:        {low: 12000, high: 30000, default: 20000}
+  crank_enable: {low: 0,   high: 1,     default: 0}   # bool 用 0/1 表示，运行时转 bool
+guards:
+  initial_fire: "locked and (rel_dist >= R_fire_min) and (rel_dist <= R_fire_max)"
+stages:
+  - name: PRESS_FIRE_PUMP
+    action:
+      type: call
+      fn: Launch_and_Leave
+    args:
+      R_fire_min: "${R_fire_min}"
+      R_fire_max: "${R_fire_max}"
+      crank_enable: "${crank_enable}"
+      cold_angle: "${cold_angle}"
+      DOR: "${DOR}"
+      MAR: "${MAR}"
+    # 由函数内部管理相位，这里不做转移；需要的话可加 "transition: false"

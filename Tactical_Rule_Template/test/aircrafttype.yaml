@@ -1,0 +1,26 @@
+teams:
+  red: [0]
+  blue: [1]
+
+aircraft_configs:
+  A0100:
+    model: j20             # TacView中显示机型为 J20
+    color: Red             # 红方
+    init_state:
+      ic_long_gc_deg: 120.0
+      ic_lat_geod_deg: 60.0
+      ic_h_sl_ft: 20000
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 800.0
+    missile: 2
+
+  B0100:
+    model: f16             # TacView中显示机型为 F16
+    color: Blue            # 蓝方
+    init_state:
+      ic_long_gc_deg: 122.2
+      ic_lat_geod_deg: 60.0
+      ic_h_sl_ft: 20000
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 800.0
+    missile: 2

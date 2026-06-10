@@ -1,0 +1,21 @@
+meta: {name: T5_BEAM, version: 0.1}
+params:
+  beam_angle:     {low: 20,    high: 70,    default: 45}    # 目标横移角（deg）
+  beam_ticks_max: {low: 1,     high: 5,     default: 3}     # 维持拍数（若函数内部用默认，这里先占位）
+  MAR:            {low: 12000, high: 30000, default: 20000}
+  debug:          {low: 0,     high: 1,     default: 0}
+
+guards:
+  high_threat: "(len(incoming) > 0) or (rel_dist < MAR)"
+
+stages:
+  - name: BEAM_SHIFT
+    action:
+      type: call
+      fn: beam_strategy_3d
+    args: {}
+    # 若后续你给 beam_strategy_3d 增加参数（如 beam_angle、beam_ticks_max），
+    # 直接把 args 改为：
+    # args:
+    #   beam_angle: "${beam_angle}"
+    #   beam_ticks_max: "${beam_ticks_max}"

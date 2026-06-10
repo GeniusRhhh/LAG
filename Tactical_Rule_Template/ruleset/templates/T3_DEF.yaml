@@ -1,0 +1,15 @@
+meta: {name: T3_DEF, version: 0.1}
+params:
+  MAR:   {low: 12000, high: 30000, default: 20000}
+  debug: {low: 0,     high: 1,     default: 0}
+
+guards:
+  high_threat: "(len(incoming) > 0) or (rel_dist < MAR)"
+
+stages:
+  - name: DEFEND
+    action:
+      type: call
+      fn: ortesc_strategy_3d
+    args: {}
+    # 防御动作为单阶段；若你想“近威胁→强制Max-G”，把 fn 改成 max_g_break_strategy_3d 即可

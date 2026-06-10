@@ -1,0 +1,19 @@
+meta: {name: T4_Drag, version: 0.1}
+params:
+  cold_angle: {low: 130, high: 170, default: 150}
+  DOR:        {low: 20000, high: 60000, default: 30000}
+  MAR:        {low: 12000, high: 30000, default: 20000}
+  auto_recommit: {low: 0, high: 1, default: 1}
+  hot_angle: {low: 10, high: 60, default: 30}
+guards: {}
+stages:
+  - name: TURN_AND_EXTEND
+    action:
+      type: call
+      fn: Drag_and_Recommit
+    args:
+      cold_angle: "${cold_angle}"
+      DOR: "${DOR}"
+      MAR: "${MAR}"
+      auto_recommit: "${auto_recommit}"
+      hot_angle: "${hot_angle}"

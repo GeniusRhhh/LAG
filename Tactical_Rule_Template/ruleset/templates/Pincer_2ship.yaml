@@ -1,0 +1,32 @@
+meta: {name: Pincer_2ship, version: 0.1}
+
+params:
+  split_angle:       {low: 30,    high: 90,    default: 60}     # 双机左右分离目标夹角（deg）
+  rejoin_angle:      {low: 10,    high: 60,    default: 30}     # 回合并/回接目标角（deg）
+  R_fire_BVR:        {low: 18000, high: 36000, default: 26000}  # BVR射击参考
+  HOT_gate_BVR:      {low: 25,    high: 60,    default: 45}     # 头向门限（deg）
+  DOR:               {low: 20000, high: 60000, default: 30000}  # 脱离距离
+  MAR:               {low: 12000, high: 30000, default: 20000}  # 最小可接受风险距离
+  cooldown_steps:    {low: 40,    high: 160,   default: 80}     # 发射冷却
+  require_lock_BVR:  {low: 0,     high: 1,     default: 1}      # 是否要求锁定
+  debug:             {low: 0,     high: 1,     default: 0}
+
+guards:
+  high_threat: "(len(incoming) > 0) or (rel_dist < MAR)"
+
+stages:
+  - name: PINCER_MAIN
+    action:
+      type: call
+      fn: Pincer_2ship                # ← 直接调用你现有函数
+    args:
+      split_angle: "${split_angle}"
+      rejoin_angle: "${rejoin_angle}"
+      R_fire_BVR: "${R_fire_BVR}"
+      HOT_gate_BVR: "${HOT_gate_BVR}"
+      DOR: "${DOR}"
+      MAR: "${MAR}"
+      cooldown_steps: "${cooldown_steps}"
+      require_lock_BVR: "${require_lock_BVR}"
+      debug: "${debug}"
+    # 阶段切换由函数内部管理
