@@ -1,0 +1,32 @@
+meta: {name: T2_LAD, version: 0.1}
+params:
+  R_fire_min:          {low: 12000, high: 32000, default: 18000}
+  R_fire_max:          {low: 18000, high: 42000, default: 28000}
+  HOT_gate_BVR:        {low: 25,    high: 60,    default: 45}
+  MAR:                 {low: 12000, high: 30000, default: 20000}
+  crank_ticks_max:     {low: 0,     high: 3,     default: 2}
+  short_defend_ticks_max: {low: 0,  high: 4,     default: 2}
+  cooldown_steps:      {low: 40,    high: 160,   default: 80}
+  require_lock_BVR:    {low: 0,     high: 1,     default: 1}   # bool 用 0/1
+  debug:               {low: 0,     high: 1,     default: 0}
+
+guards:
+  in_window: "locked and (rel_dist >= R_fire_min) and (rel_dist <= R_fire_max)"
+  high_threat: "(len(incoming) > 0) or (rel_dist < MAR)"
+
+stages:
+  - name: LAD_MAIN
+    action:
+      type: call
+      fn: Launch_and_Decide
+    args:
+      R_fire_min: "${R_fire_min}"
+      R_fire_max: "${R_fire_max}"
+      HOT_gate_BVR: "${HOT_gate_BVR}"
+      MAR: "${MAR}"
+      crank_ticks_max: "${crank_ticks_max}"
+      short_defend_ticks_max: "${short_defend_ticks_max}"
+      cooldown_steps: "${cooldown_steps}"
+      require_lock_BVR: "${require_lock_BVR}"
+      debug: "${debug}"
+    # 由函数内部管理相位/转移

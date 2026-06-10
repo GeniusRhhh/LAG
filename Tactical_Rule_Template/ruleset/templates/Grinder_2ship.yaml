@@ -1,0 +1,32 @@
+meta: {name: Grinder_2ship, version: 0.1}
+params:
+  profile: {low: 0, high: 1, default: 1}   # 1代表"BVR"（此处仅占位，实际由函数字符串判断）
+  R_fire_IR:   {low: 5000,  high: 15000, default: 9000}
+  FOV_IR:      {low: 10,    high: 60,    default: 30}
+  R_fire_BVR:  {low: 18000, high: 36000, default: 26000}
+  HOT_gate_BVR: {low: 25,    high: 60,    default: 45}
+  cold_angle:  {low: 130,   high: 170,   default: 150}
+  DOR:         {low: 20000, high: 60000, default: 30000}
+  MAR:         {low: 12000, high: 30000, default: 20000}
+  crank_ticks_max: {low: 0, high: 3, default: 2}
+  cooldown_steps:  {low: 40, high: 160, default: 80}
+  owner_timeout:   {low: 60, high: 360, default: 180}
+guards: {}
+stages:
+  - name: GRINDER_LOOP
+    action:
+      type: call
+      fn: Grinder_2ship
+    args:
+      profile: "BVR"
+      R_fire_IR: "${R_fire_IR}"
+      FOV_IR: "${FOV_IR}"
+      R_fire_BVR: "${R_fire_BVR}"
+      HOT_gate_BVR: "${HOT_gate_BVR}"
+      cold_angle: "${cold_angle}"
+      DOR: "${DOR}"
+      MAR: "${MAR}"
+      crank_ticks_max: "${crank_ticks_max}"
+      cooldown_steps: "${cooldown_steps}"
+      owner_timeout: "${owner_timeout}"
+      debug: 0
