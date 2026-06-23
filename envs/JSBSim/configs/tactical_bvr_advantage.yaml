@@ -1,0 +1,144 @@
+# 战术系统BVR配置文件 - 场景S1：我方几何/能量优势
+# 初始距离120km，己方高度略高、速度略快
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 3300           # episode length: 660s (11分钟)
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# 飞机配置 - 使用经纬度设置120km距离
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 己方长机
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 23000,          # 略高于敌机（约7000m）
+      ic_psi_true_deg: 0.0,       # 朝北
+      ic_u_fps: 950.0,            # 略快（约290m/s, 0.95马赫）
+    },
+    missile: 4                    # 每架飞机4枚导弹
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.05,     # 己方僚机，与长机同经度
+      ic_lat_geod_deg: 60.0,      # 后方约5km（前后攻击战术用）
+      ic_h_sl_ft: 23000,          # 与长机同高
+      ic_psi_true_deg: 0.0,       # 朝北
+      ic_u_fps: 950.0,            # 略快
+    },
+    missile: 4                    # 每架飞机4枚导弹
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 敌方长机
+      ic_lat_geod_deg: 61.08,     # 120km距离 (1.08度纬度差约120km)
+      ic_h_sl_ft: 17000,          # 略低高度（约5200m）
+      ic_psi_true_deg: 180.0,     # 朝南（相向飞行）
+      ic_u_fps: 850.0,            # 略慢
+    },
+    missile: 4                    # 保持4枚导弹
+  },
+  B0200: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.01,     # 敌方僚机，右侧约1km偏移
+      ic_lat_geod_deg: 61.08,     # 120km距离
+      ic_h_sl_ft: 17000,          # 略低高度
+      ic_psi_true_deg: 180.0,     # 朝南
+      ic_u_fps: 850.0,            # 略慢
+    },
+    missile: 4                    # 4枚导弹
+  }
+}
+
+# 武器系统配置
+max_attack_angle: 60
+max_attack_distance: 80000    # 80km最大攻击距离
+min_attack_interval: 30
+
+# 战场中心 (longitude, latitude, altitude)
+battle_field_center: [120.0, 60.54, 0.0]  # 中点位置
+
+# 战术距离配置 - 完整的8个阶段
+tactical_distances: {
+  # 战术阶段控制距离 (米)
+  NLT: 120000,        # 120km
+  MELD: 100000,       # 100km
+  MTR: 80000,         # 80km
+  LR: 78000,          # 78km - 导弹最大发射距离
+  TR: 75000,          # 75km - 中制导结束
+  DOR: 70000,         # 70km - 规避机动
+  DR: 65000,          # 65km
+  MAR: 40000,         # 40km - 最小规避距离
+  
+  # MultipleCombatEnv必需的标准距离
+  detection_range: 120000,      # 探测距离120km
+  engagement_range: 100000,     # 交战距离100km
+  launch_range: 78000,          # 发射距离78km
+  mar_range: 40000,             # 最小规避距离40km
+  wez_range: 78000,             # 武器交战区78km
+  rmax: 80000,                  # 最大射程80km
+  rmin: 5000,                   # 最小射程5km
+  
+  # 雷达控制距离
+  track_range: 100000,          # 跟踪距离100km
+  lock_range: 80000,            # 锁定距离80km
+  return_search_range: 40000,   # 返航解锁距离40km
+}
+
+# 战术参数配置
+tactical_params: {
+  # 机动参数
+  crank_angle: 30.0,            # Crank角度30度
+  turn_rate: 8.0,               # 转弯率8度/秒
+  short_skate_crank_angle: 30.0,      # Short Skate Crank角度30度
+  short_skate_turn_cold_angle: 90.0,  # Short Skate Turn Cold角度90度
+  short_skate_crank_duration: 6.0,    # Short Skate Crank持续6秒
+  short_skate_turn_cold_duration: 15.0, # Short Skate Turn Cold持续15秒
+  
+  # 高度参数
+  altitude_separation: 500.0,   # 上下夹击高度间隔500m
+  climb_rate: 10.0,             # 爬升率10m/s
+  descent_rate: 10.0,           # 下降率10m/s
+  
+  # 速度参数
+  acceleration: 50.0,           # 加速50m/s
+  deceleration: 50.0,           # 减速50m/s
+}
+
+# reward config
+PostureReward_scale: 5.0
+PostureReward_potential: true
+PostureReward_orientation_version: v2
+PostureReward_range_version: v3
+
+AltitudeReward_safe_altitude: 4.0
+AltitudeReward_danger_altitude: 3.5
+AltitudeReward_Kv: 0.2
+
+# 数据记录配置
+data_recording: {
+  enabled: true,
+  output_dir: "tactical_simulation_results",
+  record_interval: 0.2,
+  save_trajectory: true,
+  save_radar_status: true,
+  save_missile_status: true,
+  save_acmi: true
+}

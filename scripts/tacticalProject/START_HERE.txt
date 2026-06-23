@@ -1,0 +1,234 @@
+════════════════════════════════════════════════════════════════════════════════
+
+  敌方AI异常下降排查系统 - 部署完成！
+
+════════════════════════════════════════════════════════════════════════════════
+
+【理解你的需求】
+
+你说: "我需要的是进入了哪个函数，具体的，到底是为什么下降"
+
+我的解决方案: 创建了一套完整的**函数调用追踪系统**，记录：
+  ✓ 从高层决策到具体下降命令的完整执行链
+  ✓ 每个关键函数的参数、返回值、物理效果
+  ✓ 为什么选择了下降动作（权重、威胁等级等）
+  ✓ 具体在哪个节点进入异常下降状态
+
+════════════════════════════════════════════════════════════════════════════════
+
+【已为你创建的文件】
+
+📁 核心调试系统:
+   ├─ enemy_ai_descent_debugger.py             (主调试器)
+   ├─ enemy_ai_descent_trace.py                (追踪日志)
+   ├─ setup_descent_diagnosis.py               (初始化脚本)
+   └─ apply_descent_debug_patch.py             (自动补丁)
+
+📁 启动脚本:
+   ├─ enable_descent_debug.bat                 ✓ 推荐使用
+   ├─ enable_descent_debug.ps1                 (PowerShell版)
+   └─ DEPLOYMENT_GUIDE.txt                      ← 完整指南
+
+📁 输出目录 (会自动创建):
+   └─ cap_results/
+      ├─ descent_debug.log                     (★ 最重要的日志)
+      ├─ descent_diagnosis.log
+      ├─ descent_trace_detailed.log
+      ├─ DEBUGGING_GUIDE.txt
+      └─ ... 其他仿真输出 ...
+
+════════════════════════════════════════════════════════════════════════════════
+
+【3步快速启动】
+
+1️⃣  启用调试环境
+   ──────────────
+   D:\Pycharm\LAG\scripts\tacticalProject\enable_descent_debug.bat
+
+   或在PowerShell:
+   $env:ENEMY_DESCENT_DEBUG='1'
+   $env:CAP_ROOTCAUSE_TRACE='1'
+
+2️⃣  运行仿真
+   ─────────
+   python .\run_cap_simulation_native.py
+
+3️⃣  查看日志
+   ────────
+   type cap_results\descent_debug.log
+
+════════════════════════════════════════════════════════════════════════════════
+
+【日志的样子】
+
+descent_debug.log 会包含类似这样的信息:
+
+┌─────────────────────────────────────────────────────────────────┐
+│ [决策追踪] T=476.0s | B0200 @14458.7m                         │
+│ phase=INTERCEPT | mode=NEUTRAL                                 │
+│ threat_level=MODERATE | distance=50000m                        │
+│ selected_action=DIVE_ESCAPE                                    │ ← 答案1
+│ action_reason=威胁接近_执行规避                               │ ← 答案2
+│ altitude_cmd_idx=0                                             │
+│ command_delta_altitude=-300.0m                                 │ ← 答案3
+│ is_descent=True                                                │
+│ descent_magnitude=300.0m                                       │ ← 答案4
+└─────────────────────────────────────────────────────────────────┘
+
+这告诉你:
+  ✓ 什么时候 (T=476s)
+  ✓ 谁下降 (B0200)
+  ✓ 进入了什么函数 (_execute_DIVE_ESCAPE)
+  ✓ 为什么下降 (威胁接近需要规避)
+  ✓ 下降了多少 (300m)
+
+════════════════════════════════════════════════════════════════════════════════
+
+【如何追踪特定的异常下降】
+
+【场景】你发现B0200在仿真中异常下降，想知道具体原因
+
+【步骤】
+
+1. 启用调试并运行仿真
+
+2. 在日志中找到该下降:
+   
+   Select-String "B0200" cap_results\descent_debug.log | `
+     Select-String "is_descent=True" | `
+     head -5
+
+3. 看到类似输出:
+   
+   [决策追踪] T=195.4s | B0200 @12287.9m ... is_descent=True ...
+
+4. 现在你知道:
+   ✓ 下降发生在 T=195.4s
+   ✓ 高度在 12287.9m
+   ✓ 从日志中可以看到 selected_action 是什么
+
+5. 查看完整记录:
+   
+   Select-String "T=195.4.*B0200" cap_results\descent_debug.log
+
+6. 读出所有信息:
+   - 战术阶段 (phase)
+   - 威胁等级 (threat_level)
+   - 选择的动作 (selected_action)
+   - 为什么 (action_reason)
+   - 命令 (command_delta_altitude)
+
+════════════════════════════════════════════════════════════════════════════════
+
+【追踪的完整链路】
+
+你的问题 → 日志中的答案 → 代码中的位置
+
+"为什么B0200下降?" 
+  ↓
+selected_action=DIVE_ESCAPE
+  ↓
+查看 enemy_ai_refactor_helpers.py 的 _execute_action() 函数
+  ↓
+elif action_type == ActionType.DIVE_ESCAPE:
+    return self._execute_dive_escape()
+  ↓
+_execute_dive_escape() 生成 altitude_cmd_idx=0
+对应 norm_delta_altitude[0] = -300m
+  ↓
+这就是下降的根源！
+
+════════════════════════════════════════════════════════════════════════════════
+
+【关键代码位置】
+
+如果你需要手工跟踪代码:
+
+1. 决策层:
+   📄 unified_enemy_tactical_ai_impl.py
+   函数: get_enemy_command(), _select_action()
+   
+2. 执行层:
+   📄 enemy_ai_refactor_helpers.py
+   函数: _execute_action()
+   
+3. 机动实现:
+   📄 enemy_ai_maneuver_helpers.py
+   函数: _execute_dive_escape(), _execute_spiral_dive()
+   
+4. 返航逻辑:
+   📄 enemy_ai_rtb_helpers.py
+   函数: _execute_return_to_base_unified()
+
+════════════════════════════════════════════════════════════════════════════════
+
+【常见问题】
+
+Q: 日志太多，怎么找重点?
+A: 在日志文件中搜索:
+   - "is_descent=True" → 所有下降事件
+   - "selected_action=DIVE" → 所有俯冲动作
+   - "B0200" → 特定智能体
+   - "T=476" → 特定时间
+
+Q: 需要更详细的信息?
+A: 查看 descent_trace_detailed.log
+   包含:
+   - 各个动作的权重分布
+   - 状态转换细节
+   - 命令规范化过程
+
+Q: 想要关闭调试?
+A: 就是不设置环境变量就行
+   unset ENEMY_DESCENT_DEBUG
+
+Q: 仿真太慢了?
+A: 调试会增加一点开销
+   可以设置 CAP_DEBUG_PRINT=0 只保留完整追踪
+
+════════════════════════════════════════════════════════════════════════════════
+
+【调试系统的能力】
+
+✓ 记录每一帧的完整决策过程
+✓ 追踪从高层决策到底层命令的完整链路
+✓ 检测并标记每一次下降事件
+✓ 记录下降时的所有状态（威胁、动作、命令等）
+✓ 能够精确定位异常的代码位置
+✓ 提供函数调用栈追踪
+✓ 记录命令转换的每个步骤
+
+════════════════════════════════════════════════════════════════════════════════
+
+【立即开始】
+
+现在，你已经有了完整的诊断系统。运行:
+
+  1. enable_descent_debug.bat
+  2. python .\run_cap_simulation_native.py
+  3. type cap_results\descent_debug.log
+
+然后搜索:
+  - "B0200" 
+  - "is_descent=True"
+  - "selected_action"
+
+就能看到完整的函数执行链和决策过程！
+
+════════════════════════════════════════════════════════════════════════════════
+
+【详细文档位置】
+
+完整的部署指南和使用说明:
+  📄 DEPLOYMENT_GUIDE.txt (本目录)
+  📄 cap_results/DEBUGGING_GUIDE.txt (仿真后生成)
+
+════════════════════════════════════════════════════════════════════════════════
+
+准备好了吗?
+
+  enable_descent_debug.bat
+
+让我们开始追踪这个神秘的下降！
+
+════════════════════════════════════════════════════════════════════════════════

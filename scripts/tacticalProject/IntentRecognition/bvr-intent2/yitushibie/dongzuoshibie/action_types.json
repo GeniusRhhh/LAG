@@ -1,0 +1,1 @@
+{"level_flight": 0, "accelerate": 1, "decelerate": 2, "turn_left": 3, "turn_right": 4, "climb": 5, "climb_left": 6, "climb_right": 7, "dive": 8, "dive_left": 9, "dive_right": 10}

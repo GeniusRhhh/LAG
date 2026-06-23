@@ -1,0 +1,60 @@
+# task config
+task: cap_lowlevel
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12
+
+# episode / curriculum config
+max_steps: 900
+command_hold_min_steps: 12
+command_hold_max_steps: 72
+cap_profile_mode: foundation
+min_target_speed_mps: 120.0
+max_target_speed_mps: 330.0
+min_target_altitude_ft: 800.0
+max_target_altitude_ft: 45000.0
+low_energy_vc_mps: 135.0
+severe_low_energy_vc_mps: 105.0
+high_sink_rate_mps: 6.0
+severe_sink_rate_mps: 12.0
+min_recovery_altitude_m: 900.0
+
+# termination config
+altitude_limit: 120
+acceleration_limit_x: 12.0
+acceleration_limit_y: 12.0
+acceleration_limit_z: 12.0
+
+# aircraft config
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,
+      ic_lat_geod_deg: 60.0,
+      ic_h_sl_ft: 20000,
+      ic_psi_true_deg: 0.0,
+      ic_u_fps: 800.0,
+    }
+  }
+}
+
+# battlefield center
+battle_field_center: [120.0, 60.0, 0.0]
+
+# reward config
+HeadingReward_scale: 0.85
+AltitudeReward_scale: 0.30
+AltitudeReward_safe_altitude: 3.0
+AltitudeReward_danger_altitude: 2.0
+AltitudeReward_Kv: 0.22
+
+RecoveryReward_scale: 0.70
+RecoveryReward_target_vc_mps: 145.0
+RecoveryReward_min_vc_mps: 75.0
+RecoveryReward_safe_aoa_deg: 10.0
+RecoveryReward_bad_aoa_deg: 22.0
+RecoveryReward_max_sink_mps: 18.0
+RecoveryReward_safe_roll_deg: 35.0

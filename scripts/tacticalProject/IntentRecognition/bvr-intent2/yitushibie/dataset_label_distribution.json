@@ -1,0 +1,45 @@
+{
+  "intent_B0100": {
+    "unique_labels": [
+      0.0,
+      1.0
+    ],
+    "label_counts": {
+      "0": 61283,
+      "1": 6172
+    },
+    "total_samples": 67455
+  },
+  "intent_B0200": {
+    "unique_labels": [
+      0.0,
+      1.0
+    ],
+    "label_counts": {
+      "1": 11089,
+      "0": 56366
+    },
+    "total_samples": 67455
+  },
+  "one_hot_encoding": {
+    "unique_classes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "class_counts": {
+      "0": 40291,
+      "3": 4773,
+      "4": 6204,
+      "5": 6185,
+      "1": 5001,
+      "2": 5001
+    },
+    "total_samples": 67455,
+    "encoding_dimension": 6
+  },
+  "total_samples": 67455
+}

@@ -1,0 +1,102 @@
+# task config
+task: cap_lowlevel
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12
+
+# episode / training config
+max_steps: 3600
+command_hold_min_steps: 24
+command_hold_max_steps: 180
+cap_profile_mode: foundation
+cap_obs_semantics: direct_command
+cap_command_sampling_mode: energy_safe_balanced
+min_target_speed_mps: 185.0
+max_target_speed_mps: 320.0
+min_target_altitude_ft: 1500.0
+max_target_altitude_ft: 42000.0
+low_energy_vc_mps: 190.0
+severe_low_energy_vc_mps: 160.0
+high_sink_rate_mps: 4.5
+severe_sink_rate_mps: 8.5
+min_recovery_altitude_m: 1400.0
+energy_guard_altitude_m: 8500.0
+energy_guard_vc_mps: 225.0
+energy_guard_hard_altitude_m: 10500.0
+energy_guard_hard_vc_mps: 210.0
+timeout_reward_bonus: 140.0
+low_altitude_penalty: 260.0
+extreme_state_penalty: 260.0
+overload_penalty: 200.0
+other_failure_penalty: 180.0
+
+foundation_profile_weight_cruise: 0.46
+foundation_profile_weight_turn: 0.24
+foundation_profile_weight_vertical: 0.10
+foundation_profile_weight_aggressive: 0.04
+foundation_profile_weight_recover_high: 0.10
+foundation_profile_weight_recover_mid: 0.06
+foundation_profile_weight_ground_escape: 0.00
+
+# termination config
+altitude_limit: 120
+acceleration_limit_x: 12.0
+acceleration_limit_y: 12.0
+acceleration_limit_z: 12.0
+
+# aircraft config
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,
+      ic_lat_geod_deg: 60.0,
+      ic_h_sl_ft: 28000,
+      ic_psi_true_deg: 180.0,
+      ic_u_fps: 850.0,
+    }
+  }
+}
+
+# battlefield center
+battle_field_center: [120.0, 60.0, 0.0]
+
+# reward config
+CapTrackingReward_scale: 0.95
+CapTrackingReward_heading_progress_scale_deg: 18.0
+CapTrackingReward_alt_progress_scale_m: 220.0
+CapTrackingReward_speed_progress_scale_mps: 22.0
+CapTrackingReward_heading_tolerance_deg: 4.0
+CapTrackingReward_alt_tolerance_m: 120.0
+CapTrackingReward_speed_tolerance_mps: 9.0
+CapTrackingReward_completion_bonus: 0.20
+
+AltitudeReward_scale: 0.30
+AltitudeReward_safe_altitude: 4.5
+AltitudeReward_danger_altitude: 2.8
+AltitudeReward_Kv: 0.18
+
+RecoveryReward_scale: 0.40
+RecoveryReward_target_vc_mps: 215.0
+RecoveryReward_min_vc_mps: 125.0
+RecoveryReward_safe_aoa_deg: 9.0
+RecoveryReward_bad_aoa_deg: 17.0
+RecoveryReward_max_sink_mps: 12.0
+RecoveryReward_safe_roll_deg: 28.0
+
+EnergyManagementReward_scale: 0.55
+EnergyManagementReward_base_safe_vc_mps: 190.0
+EnergyManagementReward_high_altitude_m: 8000.0
+EnergyManagementReward_very_high_altitude_m: 10500.0
+EnergyManagementReward_high_alt_speed_margin_mps: 20.0
+EnergyManagementReward_very_high_alt_speed_margin_mps: 35.0
+EnergyManagementReward_speed_margin_band_mps: 35.0
+EnergyManagementReward_max_sink_mps: 9.0
+EnergyManagementReward_safe_aoa_deg: 9.0
+EnergyManagementReward_bad_aoa_deg: 17.0
+EnergyManagementReward_climb_drain_pitch_deg: 4.0
+EnergyManagementReward_climb_drain_vup_mps: 2.0
+EnergyManagementReward_climb_drain_penalty: 0.35
+EnergyManagementReward_esdot_scale: 800.0

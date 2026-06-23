@@ -1,0 +1,60 @@
+# task config
+task: cap_lowlevel
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12
+
+# episode / curriculum config
+max_steps: 960
+command_hold_min_steps: 14
+command_hold_max_steps: 80
+cap_profile_mode: foundation
+min_target_speed_mps: 135.0
+max_target_speed_mps: 360.0
+min_target_altitude_ft: 1000.0
+max_target_altitude_ft: 52000.0
+low_energy_vc_mps: 150.0
+severe_low_energy_vc_mps: 120.0
+high_sink_rate_mps: 6.5
+severe_sink_rate_mps: 12.5
+min_recovery_altitude_m: 1100.0
+
+# termination config
+altitude_limit: 150
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# aircraft config
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: su27sk,
+    init_state: {
+      ic_long_gc_deg: 120.0,
+      ic_lat_geod_deg: 60.0,
+      ic_h_sl_ft: 26000,
+      ic_psi_true_deg: 0.0,
+      ic_u_fps: 820.0,
+    }
+  }
+}
+
+# battlefield center
+battle_field_center: [120.0, 60.0, 0.0]
+
+# reward config
+HeadingReward_scale: 0.82
+AltitudeReward_scale: 0.34
+AltitudeReward_safe_altitude: 3.5
+AltitudeReward_danger_altitude: 2.2
+AltitudeReward_Kv: 0.22
+
+RecoveryReward_scale: 0.78
+RecoveryReward_target_vc_mps: 165.0
+RecoveryReward_min_vc_mps: 90.0
+RecoveryReward_safe_aoa_deg: 11.0
+RecoveryReward_bad_aoa_deg: 24.0
+RecoveryReward_max_sink_mps: 20.0
+RecoveryReward_safe_roll_deg: 38.0

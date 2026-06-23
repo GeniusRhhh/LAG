@@ -1,0 +1,2464 @@
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+D:\Pycharm\LAG\scripts\tacticalProject\cap\generate_ch6_validation_assets.py:215: UserWarning: Tight layout not applied. The left and right margins cannot be made large enough to accommodate all Axes decorations.
+  fig.tight_layout()
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 277
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 282
+Engine orientation ignored, only thruster orientation is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 303
+Engine location ignored, only thruster location is used.
+
+In file D:/Pycharm/LAG/envs/JSBSim/utils/../data/aircraft/su27sk/su27sk.xml: line 308
+Engine orientation ignored, only thruster orientation is used.
+D:\Pycharm\LAG\scripts\tacticalProject\cap\generate_ch6_validation_assets.py:215: UserWarning: Tight layout not applied. The left and right margins cannot be made large enough to accommodate all Axes decorations.
+  fig.tight_layout()

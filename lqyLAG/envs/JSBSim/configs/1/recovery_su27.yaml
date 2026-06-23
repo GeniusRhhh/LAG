@@ -1,0 +1,50 @@
+# task config
+task: recovery
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12  # step 0.2s
+
+# termination config
+max_steps: 750               # episode length: 150s
+altitude_limit: 120          # allow low-altitude recovery before hard crash
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+RecoverySuccess_required_stable_steps: 40
+RecoveryTeacher_release_stable_steps: 50
+RecoveryTeacher_min_hold_steps: 35
+RecoveryTeacher_early_vc_mps: 170.0
+RecoveryTeacher_early_sink_mps: 3.0
+RecoveryTeacher_early_bank_deg: 35.0
+RecoveryTeacher_early_aoa_deg: 11.0
+
+# aircraft config
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: su27sk,
+    max_heading_increment: 150,
+    max_altitude_increment: 6000,
+    max_velocities_u_increment: 80,
+    check_interval: 25,
+    init_state: {
+      ic_long_gc_deg: 120.0,
+      ic_lat_geod_deg: 60.0,
+      ic_h_sl_ft: 26000,
+      ic_psi_true_deg: 0.0,
+      ic_u_fps: 820.0,
+    }
+  }
+}
+
+# battlefield center
+battle_field_center: [120.0, 60.0, 0.0]
+
+# reward config
+RecoveryReward_target_vc_mps: 165.0
+RecoveryReward_min_vc_mps: 90.0
+RecoveryReward_safe_aoa_deg: 11.0
+RecoveryReward_bad_aoa_deg: 24.0
+RecoveryReward_max_sink_mps: 20.0
+RecoveryReward_safe_roll_deg: 38.0

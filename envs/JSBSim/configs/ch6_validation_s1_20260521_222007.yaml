@@ -1,0 +1,107 @@
+task: multiplecombat
+base_reference:
+  a0100:
+    longitude: 120.6757
+    latitude: 60.0
+    heading: 0.0
+formation:
+  wingman_y_offset: 100.0
+  lead_x:
+    left: 75.0
+    right: 125.0
+  wingman_x:
+    left: 25.0
+    right: 175.0
+enemy:
+  spawn_y: 250.0
+  spawn_x:
+  - 40
+  - 80
+  - 120
+  - 160
+aircraft_configs:
+  A0100:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 120.6757
+      ic_lat_geod_deg: 60.0
+      ic_h_sl_ft: 29520
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 984.25
+    missile: 4
+  A0200:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 120.4252
+      ic_lat_geod_deg: 60.2009
+      ic_h_sl_ft: 29520
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  A0300:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 121.3766
+      ic_lat_geod_deg: 60.0
+      ic_h_sl_ft: 29520
+      ic_psi_true_deg: 0.0
+      ic_u_fps: 984.25
+    missile: 4
+  A0400:
+    color: Red
+    model: su27sk
+    init_state:
+      ic_long_gc_deg: 121.2261
+      ic_lat_geod_deg: 60.2009
+      ic_h_sl_ft: 29520
+      ic_psi_true_deg: 180.0
+      ic_u_fps: 984.25
+    missile: 4
+  B0100:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.36038468468469
+      ic_lat_geod_deg: 62.4
+      ic_h_sl_ft: 32808.4
+      ic_psi_true_deg: 180
+      ic_u_fps: 1251.1
+    missile: 4
+  B0200:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.4684927927928
+      ic_lat_geod_deg: 62.4
+      ic_h_sl_ft: 32808.4
+      ic_psi_true_deg: 180
+      ic_u_fps: 1251.1
+    missile: 4
+  B0300:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 121.33335765765766
+      ic_lat_geod_deg: 62.4
+      ic_h_sl_ft: 32808.4
+      ic_psi_true_deg: 180
+      ic_u_fps: 1251.1
+    missile: 4
+  B0400:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 121.44146576576577
+      ic_lat_geod_deg: 62.4
+      ic_h_sl_ft: 32808.4
+      ic_psi_true_deg: 180
+      ic_u_fps: 1251.1
+    missile: 4
+max_steps: 10000
+time_interval: 0.2
+cap_experiment_mode: proposed
+cap_rng_seed: 3
+cap_awacs_seed: 3

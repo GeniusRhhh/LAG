@@ -1,0 +1,218 @@
+# 2v2并排射击战术配置文件
+# 基于拖曳射击项目的成功配置格式
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 1500           # episode length: 300s - 确保完整战术执行
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# environment config
+num_agents: 4
+num_friendlies: 2
+num_enemies: 2
+
+# 飞机配置 - 使用正确的经纬度设置100km距离
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 己方长机
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 32800,          # 10km高度
+      ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.02,     # 己方僚机，右侧2海里偏移
+      ic_lat_geod_deg: 60.0,      # 基准纬度
+      ic_h_sl_ft: 32800,          # 10km高度
+      ic_psi_true_deg: 0.0,       # 朝北（接敌方向）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.0,      # 敌方长机
+      ic_lat_geod_deg: 60.9,      # 南方约100km
+      ic_h_sl_ft: 32800,          # 10km高度
+      ic_psi_true_deg: 180.0,     # 朝南（接敌方向）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  },
+  B0200: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 119.98,     # 敌方僚机，左侧2海里偏移
+      ic_lat_geod_deg: 60.9,      # 南方约100km
+      ic_h_sl_ft: 32800,          # 10km高度
+      ic_psi_true_deg: 180.0,     # 朝南（接敌方向）
+      ic_u_fps: 1200.0,           # 速度
+    },
+    missile: 4
+  }
+}
+
+# 并排射击战术距离配置
+tactical_distances: {
+  # 战术阶段控制距离 (米) - 与拖曳射击相同
+  NLT_MELD_max: 90000,        # 90km
+  NLT_MELD_min: 81000,        # 81km
+  MELD_MTR_max: 81000,        # 81km
+  MELD_MTR_min: 45000,        # 45km
+  MTR_TR_max: 45000,          # 45km
+  MTR_TR_min: 41000,          # 41km
+  TR_DOR_max: 41000,          # 41km
+  TR_DOR_min: 19600,          # 19.6km
+  DOR_DR_max: 19600,          # 19.6km
+  DOR_DR_min: 14500,          # 14.5km
+  
+  # 并排射击导弹发射距离 - 同时发射
+  simultaneous_launch_range: 20600,   # 20.6km同时发射
+  enemy_launch_ranges: [45000, 41000, 19600],  # 敌方发射距离
+  
+  # MultipleCombatEnv必需的标准距离
+  detection_range: 100000,      # 探测距离100km
+  engagement_range: 90000,      # 交战距离90km (必需)
+  launch_range: 45000,          # 发射距离45km (必需)
+  mar_range: 19600,             # 最小规避距离19.6km (必需)
+  wez_range: 45000,             # 武器交战区45km
+  rmax: 60000,                  # 最大射程60km
+  rmin: 500,                    # 最小射程500m（符合AIM-120C-7标准）
+
+  # 雷达控制距离
+  track_range: 81000,           # 跟踪距离81km
+  lock_range: 45000,            # 锁定距离45km
+  return_search_range: 19600,   # 返航解锁距离19.6km
+}
+
+# 并排射击战术参数
+side_by_side_shooting_tactics: {
+  # 编队参数
+  formation_spacing_min: 1852,         # 最小编队间距1海里(1852m)
+  formation_spacing_max: 5556,         # 最大编队间距3海里(5556m)
+  formation_spacing_target: 3704,      # 目标编队间距2海里(3704m)
+  
+  # 机动参数 - 复用拖曳射击的short_skate参数
+  short_skate_angle: 45.0,      # short_skate角度45度
+  short_skate_duration: 5.0,    # short_skate持续时间5秒
+  crank_angle: 40.0,            # crank角度40度
+  turn_cold_angle: 100.0,       # turn_cold角度100度
+  
+  # 返航参数
+  leader_return_side: "left",   # 长机左侧返航
+  wingman_return_side: "right", # 僚机右侧返航
+  return_heading_offset: 45.0,  # 返航航向偏移45度
+  
+  # 导弹发射参数
+  simultaneous_launch: true,    # 启用同时发射
+  launch_coordination_window: 2.0,  # 发射协调时间窗口2秒
+  launch_distance_threshold: 20600, # 发射距离阈值20.6km
+  
+  # 战术阶段参数
+  maintain_formation_phases: ["NLT_MELD", "MELD_MTR", "MTR_TR", "TR_DOR"],  # 保持编队的阶段
+  launch_phase: "TR_DOR",       # 发射阶段
+  return_phase: "DOR_DR",       # 返航阶段
+}
+
+# 雷达配置 - 复用拖曳射击的雷达设置
+radar_config: {
+  # 友方雷达 (AN/APG-68)
+  friendly_radar: {
+    max_detection_range: 100000,    # 最大探测距离100km
+    max_track_range: 81000,         # 最大跟踪距离81km
+    max_lock_range: 45000,          # 最大锁定距离45km
+    scan_angle: 120,                # 扫描角度120度
+    update_interval: 1.0,           # 更新间隔1秒
+    detection_probability: 0.95,    # 探测概率95%
+    track_quality_threshold: 0.7,   # 跟踪质量阈值
+    lock_quality_threshold: 0.8,    # 锁定质量阈值
+  },
+  
+  # 敌方雷达 (N001VE)
+  enemy_radar: {
+    max_detection_range: 90000,     # 最大探测距离90km
+    max_track_range: 70000,         # 最大跟踪距离70km
+    max_lock_range: 40000,          # 最大锁定距离40km
+    scan_angle: 110,                # 扫描角度110度
+    update_interval: 1.2,           # 更新间隔1.2秒
+    detection_probability: 0.90,    # 探测概率90%
+    track_quality_threshold: 0.6,   # 跟踪质量阈值
+    lock_quality_threshold: 0.75,   # 锁定质量阈值
+  }
+}
+
+# 导弹配置 - 复用拖曳射击的导弹设置
+missile_config: {
+  # AIM-120C-7 AMRAAM
+  type: "AIM-120C-7",
+  max_range: 60000,               # 最大射程60km
+  min_range: 500,                 # 最小射程500m
+  max_speed: 1200,                # 最大速度1200m/s (约4马赫)
+  guidance_type: "active_radar",   # 主动雷达制导
+  warhead_weight: 22.7,           # 战斗部重量22.7kg
+  probability_kill: 0.85,         # 杀伤概率85%
+  
+  # 发射包络
+  launch_envelope: {
+    min_altitude: 500,            # 最小发射高度500m
+    max_altitude: 15000,          # 最大发射高度15km
+    min_speed: 150,               # 最小发射速度150m/s
+    max_speed: 600,               # 最大发射速度600m/s
+  }
+}
+
+# 环境配置
+environment: {
+  weather: "clear",               # 晴朗天气
+  visibility: 50000,              # 能见度50km
+  wind_speed: 0,                  # 无风
+  temperature: 15,                # 温度15°C
+  pressure: 101325,               # 标准大气压
+}
+
+# 数据记录配置
+data_recording: {
+  enable_trajectory_recording: true,    # 启用轨迹记录
+  enable_radar_recording: true,         # 启用雷达记录
+  enable_missile_recording: true,       # 启用导弹记录
+  enable_tactical_recording: true,      # 启用战术记录
+  recording_interval: 0.2,              # 记录间隔0.2秒
+  output_directory: "side_by_side_shooting_results",  # 输出目录
+}
+
+# 仿真控制
+simulation_control: {
+  enable_real_time: false,        # 禁用实时仿真
+  time_acceleration: 1.0,         # 时间加速倍数
+  enable_visualization: true,     # 启用可视化
+  enable_logging: true,           # 启用日志
+  log_level: "INFO",              # 日志级别
+}
+
+# 性能配置
+performance: {
+  max_cpu_usage: 80,              # 最大CPU使用率80%
+  memory_limit: 4096,             # 内存限制4GB
+  enable_gpu: false,              # 禁用GPU加速
+  parallel_agents: false,         # 禁用并行智能体
+}

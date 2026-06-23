@@ -1,0 +1,411 @@
+from pathlib import Path
+import json
+import shutil
+import pandas as pd
+
+
+root = Path(r"d:\Pycharm\LAG\scripts\tacticalProject\cap\docs")
+asset_root = root / "第六章仿真验证文档0511_assets"
+fig_root = root / "figs"
+fig_root.mkdir(exist_ok=True)
+
+doc_path = root / "第六章仿真验证文档0511_trae.md"
+xlsx_path = root / "第六章仿真验证文档0511_trae_指标原始数据包.xlsx"
+matlab_path = root / "plot_ch6_metrics_matlab.m"
+
+scenes = {
+    "S1": {
+        "id": "S1_20260511_090228",
+        "risk": "LOW",
+        "summary_dir": Path(r"d:\Pycharm\LAG\scripts\tacticalProject\cap_results\Chapter6_validation\ALL_20260511_090228\S1_20260511_090228"),
+        "metrics": {
+            "战果": "敌 2 / 我损 1，最终我方 3 机存活、敌方 2 机存活",
+            "首次雷达激活": "79.2 s",
+            "首次 FCR 航迹": "85.4 s",
+            "全探完成": "111.6 s",
+            "首次 stable ready": "194.6 s",
+            "stable ready 峰值": "2",
+            "稳定跟踪目标峰值": "3",
+            "首次门禁通过": "276.2 s",
+            "门禁通过率(unique)": "18.52%",
+            "接力制导成功率(unique)": "25.55%",
+            "中制导导弹峰值": "8",
+            "首次击落": "344.6 s",
+            "期望风险区图真一致率": "92.48%",
+            "全风险区精确一致率": "31.78%",
+            "最小敌我距离": "43.15 km",
+            "我方最小高度/速度": "8024.6 m / 92.9 m/s",
+        },
+        "analysis": [
+            "场景一承担基线验证职责，重点不是追求极端战果，而是验证在标准正面对进且无额外敌方脚本干预条件下，系统是否能够稳定完成协同探测、稳定跟踪、门禁通过、接力制导与战果兑现的完整链路。",
+            "该场景中 AWACS 在 0.2 s 即建立全局感知，但真正与火控可用性直接相关的 FCR 航迹建立延后到 85.4 s 以后，stable ready 首次出现在 194.6 s，说明算法采用了相对保守的火控资源收敛方式。",
+            "发射门通过率与接力成功率均不算最高，但从 276.2 s 首发、292.0 s 首次接力成功到 344.6 s 首杀兑现的顺序完全闭合，证明本文算法在自由博弈基线样本中已经具备真实可执行的中远距交战能力。",
+            "场景一最有价值的工程结论是，即使交战拖长到残局阶段，系统仍未出现飞行包线崩坏、责任区彻底失守或状态机失控振荡；不足主要体现在高质量双机火控窗口建立速度偏慢，导致后段收口效率仍有提升空间。",
+        ],
+    },
+    "S2": {
+        "id": "S2_20260511_091756",
+        "risk": "MEDIUM",
+        "summary_dir": Path(r"d:\Pycharm\LAG\scripts\tacticalProject\cap_results\Chapter6_validation\ALL_20260511_090228\S2_20260511_091756"),
+        "metrics": {
+            "战果": "敌 3 / 我损 0，最终我方 4 机存活、敌方 1 机存活",
+            "首次雷达激活": "30.8 s",
+            "首次 FCR 航迹": "38.2 s",
+            "全探完成": "70.4 s",
+            "首次 stable ready": "152.8 s",
+            "stable ready 峰值": "2",
+            "稳定跟踪目标峰值": "4",
+            "首次门禁通过": "259.8 s",
+            "门禁通过率(unique)": "15.28%",
+            "接力制导成功率(unique)": "47.13%",
+            "中制导导弹峰值": "12",
+            "首次击落": "337.6 s",
+            "期望风险区图真一致率": "31.30%",
+            "全风险区精确一致率": "27.07%",
+            "最小敌我距离": "41.94 km",
+            "我方最小高度/速度": "8209.7 m / 74.3 m/s",
+        },
+        "analysis": [
+            "场景二引入更近的宽正面混合高度几何和间歇性 AWACS 失配，验证的是系统在感知条件不完整时是否仍能恢复搜索、建立稳定火控并持续压制敌方。",
+            "该场景的关键亮点不在门禁放宽，而在前端更严格、后端更有效。门禁通过率虽低于场景一，但接力成功率达到三场景最高值 47.13%，证明发射门约束与中制导维持在此场景中形成了有效协同。",
+            "稳定跟踪目标峰值达到 4，说明在 AWACS 受损情况下，多机协同探测和火控接力已能够接管主责；三次击杀分别发生在 338.0 s、673.4 s 与 1053.6 s，呈现典型的持续压制型而非单波次清场型战果形成过程。",
+            "场景二暴露出的主要短板并不在交战链，而在风险图。真实中风险占用时间远长于图像侧预测，中风险图真一致率仅为 31.30%，说明当前风险图对长时中风险占用的描绘仍偏保守。",
+        ],
+    },
+    "S3": {
+        "id": "S3_20260511_093323",
+        "risk": "HIGH",
+        "summary_dir": Path(r"d:\Pycharm\LAG\scripts\tacticalProject\cap_results\Chapter6_validation\ALL_20260511_090228\S3_20260511_093323"),
+        "metrics": {
+            "战果": "敌 4 / 我损 0，最终我方 4 机存活、敌方 0 机存活",
+            "首次雷达激活": "0.2 s",
+            "首次 FCR 航迹": "0.2 s",
+            "全探完成": "25.8 s",
+            "首次 stable ready": "48.2 s",
+            "stable ready 峰值": "4",
+            "稳定跟踪目标峰值": "4",
+            "首次门禁通过": "127.2 s",
+            "门禁通过率(unique)": "39.39%",
+            "接力制导成功率(unique)": "42.71%",
+            "中制导导弹峰值": "16",
+            "首次击落": "220.6 s",
+            "期望风险区图真一致率": "97.21%",
+            "全风险区精确一致率": "43.38%",
+            "最小敌我距离": "32.11 km",
+            "我方最小高度/速度": "8510.6 m / 120.1 m/s",
+        },
+        "analysis": [
+            "场景三是本章压力最高的验证样本。敌方低空突防并在前 45 s 加速爬升，要求系统在极短时间内完成风险研判、火控资源配置、首轮交战组织和要地防护。",
+            "从 0.2 s 首次雷达激活、0.2 s 首次 FCR 航迹、25.8 s 全探完成、48.2 s stable ready 到 127.2 s 首次门禁通过的时间链可见，系统已经把高压场景下的完整交战链整体前移。",
+            "场景三门禁通过率与中制导峰值均显著提高，战果达到 4:0，说明在高风险要地防护模式下，系统能够主动提高交战密度以快速消除威胁，而不是被动等待更宽松的几何窗口。",
+            "需要如实指出的是，场景三意图链没有形成有效 ready 输出，因此本场景的正证据主要来自探测链、风险图、任务威胁与战果链；意图识别尚不能作为高风险场景的主驱动模块。",
+        ],
+    },
+}
+
+fig_plan = [
+    ("S1", "overview.png", "s1_overview.png"),
+    ("S1", "fig02_detection_tracking_pipeline.png", "s1_detection_tracking_pipeline.png"),
+    ("S1", "fig03b_control_distance_timeline.png", "s1_control_distance_timeline.png"),
+    ("S1", "fig05_gate_and_relay.png", "s1_gate_and_relay.png"),
+    ("S1", "fig06_survival_distance_targeting.png", "s1_survival_distance_targeting.png"),
+    ("S1", "fig07_enemy_zone_heatmap.png", "s1_enemy_zone_heatmap.png"),
+    ("S1", "fig09_flight_safety_envelope.png", "s1_flight_safety_envelope.png"),
+    ("S2", "overview.png", "s2_overview.png"),
+    ("S2", "fig02_detection_tracking_pipeline.png", "s2_detection_tracking_pipeline.png"),
+    ("S2", "fig03b_control_distance_timeline.png", "s2_control_distance_timeline.png"),
+    ("S2", "fig05_gate_and_relay.png", "s2_gate_and_relay.png"),
+    ("S2", "fig06_survival_distance_targeting.png", "s2_survival_distance_targeting.png"),
+    ("S2", "fig07_enemy_zone_heatmap.png", "s2_enemy_zone_heatmap.png"),
+    ("S2", "fig09_flight_safety_envelope.png", "s2_flight_safety_envelope.png"),
+    ("S3", "overview.png", "s3_overview.png"),
+    ("S3", "fig02_detection_tracking_pipeline.png", "s3_detection_tracking_pipeline.png"),
+    ("S3", "fig03b_control_distance_timeline.png", "s3_control_distance_timeline.png"),
+    ("S3", "fig05_gate_and_relay.png", "s3_gate_and_relay.png"),
+    ("S3", "fig06_survival_distance_targeting.png", "s3_survival_distance_targeting.png"),
+    ("S3", "fig07_enemy_zone_heatmap.png", "s3_enemy_zone_heatmap.png"),
+    ("S3", "fig09_flight_safety_envelope.png", "s3_flight_safety_envelope.png"),
+    ("batch", "comparison_effectiveness.png", "batch_comparison_effectiveness.png"),
+    ("batch", "comparison_timing.png", "batch_comparison_timing.png"),
+    ("batch", "comparison_zone_picture.png", "batch_comparison_zone_picture.png"),
+]
+
+for scope, src_name, dst_name in fig_plan:
+    shutil.copy2(asset_root / scope / src_name, fig_root / dst_name)
+
+summary_rows = []
+for key, cfg in scenes.items():
+    row = {"场景": key, "场景编号": cfg["id"], "风险区": cfg["risk"]}
+    row.update(cfg["metrics"])
+    summary_rows.append(row)
+comparison_df = pd.DataFrame(summary_rows)
+
+with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+    comparison_df.to_excel(writer, sheet_name="summary_compare", index=False)
+    for key, cfg in scenes.items():
+        pd.DataFrame(list(cfg["metrics"].items()), columns=["指标", "数值"]).to_excel(writer, sheet_name=f"{key}_summary", index=False)
+        metrics_json = cfg["summary_dir"] / "thesis_assets" / "summary_metrics.json"
+        if metrics_json.exists():
+            metrics_data = json.loads(metrics_json.read_text(encoding="utf-8"))
+            pd.DataFrame(
+                [{"key": k, "value": json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v} for k, v in metrics_data.items()]
+            ).to_excel(writer, sheet_name=f"{key}_json", index=False)
+        csv_dir = cfg["summary_dir"] / "thesis_assets" / "csv"
+        mapping = {
+            "awacs_tracks.csv": f"{key}_awacs",
+            "battle_snapshots.csv": f"{key}_battle",
+            "kill_timeline.csv": f"{key}_kills",
+            "missile_end_reasons.csv": f"{key}_missile",
+            "ready_cumulative.csv": f"{key}_ready",
+            "state_timeline.csv": f"{key}_state",
+            "target_timeline.csv": f"{key}_target",
+        }
+        for filename, sheet in mapping.items():
+            path = csv_dir / filename
+            if path.exists():
+                pd.read_csv(path).to_excel(writer, sheet_name=sheet[:31], index=False)
+
+matlab_path.write_text(
+    """%% 第六章仿真验证 0511 Matlab 复现实验脚本
+clear; clc;
+file = './第六章仿真验证文档0511_trae_指标原始数据包.xlsx';
+T = readtable(file, 'Sheet', 'summary_compare');
+figure('Color','w');
+subplot(1,2,1);
+bar(categorical(T.场景), [2;3;4]);
+title('敌机击落数 / Enemy Kills');
+ylabel('数量 / Count');
+subplot(1,2,2);
+bar(categorical(T.场景), [18.52;15.28;39.39]);
+title('发射门通过率 / Gate Pass Rate');
+ylabel('百分比 / %');
+figure('Color','w');
+bar(categorical(T.场景), [25.55;47.13;42.71]);
+title('接力制导成功率 / Relay Guidance Success Rate');
+ylabel('百分比 / %');
+""",
+    encoding="utf-8",
+)
+
+
+def fig_block(no: str, zh: str, en: str, file_name: str, caption: str) -> str:
+    return (
+        f"图{no} {zh} / Fig. {no} {en}\n\n"
+        f"![图{no} {zh}](./figs/{file_name})\n\n"
+        f"图注 / Caption：{caption}\n"
+    )
+
+
+scene_table_titles = {"S1": "表6-17 场景一关键指标", "S2": "表6-18 场景二关键指标", "S3": "表6-19 场景三关键指标"}
+
+lines = [
+    "# 第六章仿真验证文档0511_trae",
+    "",
+    "第六章  基于战术规则模板的分层战术决策方法",
+    "",
+    "## 6.3 仿真验证",
+    "",
+    "本文档以 `第六章仿真验证0509.md` 的 6.3 节为结构底稿，在此基础上完成面向 2026 年 5 月 11 日正式批次数据的系统性重写、扩充与工程化整理。与 0509 版本相比，本文档不再把仿真验证仅仅停留在样例展示层面，而是围绕三条主线重新组织论证：其一，证明战术规则模板驱动的分层决策算法在低、中、高三类典型风险结构下是否具备稳定、可解释、可复核的作战闭环；其二，明确探测链、门禁链、接力链、风险图链和战果链之间的因果关系，而不是简单罗列若干局部指标；其三，把图表、日志、CSV 统计、场景脚本与复现实验数据包统一收束到同一文档和同一交付目录中，形成可直接发布、可交叉审计、可第三方复现的正式验证材料。",
+    "",
+    "本次正式验证仅采用 `ALL_20260511_090228` 批次中的三组正式场景：`s1_20260511_090228`、`s2_20260511_091756`、`s3_20260511_093323`。三者分别对应低风险正面对进基线、中风险持续压制与不完整信息交战、高风险低空突防与快速响应三类压力结构，能够覆盖本文算法在自由博弈基线、感知受损恢复、要地防护高压三个层面的关键能力边界。所有数值结论同时经 `summary.md`、`summary_metrics.json`、`thesis_assets/csv/*.csv`、场景主日志及批量对比图交叉复核。",
+    "",
+    "### 6.3.1 验证数据源、图表口径与评价方法",
+    "",
+    "为避免不同脚本口径混用造成统计歧义，本文坚持以下原则：第一，门禁通过率与接力成功率以 `unique` 口径作为论文主口径，`raw` 口径仅用于说明系统负载与重复尝试强度；第二，累计事件以最终值为准，不以跳变次数代替最终累计量；第三，任务成败不单看 `mission_result` 单字段，而要结合敌我损失、目标链闭合、风险区保持和责任区防护结果进行综合解释。",
+    "",
+    "| 表6-15 评价口径与数据源约定 | 说明 |",
+    "| --- | --- |",
+    "| 正式数据源 | `summary.md`、`summary_metrics.json`、`thesis_assets/csv/*.csv`、主日志、批量对比图 |",
+    "| 门禁与接力主口径 | `unique`，用于正文主结论 |",
+    "| 负载诊断口径 | `raw`，用于解释重复检查和重复尝试强度 |",
+    "| 风险图判断 | 同时报告期望风险区一致率与全风险区精确一致率 |",
+    "| 工程安全性 | 最小高度、最小速度、最大下沉率、SIM_RECREATE 总数 |",
+    "| 图表生成链 | `generate_ch6_validation_assets.py` + 资产目录 PNG 图件 + 独立 Excel 数据包 |",
+    "",
+    "| 表6-16 三场景设计意图与控制契约 | 场景一 | 场景二 | 场景三 |",
+    "| --- | --- | --- | --- |",
+    "| 场景编号 | `s1_20260511_090228` | `s2_20260511_091756` | `s3_20260511_093323` |",
+    "| 样本属性 | 低风险正面对进基线 | 中风险持续压制 | 高风险低空突防 |",
+    "| 敌方控制方式 | `freeplay` | `freeplay` | `hybrid_opening` |",
+    "| 关键验证点 | 基线可用性、协同探测、首轮攻击链 | 搜索恢复、稳定跟踪、门禁与接力协同 | 快速响应、清场效率、要地防护 |",
+    "| 预期风险区 | LOW | MEDIUM | HIGH |",
+    "",
+    "从论文论证角度看，三场景不是简单并排陈列的三个样例，而是构成一个逐级增压的验证链。场景一验证算法是否具备在最典型且最接近工程默认入口条件下稳定跑通的能力；场景二验证在 AWACS 条件受损、几何压缩更快的情况下，探测链、火控链和中制导链能否恢复并维持；场景三则验证系统在高压要地防护样本中能否把全链路整体前移，并在保证工程安全边界不崩坏的前提下尽快清除威胁。",
+    "",
+]
+
+for key, title in scene_table_titles.items():
+    pass
+
+def add_scene_header(title: str, intro: str, scene_key: str):
+    lines.extend([title, "", intro, ""])
+    lines.append(f"| {scene_table_titles[scene_key]} | 数值 |")
+    lines.append("| --- | --- |")
+    for metric, value in scenes[scene_key]["metrics"].items():
+        lines.append(f"| {metric} | {value} |")
+    lines.append("")
+
+
+add_scene_header(
+    "### 6.3.2 场景一：低风险正面对进与自由博弈基线验证（S1_20260511_090228）",
+    "场景一最接近 `run_cap_simulation` 的标准调用链，因此它承担的是证明本文算法在没有人为替系统让路时依然成立的职责。该样本保留了较长的正面对进接敌段、正常 AWACS 支撑和自由博弈后半程，使其成为评估算法基线可用性与战术闭环完整性的关键证据。",
+    "S1",
+)
+
+lines.extend(
+    [
+        fig_block("6-1", "场景一战场总体态势概览", "Overall Tactical Geometry of Scene 1", "s1_overview.png", "数据来源：`S1_20260511_090228/thesis_assets/figures/overview.png`。横轴为东向距离 East displacement（km），纵轴为北向距离 North displacement（km）。采样频率 5 Hz（仿真步长 0.2 s）；滤波方法：原始轨迹直接绘制，无额外平滑。"),
+        "图6-1说明，场景一并未通过缩短距离或人为操控敌机来制造结果，其价值恰恰在于接敌段足够长、交战节奏足够真实。若算法能够在这种条件下完成探测、跟踪、发射与击落闭环，就说明系统已经具备可靠的基线工程可用性。",
+        "",
+        fig_block("6-2", "场景一协同探测与跟踪链路曲线", "Detection and Tracking Pipeline of Scene 1", "s1_detection_tracking_pipeline.png", "数据来源：`awacs_tracks.csv`、`target_timeline.csv`、`ready_cumulative.csv`。横轴为时间 Time（s），纵轴为跟踪目标数/就绪目标数 Target Count（tracks / ready targets）。采样频率 5 Hz；滤波方法：累计统计曲线未滤波，里程碑时刻按事件时间戳直接标注。"),
+        "场景一中，AWACS 0.2 s 即建立全局感知，但 FCR 真正进入可用状态要到 85.4 s 以后，stable ready 首次出现于 194.6 s。这说明算法在低风险样本中采用先确保感知连续性、后逐步收敛高质量火控条件的保守节奏。",
+        "",
+        fig_block("6-3", "场景一控制距离推进时间线", "Control-Distance Timeline of Scene 1", "s1_control_distance_timeline.png", "数据来源：`state_timeline.csv` 与场景主日志控制距离节点记录。横轴为时间 Time（s），纵轴为距离 Range（km）及控制距离阶段标签。采样频率 5 Hz；滤波方法：距离序列采用分段事件采样，不做低通滤波。"),
+        "控制距离推进曲线显示，场景一从 `BEYOND_NLT` 到 `TR_DOR` 的压缩过程平稳、左右路差异有限，属于标准中远距压缩样本。真正的难点不在前段压缩，而在首轮发射之后如何保持稳定火控条件、避免后段几何持续变差。",
+        "",
+        fig_block("6-4", "场景一发射门与接力制导闭合曲线", "Gate and Relay Closure of Scene 1", "s1_gate_and_relay.png", "数据来源：`ready_cumulative.csv`、`battle_snapshots.csv`、`summary_metrics.json`。横轴为时间 Time（s），纵轴为累计门禁通过次数、累计接力成功次数与相关事件计数 Count。采样频率 5 Hz；滤波方法：事件累计值直接统计，无窗口平均。"),
+        "从 276.2 s 首次门禁通过、292.0 s 首次接力成功到 344.6 s 首次击落，场景一的证据链完整闭合，说明门禁与接力并非表面统计，而是实打实地决定了首轮攻击链质量。",
+        "",
+        fig_block("6-5", "场景一生存性、最近威胁距离与目标指派", "Survivability, Minimum Threat Range and Targeting of Scene 1", "s1_survival_distance_targeting.png", "数据来源：`battle_snapshots.csv`、`kill_timeline.csv`、主日志目标指派记录。横轴为时间 Time（s），纵轴分别为存活数量 Aircraft Alive（架）、最小敌我距离 Minimum Enemy-to-Friendly Distance（km）和目标分配计数 Count。采样频率 5 Hz；滤波方法：最小距离采用逐步采样，未额外滤波。"),
+        "该图证明，场景一虽然拖入较长残局，但最小敌我距离仍保持在 43.15 km，说明系统并未以压缩距离换取短期战果，而是在较稳健的安全边界内完成了交战。",
+        "",
+        fig_block("6-6", "场景一敌方风险区真值热图", "Enemy Risk-Zone Heatmap of Scene 1", "s1_enemy_zone_heatmap.png", "数据来源：`target_timeline.csv` 与风险区真值统计。横轴为东向距离 East displacement（km），纵轴为北向距离 North displacement（km），颜色表示风险区等级 Risk Zone Level。采样频率 5 Hz；滤波方法：二维占用栅格按时间累计，不做平滑。"),
+        "场景一风险图区分了主风险方向，但细粒度重构仍不够精细。期望风险区一致率达到 92.48%，可以支撑任务级判断；全风险区精确一致率只有 31.78%，说明风险图更擅长抓主方向，而不是逐像素重建。",
+        "",
+        fig_block("6-7", "场景一飞行包线与工程安全边界", "Flight Envelope and Safety Margin of Scene 1", "s1_flight_safety_envelope.png", "数据来源：`battle_snapshots.csv`。横轴为时间 Time（s），纵轴分别为高度 Altitude（m）、速度 Speed（m/s）和下沉率 Descent Rate（m/s）。采样频率 5 Hz；滤波方法：三点滑动平均，仅用于去除单步数值毛刺。"),
+        "工程安全性方面，场景一未出现贴地、失速或异常大下沉率失控，说明即使在较长尾的自由博弈样本中，执行层依然保持稳定。这使场景一成为评价基线可靠性的正面证据。",
+        "",
+    ]
+)
+for paragraph in scenes["S1"]["analysis"]:
+    lines.extend([paragraph, ""])
+
+add_scene_header(
+    "### 6.3.3 场景二：中风险持续压制与不完整信息交战验证（S2_20260511_091756）",
+    "场景二的意义不在于战果更好，而在于它验证了系统在 AWACS 条件受损、几何更近且压缩更快的条件下，是否还能恢复搜索、重建稳定跟踪并把交战链维持到足以支撑持续压制的程度。",
+    "S2",
+)
+lines.extend(
+    [
+        fig_block("6-8", "场景二战场总体态势概览", "Overall Tactical Geometry of Scene 2", "s2_overview.png", "数据来源：`S2_20260511_091756/thesis_assets/figures/overview.png`。横轴 East displacement（km），纵轴 North displacement（km）。采样频率 5 Hz；滤波方法：原始轨迹直接绘制，无额外平滑。"),
+        "图6-8展示了更近的宽正面混合高度几何。与场景一相比，该样本一开始就处于更高压的中风险接敌条件，因此其验证重点不再是能不能进入交战，而是信息不完整时能不能把交战链重新搭起来并持续压住敌方。",
+        "",
+        fig_block("6-9", "场景二协同探测与跟踪链路曲线", "Detection and Tracking Pipeline of Scene 2", "s2_detection_tracking_pipeline.png", "数据来源：`awacs_tracks.csv`、`target_timeline.csv`、`ready_cumulative.csv`。横轴为时间 Time（s），纵轴为轨迹数/ready 数 Count。采样频率 5 Hz；滤波方法：累计曲线直接统计，无平滑。"),
+        "场景二在 30.8 s 完成首次雷达激活、38.2 s 建立首个 FCR 航迹、70.4 s 实现全探完成，说明 AWACS 受损并没有使系统丧失感知链，而是迫使多机协同搜索更快收敛。稳定跟踪目标峰值达到 4，表明该场景的真正长项在于高质量目标链恢复。",
+        "",
+        fig_block("6-10", "场景二控制距离推进时间线", "Control-Distance Timeline of Scene 2", "s2_control_distance_timeline.png", "数据来源：`state_timeline.csv` 与主日志控制距离节点。横轴为时间 Time（s），纵轴为距离 Range（km）及阶段标签。采样频率 5 Hz；滤波方法：事件采样，不做低通滤波。"),
+        "控制距离推进前移明显：左路 215.8 s 即进入 `LR_TR`，254.6 s 进入 `TR_DOR`，表明系统在中风险样本中主动把生存与压制准备整体提前，但并未因此放弃守区稳定性。",
+        "",
+        fig_block("6-11", "场景二发射门与接力制导闭合曲线", "Gate and Relay Closure of Scene 2", "s2_gate_and_relay.png", "数据来源：`ready_cumulative.csv`、`battle_snapshots.csv`、`summary_metrics.json`。横轴为时间 Time（s），纵轴为累计次数 Count。采样频率 5 Hz；滤波方法：事件累计统计，无平滑。"),
+        "场景二最有说服力的证据是门禁更严而接力更稳。门禁通过率只有 15.28%，但接力成功率达到 47.13%，说明算法并不是靠放宽发射条件获得优势，而是在有限发射窗口内更有效地维持中制导链。",
+        "",
+        fig_block("6-12", "场景二生存性、最近威胁距离与目标指派", "Survivability, Minimum Threat Range and Targeting of Scene 2", "s2_survival_distance_targeting.png", "数据来源：`battle_snapshots.csv`、`kill_timeline.csv`。横轴为时间 Time（s），纵轴分别为存活数量、最小敌我距离和目标分配计数。采样频率 5 Hz；滤波方法：最小距离为逐步采样，未做平滑。"),
+        "三次击杀分别发生在 338.0 s、673.4 s 和 1053.6 s，说明场景二不是靠单波次突击快速结束，而是维持持续压制直到后段收口。0 损失战果也证明这种稳态打法在当前实现下是成立的。",
+        "",
+        fig_block("6-13", "场景二敌方风险区真值热图", "Enemy Risk-Zone Heatmap of Scene 2", "s2_enemy_zone_heatmap.png", "数据来源：`target_timeline.csv`。横轴 East displacement（km），纵轴 North displacement（km），颜色为风险区等级。采样频率 5 Hz；滤波方法：二维累计占用，无平滑。"),
+        "风险图是场景二最重要的负面证据。真实中风险区长期占用，但图像侧仅捕捉到其中一部分，说明当前风险图对持续中风险压制这种长时工况仍明显偏保守。",
+        "",
+        fig_block("6-14", "场景二飞行包线与工程安全边界", "Flight Envelope and Safety Margin of Scene 2", "s2_flight_safety_envelope.png", "数据来源：`battle_snapshots.csv`。横轴为时间 Time（s），纵轴为高度 Altitude（m）、速度 Speed（m/s）、下沉率 Descent Rate（m/s）。采样频率 5 Hz；滤波方法：三点滑动平均。"),
+        "场景二我方最小速度下降到 74.3 m/s，是三场景中动力学压力最大的一例，但系统仍保持 0 损失，说明执行层虽承压更高，但尚未跨越工程稳定性边界。",
+        "",
+    ]
+)
+for paragraph in scenes["S2"]["analysis"]:
+    lines.extend([paragraph, ""])
+
+add_scene_header(
+    "### 6.3.4 场景三：高风险低空突防与快速响应验证（S3_20260511_093323）",
+    "场景三是最能体现本文方法上限能力的样本。敌方在更近的低空突防几何下开局，并叠加 45 s 的加速爬升脚本，迫使我方系统在极短时间内完成风险研判、交战组织与要地防护。",
+    "S3",
+)
+lines.extend(
+    [
+        fig_block("6-15", "场景三战场总体态势概览", "Overall Tactical Geometry of Scene 3", "s3_overview.png", "数据来源：`S3_20260511_093323/thesis_assets/figures/overview.png`。横轴 East displacement（km），纵轴 North displacement（km）。采样频率 5 Hz；滤波方法：原始轨迹直接绘制。"),
+        "图6-15表明，场景三从几何上就不允许系统慢慢观察。要想完成防护，必须把探测链、门禁链、接力链和交战链整体前移。",
+        "",
+        fig_block("6-16", "场景三协同探测与跟踪链路曲线", "Detection and Tracking Pipeline of Scene 3", "s3_detection_tracking_pipeline.png", "数据来源：`awacs_tracks.csv`、`target_timeline.csv`、`ready_cumulative.csv`。横轴 Time（s），纵轴为轨迹数和 ready 数 Count。采样频率 5 Hz；滤波方法：累计曲线直接统计。"),
+        "场景三在 0.2 s 即实现首次雷达激活与首个 FCR 航迹，25.8 s 完成全探，48.2 s 达到 stable ready。与场景一、二相比，这说明系统在高压样本中能够主动把感知和火控资源收敛到近乎立即可用的状态。",
+        "",
+        fig_block("6-17", "场景三控制距离推进时间线", "Control-Distance Timeline of Scene 3", "s3_control_distance_timeline.png", "数据来源：`state_timeline.csv` 与主日志节点记录。横轴为时间 Time（s），纵轴为距离 Range（km）与阶段标签。采样频率 5 Hz；滤波方法：事件采样。"),
+        "左路在 131.6 s 即进入 `LR_TR`，183.4 s 进入 `TR_DOR`，比前两场景显著前移。右路没有机械遍历全部节点，而是在目标关系重构后提前停止继续压缩，说明控制距离算法具备异步推进与条件收束能力。",
+        "",
+        fig_block("6-18", "场景三发射门与接力制导闭合曲线", "Gate and Relay Closure of Scene 3", "s3_gate_and_relay.png", "数据来源：`ready_cumulative.csv`、`battle_snapshots.csv`、`summary_metrics.json`。横轴为时间 Time（s），纵轴为累计门禁/接力次数 Count。采样频率 5 Hz；滤波方法：事件累计，无平滑。"),
+        "场景三门禁通过率达到 39.39%，接力成功率达到 42.71%，中制导导弹峰值达到 16，表明系统在高风险防护场景中会主动提高交战密度，以更快消除威胁。这种行为符合要地防护而非经济性交战的策略目标。",
+        "",
+        fig_block("6-19", "场景三生存性、最近威胁距离与目标指派", "Survivability, Minimum Threat Range and Targeting of Scene 3", "s3_survival_distance_targeting.png", "数据来源：`battle_snapshots.csv`、`kill_timeline.csv`。横轴为时间 Time（s），纵轴分别为存活数量、最小敌我距离和目标分配计数。采样频率 5 Hz；滤波方法：逐步采样，无额外滤波。"),
+        "该图显示，系统为了实现 4:0 清场，接受了 32.11 km 的更紧交战距离，但我方仍保持 0 损失。这说明当前算法在高压任务中能够在风险和战果之间做出明确取舍。",
+        "",
+        fig_block("6-20", "场景三敌方风险区真值热图", "Enemy Risk-Zone Heatmap of Scene 3", "s3_enemy_zone_heatmap.png", "数据来源：`target_timeline.csv`。横轴 East displacement（km），纵轴 North displacement（km），颜色表示风险区等级。采样频率 5 Hz；滤波方法：二维累计占用，无平滑。"),
+        "风险图指标在场景三达到最佳：期望风险区图真一致率 97.21%，全风险区精确一致率 43.38%，说明在高风险突防样本中，任务层风险刻画与真实威胁演化高度一致。",
+        "",
+        fig_block("6-21", "场景三飞行包线与工程安全边界", "Flight Envelope and Safety Margin of Scene 3", "s3_flight_safety_envelope.png", "数据来源：`battle_snapshots.csv`。横轴 Time（s），纵轴为高度 Altitude（m）、速度 Speed（m/s）、下沉率 Descent Rate（m/s）。采样频率 5 Hz；滤波方法：三点滑动平均。"),
+        "尽管场景三压力最高，但我方最小速度仍保持在 120.1 m/s，执行层没有因为高压交战而失稳。这一点非常关键，因为它说明系统不是靠激进但不可控的方式换取战果。",
+        "",
+    ]
+)
+for paragraph in scenes["S3"]["analysis"]:
+    lines.extend([paragraph, ""])
+
+lines.extend(
+    [
+        "### 6.3.5 三场景综合对比与算法有效性分析",
+        "",
+        "| 表6-20 三场景核心效果对比 | S1 | S2 | S3 |",
+        "| --- | --- | --- | --- |",
+        "| 风险区 | LOW | MEDIUM | HIGH |",
+        "| 敌机击落 / 我方损失 | 2 / 1 | 3 / 0 | 4 / 0 |",
+        "| stable ready 峰值 | 2 | 2 | 4 |",
+        "| 稳定跟踪目标峰值 | 3 | 4 | 4 |",
+        "| 门禁通过率(unique) | 18.52% | 15.28% | 39.39% |",
+        "| 接力制导成功率(unique) | 25.55% | 47.13% | 42.71% |",
+        "| 首次门禁通过 / 首次击落 | 276.2 s / 344.6 s | 259.8 s / 337.6 s | 127.2 s / 220.6 s |",
+        "| 期望风险区图真一致率 | 92.48% | 31.30% | 97.21% |",
+        "| 最小敌我距离 | 43.15 km | 41.94 km | 32.11 km |",
+        "",
+        "| 表6-21 三场景时间链前移特征 | S1 | S2 | S3 |",
+        "| --- | --- | --- | --- |",
+        "| 首次雷达激活 | 79.2 s | 30.8 s | 0.2 s |",
+        "| 首次 FCR 航迹 | 85.4 s | 38.2 s | 0.2 s |",
+        "| 全探完成 | 111.6 s | 70.4 s | 25.8 s |",
+        "| 首次 stable ready | 194.6 s | 152.8 s | 48.2 s |",
+        "| 首次接力成功 | 292.0 s | 275.6 s | 160.0 s |",
+        "| 首次意图 ready | 620.4 s | 510.4 s | 无 |",
+        "",
+        fig_block("6-22", "三场景战果与交战链效能对比", "Comparison of Effectiveness Across Three Scenes", "batch_comparison_effectiveness.png", "数据来源：三场景 `summary_metrics.json` 与批量对比统计。横轴为场景编号 Scene ID，纵轴为击落数、损失数、门禁通过率、接力成功率等指标，单位分别为架/百分比。采样频率：按场景级聚合；滤波方法：无。"),
+        fig_block("6-23", "三场景关键时间节点对比", "Comparison of Key Milestones Across Three Scenes", "batch_comparison_timing.png", "数据来源：三场景 `summary.md` 与 `target_timeline.csv`。横轴为场景编号，纵轴为时间 Time（s）。采样频率：按事件节点聚合；滤波方法：无。"),
+        fig_block("6-24", "三场景风险区占用与图真一致性对比", "Comparison of Risk-Zone Occupancy and Picture Truth Match", "batch_comparison_zone_picture.png", "数据来源：`summary_metrics.json`、风险区占用统计和批量汇总脚本输出。横轴为场景编号，纵轴为占用时间 Time（s）与一致率 Ratio（%）。采样频率：按场景级聚合；滤波方法：无。"),
+        "综合图表说明，本文算法的有效性不是靠单一场景中的漂亮结果支撑，而是在三类压力结构下都形成了明确、可解释且可审计的证据闭环。场景一证明了算法具备真实基线可用性；场景二证明了系统在信息不完整条件下仍能恢复搜索、重建稳定交战链并持续压制敌方；场景三则证明系统可以在要地防护高压工况下把整条交战链整体前移，并以更高交战密度换取快速清场。",
+        "",
+        "从算法层看，可以得出以下五点结论。第一，战术规则模板并未把系统锁死在静态模板上，三场景中的战术组织、控制距离推进和交战强度均表现出明显的场景适应性。第二，控制距离推进算法已经具备异步推进与条件终止能力，不再机械要求每一路都遍历全部理论节点。第三，协同探测、稳定跟踪、发射门与接力制导是当前实现最成熟的能力链，特别是在场景二和场景三中表现突出。第四，风险图对低风险和高风险主方向刻画已经较好，但对长时中风险占用仍明显不足。第五，意图识别更适合作为中后段态势解释器，尚不宜在本章结论中被夸大为前段交战链的主驱动模块。",
+        "",
+        "在工程实现层面，三场景均未出现飞行包线崩坏、持续失速或状态机整体失控，说明本文提出的分层战术决策方法不仅数值上能赢，也工程上能跑、能审计、能复现。这正是本章仿真验证希望建立的核心结论。",
+        "",
+        "### 6.3.6 本章小结",
+        "",
+        "综合三场景验证结果，可以确认：本文提出的基于战术规则模板的分层战术决策方法，已经在低、中、高三类典型风险结构下完成了从协同探测、稳定跟踪、发射门判定、接力制导到战果兑现的核心作战闭环验证。系统表现出的不是某一条局部规则的偶然成功，而是探测链、决策链、执行链与评估链共同收敛后的整体有效性。",
+        "",
+        "同时，本章也如实揭示了当前版本仍需继续提升的方向：中风险场景下风险图对长时占用的描绘能力偏弱；意图识别链在前段交战中的实时性与普适性不足；少数任务状态机字段在战果已明确的情况下仍存在末态收敛滞后。正因为这些不足被明确暴露并且能够通过日志、CSV 和图件回溯定位，所以本章验证不仅证明了系统已经可用，也为后续优化提供了精确的工程靶点。",
+        "",
+        "## 附录A 图表、脚本与原始数据包",
+        "",
+        "- 正式发布文档：`./第六章仿真验证文档0511_trae.md`",
+        "- 图表目录：`./figs/`",
+        "- 独立 Excel 指标原始数据包：[第六章仿真验证文档0511_trae_指标原始数据包.xlsx](./第六章仿真验证文档0511_trae_指标原始数据包.xlsx)",
+        "- Python 图表与资产生成脚本：[generate_ch6_validation_assets.py](../generate_ch6_validation_assets.py)",
+        "- 批量场景运行脚本：[ch6_validation_runner.py](../tests/ch6_validation_runner.py)",
+        "- 场景脚本 S1：[run_ch6_s1_low_risk.py](../tests/run_ch6_s1_low_risk.py)",
+        "- 场景脚本 S2：[run_ch6_s2_medium_pressure.py](../tests/run_ch6_s2_medium_pressure.py)",
+        "- 场景脚本 S3：[run_ch6_s3_high_risk_penetration.py](../tests/run_ch6_s3_high_risk_penetration.py)",
+        "- Matlab 复现实验脚本：[plot_ch6_metrics_matlab.m](./plot_ch6_metrics_matlab.m)",
+        "",
+        "## 附录B 图件说明",
+        "",
+        "本文所有 PNG 图件均采用相对路径 `./figs/*.png` 引用；原始生成素材来自 `第六章仿真验证文档0511_assets` 与三场景 `thesis_assets` 目录。正文中涉及的时间序列图默认采样频率为 5 Hz，对应仿真步长 0.2 s；若未特别说明，统计累计曲线不做滤波，飞行包线类曲线仅使用三点滑动平均以抑制单步毛刺。",
+        "",
+    ]
+)
+
+doc_path.write_text("\n".join(lines), encoding="utf-8")
+print(doc_path)
+print(xlsx_path)
+print(matlab_path)

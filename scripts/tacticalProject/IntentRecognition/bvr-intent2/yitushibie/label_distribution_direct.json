@@ -1,0 +1,16 @@
+{
+  "intent_B0100": {
+    "unique_labels": [],
+    "label_counts": {},
+    "label_percentages": {},
+    "total_samples": 67455
+  },
+  "intent_B0200": {
+    "unique_labels": [],
+    "label_counts": {},
+    "label_percentages": {},
+    "total_samples": 67455
+  },
+  "total_samples": 67455,
+  "error_count": 67455
+}

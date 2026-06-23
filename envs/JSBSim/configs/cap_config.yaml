@@ -1,0 +1,140 @@
+# CAP任务配置文件
+# 4v4战斗空中巡逻任务配置
+
+# task config
+task: multiplecombat
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 6000           # episode length: 1200s (20分钟)
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# FAOR责任区配置
+faor:
+  width: 200000      # 200km（短边，垂直于威胁方向）
+  length: 300000     # 300km（长边，平行于威胁方向）
+  center_north: 0.0  # 责任区中心（北，米）
+  center_east: 0.0   # 责任区中心（东，米）
+  altitude_min: 7000   # 最低高度 7km
+  altitude_max: 12000  # 最高高度 12km
+  high_risk_radius: 50000   # 高风险区半径 50km
+  medium_risk_radius: 100000  # 中风险区半径 100km
+
+# 战术控制距离（单位：米）
+tactical_distances:
+  PR: 250000      # 态势距离（Picture Range），等价于NLT
+  NLT: 250000     # 初始距离（No Later Than），与PR等价
+  MELD: 100000    # 最小索敌距离
+  MTR: 80000      # 最小跟踪距离
+  LR: 78000       # 发射距离
+  TR: 75000       # 转换距离
+  DOR: 70000      # 期望脱离距离
+  DR: 65000       # 决断距离
+  MAR: 40000      # 最小脱离距离
+
+# 飞机配置 - 4v4场景
+# 我方4机形成双编队：左编队（A0100/A0200）和右编队（A0300/A0400）
+aircraft_configs:
+  # 我方编队1（左编队）- 双机，在责任区左侧
+  A0100:
+    color: Red
+    model: f16
+    init_state:
+      ic_long_gc_deg: 119.95      # 己方长机1（左编队）- 经度稍小，在左侧
+      ic_lat_geod_deg: 60.0       # 基准纬度
+      ic_h_sl_ft: 30000           # 30,000英尺 (约9000m，在7-12km范围内)
+      ic_psi_true_deg: 90.0       # 朝东（初始巡逻方向，逆时针）
+      ic_u_fps: 984.25            # 300m/s (约0.9马赫)
+    missile: 4                    # 每架飞机4枚导弹
+  A0200:
+    color: Red
+    model: f16
+    init_state:
+      ic_long_gc_deg: 119.95      # 己方僚机1（左编队）- 与长机同经度
+      ic_lat_geod_deg: 60.005     # 后方约5km（纬度差约0.005度≈550m）
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 90.0       # 朝东
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+  # 我方编队2（右编队）- 双机，在责任区右侧
+  A0300:
+    color: Red
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.05      # 己方长机2（右编队）- 经度稍大，在右侧
+      ic_lat_geod_deg: 60.0       # 与左编队同纬度
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 90.0       # 朝东（与左编队同方向，实现冷热交替）
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+  A0400:
+    color: Red
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.05      # 己方僚机2（右编队）- 与长机同经度
+      ic_lat_geod_deg: 60.005     # 后方约5km
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 90.0       # 朝东
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+  # 敌方编队（4机）
+  B0100:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.0       # 敌方长机1
+      ic_lat_geod_deg: 61.35      # 约250km距离（PR距离外，用于测试态势感知）
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 180.0      # 朝南（朝向责任区）
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+  B0200:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.05      # 敌方僚机1
+      ic_lat_geod_deg: 61.35      # 与长机同纬度
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 180.0      # 朝南
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+  B0300:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.0       # 敌方长机2
+      ic_lat_geod_deg: 61.35      # 与编队1同纬度
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 180.0      # 朝南
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+  B0400:
+    color: Blue
+    model: f16
+    init_state:
+      ic_long_gc_deg: 120.05      # 敌方僚机2
+      ic_lat_geod_deg: 61.35      # 与长机同纬度
+      ic_h_sl_ft: 30000           # 30,000英尺
+      ic_psi_true_deg: 180.0      # 朝南
+      ic_u_fps: 984.25            # 300m/s
+    missile: 4
+
+# 预警机配置（模拟）
+awacs:
+  detection_range: 400000    # 400km探测距离
+  update_rate: 1.0           # 1秒更新一次
+  position_error: 2000       # 2-3km位置误差
+
+# 巡逻配置
+patrol:
+  racetrack_length: 200000   # 跑马圈长轴 200km
+  racetrack_width: 100000    # 跑马圈短轴 100km
+  combat_patrol_distance: 75000  # 战斗巡逻点距离靶眼 75km
+  hot_cold_switch_angle: 90.0   # 热段/冷段切换角度阈值（度）
+
